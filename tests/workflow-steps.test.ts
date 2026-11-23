@@ -1762,6 +1762,28 @@ describe('#400 段④ ── 雛形を置く順番', () => {
    * ⚠ **見るのは実行する行**である ── 注釈には `continue-on-error` も `#1014` も
    *   書いてあるので、コメントごと数えると**外しても緑**になる(§1 の 5 度目)。
    */
+  /** pages.yml を「jobs: より前」と job ごとの本文(コメント行を剥がしたもの)に切り分ける */
+  function pagesJobs(): { top: string; build: string; deploy: string } & Record<string, string> {
+    const code = readFileSync(join(DIR, 'pages.yml'), 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l));
+    const at = code.indexOf('jobs:');
+    const out: Record<string, string> = {};
+    let name = '';
+    for (const l of code.slice(at + 1)) {
+      const m = /^ {2}([A-Za-z0-9_-]+):\s*$/.exec(l);
+      if (m) {
+        name = m[1];
+        out[name] = '';
+        continue;
+      }
+      if (name) out[name] += l + '\n';
+    }
+    const jobs = { ...out } as { top: string; build: string; deploy: string } & Record<string, string>;
+    Object.defineProperty(jobs, 'top', { value: code.slice(0, at).join('\n') + '\n', enumerable: false });
+    return jobs;
+  }
+
   it('🔴 pages.yml: 雛形が落ちても配り、そのうえで job を赤にする(#1014)', () => {
     const raw = readFileSync(join(DIR, 'pages.yml'), 'utf-8');
     const code = raw
@@ -1781,17 +1803,69 @@ describe('#400 段④ ── 雛形を置く順番', () => {
       'continue-on-error: true',
     );
 
-    // ② 落ちたことを赤で残す step が在る
-    const guard = code.indexOf("if: steps.portable.outcome == 'failure'");
+    // ② 雛形の結果を build job の outputs で deploy job へ渡している
+    //    (step の結果は job をまたいで見えない ── `steps.portable` のままだと常に空で、赤が出ない)
+    const jobs = pagesJobs();
+    expect(jobs.build, 'build job が無い(空振り)').toBeTruthy();
+    expect(jobs.deploy, 'deploy job が無い(空振り)').toBeTruthy();
+    expect(jobs.build, '🔴 build job が雛形の結果を outputs で渡していない').toMatch(
+      /^\s+portable_outcome: \$\{\{ steps\.portable\.outcome \}\}$/m,
+    );
+
+    // ③ 落ちたことを赤で残す step が deploy job に在る
+    const guard = jobs.deploy.indexOf("if: needs.build.outputs.portable_outcome == 'failure'");
     expect(guard, '🔴 雛形の失敗を赤で残す step が無い(緑のまま配ってしまう)').toBeGreaterThanOrEqual(
       0,
     );
-    expect(code.slice(guard), '赤で残す step が exit 1 で終わっていない').toContain('exit 1');
+    expect(jobs.deploy.slice(guard), '赤で残す step が exit 1 で終わっていない').toContain('exit 1');
+    expect(code, '🔴 build job の step の結果を deploy job から直に読んでいる(常に空)').not.toContain(
+      "if: steps.portable.outcome == 'failure'",
+    );
 
-    // ③ 🔴 その step は deploy の「後」── 前に置くと、また配信ごと止まる
-    const deploy = code.indexOf('actions/deploy-pages@');
+    // ④ 🔴 その step は deploy の「後」── 前に置くと、また配信ごと止まる
+    const deploy = jobs.deploy.indexOf('actions/deploy-pages@');
     expect(deploy, 'deploy-pages が無い(空振り)').toBeGreaterThanOrEqual(0);
     expect(guard, '🔴 赤で残す step が deploy より前に在る(配信ごと止まる)').toBeGreaterThan(deploy);
+  });
+
+  /**
+   * 🔴 **build と deploy は別 job**(GitHub Pages 公式の構成)。
+   *
+   * ⚠ 1 job だと、Pages 側の一時障害(`Deployment failed, try again later.`)で落ちた
+   *   run を Re-run すると `upload-pages-artifact` がもう一度走り、同じ名前の artifact が
+   *   2 つになって **`Multiple artifacts` で二度と通らない**。
+   * ⚠ `cancel-in-progress: true` は deploy の最中の run を後の run が切る ── 公式の推奨は `false`。
+   */
+  it('🔴 pages.yml: upload-pages-artifact と deploy-pages は別 job / deploy は build を待つ', () => {
+    const jobs = pagesJobs();
+    expect(Object.keys(jobs).sort(), 'job は build と deploy の 2 つ').toEqual(['build', 'deploy']);
+    expect(jobs.build, 'build に upload が無い').toContain('actions/upload-pages-artifact@');
+    expect(jobs.build, '🔴 build で deploy している(Re-run で Multiple artifacts)').not.toContain(
+      'actions/deploy-pages@',
+    );
+    expect(jobs.deploy, 'deploy に deploy-pages が無い').toContain('actions/deploy-pages@');
+    expect(jobs.deploy, '🔴 deploy で upload している(Re-run で Multiple artifacts)').not.toContain(
+      'actions/upload-pages-artifact@',
+    );
+    expect(jobs.deploy, '🔴 deploy が build を待たない').toMatch(/^\s+needs: build$/m);
+    expect(jobs.deploy, 'deploy に github-pages 環境が無い').toMatch(/name: github-pages/);
+    expect(jobs.deploy, 'deploy に pages: write が無い').toMatch(/^\s+pages: write$/m);
+    expect(jobs.deploy, 'deploy に id-token: write が無い').toMatch(/^\s+id-token: write$/m);
+    // 🔴 書き込み権は deploy job だけ ── build(npm ci で外部のコードを走らせる側)に持たせない
+    expect(jobs.build, '🔴 build job に pages / id-token の書込権がある').not.toMatch(
+      /^\s+(pages|id-token): write$/m,
+    );
+    expect(jobs.top, '🔴 workflow 全体に pages / id-token の書込権がある').not.toMatch(
+      /^\s+(pages|id-token): write$/m,
+    );
+  });
+
+  it('🔴 pages.yml: 進行中の deploy を途中で切らない(cancel-in-progress: false)', () => {
+    const { top } = pagesJobs();
+    const m = top.match(/^concurrency:\n((?:[ ]+.*\n)+)/m);
+    expect(m, 'concurrency が無い(空振り)').toBeTruthy();
+    expect(m![1]).toMatch(/^\s+group: pages$/m);
+    expect(m![1], '🔴 deploy の最中の run を後の run が切る').toMatch(/^\s+cancel-in-progress: false$/m);
   });
 
   it('🔴 置き先の名前は、アプリが取りに行く名前と同じ', () => {

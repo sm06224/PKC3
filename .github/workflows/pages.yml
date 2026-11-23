@@ -12,18 +12,31 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
+# 🔴 **進行中の deploy を途中で止めない**(GitHub Pages 公式の推奨)。
+#    `true` だと後から来た run が deploy の最中の run を切り、Pages 側に
+#    中途半端な deploy が残りうる。後の run は前の run の終了を待って走る。
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
+# 🔴 **build と deploy を別 job に分ける**(GitHub Pages 公式の構成)。
+#    1 job だと、Pages 側の一時障害(`Deployment failed, try again later.`)で
+#    落ちた run を Re-run したとき `upload-pages-artifact` がもう一度走り、
+#    同じ名前の artifact が 2 つになって `Multiple artifacts` で**二度と通らない**。
+#    分けておけば「失敗した job だけ Re-run」で deploy だけをやり直せる。
+#    門は `tests/workflow-steps.test.ts`。
 jobs:
-  build-deploy:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    # ⚠ `configure-pages` は Pages の設定を読む(GET)ので `pages: read` が要る。
+    #   書き込み権(`pages: write` / `id-token: write`)は deploy job だけに持たせる
+    #   ── build は `npm ci` で外部のコードを走らせる側なので、配る権限を渡さない。
+    permissions:
+      contents: read
+      pages: read
+    outputs:
+      # deploy job の #1014 ガードが読む(step の結果は job をまたいで見えない)
+      portable_outcome: ${{ steps.portable.outcome }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -128,15 +141,27 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
       # 🔴 **配ったうえで、雛形の失敗を赤として残す**(#1014)。
       # ⚠ `continue-on-error` だけだと job は緑になる ── それだと
       #    「雛形がいつの間にか焼けていない」を**誰も知らない**
       #    (CLAUDE.md「赤が届く先を作る」── Nightly が 13 晩赤かった件と同じ型)。
+      # ⚠ build job の step の結果はここからは見えない ── `outputs` 経由で受け取る。
       # 🔑 門は `tests/workflow-steps.test.ts`。
       - name: 雛形が焼けなかったことを赤で残す(#1014)
-        if: steps.portable.outcome == 'failure'
+        if: needs.build.outputs.portable_outcome == 'failure'
         run: |
           echo "::error::可搬単一 HTML の雛形が焼けなかった ── アプリ本体は配ってあるが、「持ち歩ける 1 枚」を押すと取れない状態である"
           exit 1
