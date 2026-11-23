@@ -16,7 +16,8 @@ const inspector = readFileSync('src/adapter/ui/render/inspector.ts', 'utf8');
 
 function section(): string {
   // 🔑 見出しの名前ではなく**この節にしか無い 1 文**で探す(章立てを組み替えて見出しが変わっても同じ節を拾う)
-  const s = sectionContaining(manual, '作成・更新は、お使いの端末の日付と時刻');
+  // 🔑 小節を含めない(自分の本文だけ)── 隣の小節の字に満たされない範囲で見る
+  const s = sectionContaining(manual, '作成・更新は、お使いの端末の日付と時刻', { ownBodyOnly: true });
   expect(s, '前提:節が見つからない').not.toBeNull();
   return s!;
 }

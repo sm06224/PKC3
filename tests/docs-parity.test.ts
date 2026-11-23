@@ -89,8 +89,8 @@ import { readReducerSource } from './helpers/reducer-source';
 import {
   scanHeadings,
   sectionByTitle,
+  occurrences,
   sectionContaining,
-  sectionsByTitle,
   type MdHeading,
 } from './helpers/manual-style';
 
@@ -632,8 +632,14 @@ describe('マニュアルと実装の突合', () => {
     // 🔴 「追記」は短い字で、マニュアルのどこにでも出る(付箋の「追記」・操作を探すの一覧)── 全体で見ると
     //   追記欄の節から消えても他の節に満たされる(§1.3)。だから**追記欄の節だけ**を切り出して見る。
     //   🔑 見出しの名前ではなく**本文の 1 文**で節を探す(章立てを組み替えて見出しが変わっても同じ節を拾う)
-    const appendSection = sectionContaining(MANUAL, 'と **追記** が並びます');
+    const APPEND_PHRASE = 'と **追記** が並びます';
+    //   ⚠ 探した字を同じ節に「在る」と読むのは自己充足になる ── ①字がマニュアルにちょうど 1 回だけ在ること
+    //   ②その節が追記欄の節であることを、別の事実(**追記先** と `Enter` で追記する説明、**元に戻す**)で縛る
+    expect(occurrences(MANUAL, APPEND_PHRASE), '追記ボタンの説明文が 1 か所でない(節を特定できない)').toBe(1);
+    const appendSection = sectionContaining(MANUAL, APPEND_PHRASE);
     expect(appendSection, 'マニュアルに追記欄の節が無い(空振り)').not.toBeNull();
+    expect(appendSection!, '追記欄の節に **追記先** の説明が無い(別の節を拾っている)').toContain('**追記先**');
+    expect(appendSection!, '追記欄の節に Enter で追記する説明が無い(別の節を拾っている)').toContain('+ `Enter`');
     expect(appendSection!, '追記欄の節に、ボタン **追記** の説明が無い').toContain('と **追記** が並びます');
     expect(appendSection!, '追記欄の節に **元に戻す** の説明が無い').toContain('**元に戻す**');
   });
@@ -1057,9 +1063,10 @@ describe('確認の画面とマニュアルの突合(#299)', () => {
   function section(): string {
     const main = sectionByTitle(MANUAL, '確認の画面');
     expect(main, 'マニュアルに「確認の画面」の節が無い').not.toBeNull();
-    // 🔴 危険色のボタンの字の一覧は別の節に分かれていることがある ── 在れば 2 つで 1 組として読む
-    const colours = sectionByTitle(MANUAL, '色の付いた実行ボタンの字') ?? '';
-    return main! + '\n' + colours;
+    // 🔴 危険色のボタンの字の一覧は別の節に分かれている ── 2 つで 1 組として読む(節を統合したら、ここも 1 つへ直す)
+    const colours = sectionByTitle(MANUAL, '色の付いた実行ボタンの字');
+    expect(colours, 'マニュアルに「色の付いた実行ボタンの字」の節が無い').not.toBeNull();
+    return main! + '\n' + colours!;
   }
 
   /**
@@ -1965,7 +1972,8 @@ describe('執筆規約 条 5 / 6(#793)', () => {
 describe('執筆規約 条 8 ── ガイドの表にキーを並べない(#779 段⑤)', () => {
   /** 見出し 1 つぶんの本文(次の `#` 見出しの手前まで)。 */
   function sectionBody(title: string): string {
-    const body = sectionByTitle(MANUAL, title);
+    // 🔑 自分の本文だけ(小節は含まない)── 表の隣の別の節に満たされない範囲で見る
+    const body = sectionByTitle(MANUAL, title, { ownBodyOnly: true });
     expect(body, `見出し「${title}」がマニュアルに無い(この検査は空振り)`).not.toBeNull();
     return body!;
   }
@@ -6308,8 +6316,14 @@ describe('近道の押し先が画面に在る', () => {
  *   別の面の「同じです」に満たされる ── CLAUDE.md §1「面へスコープする」)。
  */
 describe('マニュアルだけの窓の節(§4-4)の主張', () => {
-  // 🔑 「窓」の説明が何節に割れていても 1 組として読む(題名に「マニュアル」と「ウィンドウ」を含む節を全部つなぐ)
-  const section = sectionsByTitle(MANUAL, /マニュアル.*ウィンドウ/) ?? '';
+  // 🔑 「窓」の説明は 3 つの節に分かれている ── 3 つで 1 組として読む(節を統合したら、ここも直す)
+  const section = ['マニュアルだけのウィンドウ', 'マニュアルのウィンドウを再び', 'マニュアルのウィンドウに配色']
+    .map((t) => {
+      const s = sectionByTitle(MANUAL, t);
+      if (s === null) throw new Error(`マニュアルに「${t}」の節が無い(空振り)`);
+      return s;
+    })
+    .join('\n');
 
   it('🔴 F5 で読んでいた所が残るとは言わない(残らない)', () => {
     expect(section.length, '節が見つからない(空振り)').toBeGreaterThan(500);

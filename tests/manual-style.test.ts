@@ -23,7 +23,9 @@ import {
   scanHeadings,
   sectionByTitle,
   sectionContaining,
-  sectionsByTitle,
+  occurrences,
+  stripQuoted,
+  headingCore,
   staleUiLines,
   totalLines,
 } from './helpers/manual-style';
@@ -42,17 +44,32 @@ const FINAL = {
   h3: 150,
 } as const;
 
-/** いまの違反数(2026-11-23 に実測。囲みの外のみ)。⚠ PR 3(本文の書き直し)で FINAL へ揃える。 */
+/**
+ * いまの違反数(2026-11-23 に実測。囲みの外のみ。画面の字の逐語引用「…」/ `…` / **太字の画面の字** は数えない)。
+ * ⚠ **等値**で見る ── 直したら数字も下げる(上限のままだと、直した分だけ「また増やしてよい余地」が残る)。
+ * ⚠ PR 3(本文の書き直し)で FINAL へ揃える。
+ */
 const BASELINE = {
   longHeadings: 40, // PR 3 で 0 にする
   commaHeadings: 170, // PR 3 で 0 にする
-  bannedEndings: 112, // PR 3 で 0 にする
-  dateStamps: 160, // PR 3 で 0 にする
-  staleUi: 94, // PR 3 で 0 にする
-  historyWords: 20, // PR 3 で 0 にする
-  lines: 10800, // PR 3 で 3,500 にする(実測 10773 + 余白)
+  bannedEndings: 128, // PR 3 で 0 にする
+  dateStamps: 168, // PR 3 で 0 にする
+  staleUi: 78, // PR 3 で 0 にする
+  historyWords: 14, // PR 3 で 0 にする
+  lines: 10773, // PR 3 で 3,500 にする
   h3: 680, // PR 3 で 150 にする
 } as const;
+
+/** 等値の門。⚠ 食い違ったら向きで直し方が変わる ── 増えたなら本文を直す / 減ったなら BASELINE を下げる。 */
+function expectRatchet(name: keyof typeof BASELINE, actual: number): void {
+  const base = BASELINE[name];
+  expect(
+    actual,
+    actual > base
+      ? `${name}: ${actual} 件で、BASELINE(${base})より増えた ── 本文を直す(増やさない)`
+      : `${name}: ${actual} 件で、BASELINE(${base})より減った ── BASELINE を ${actual} へ下げる(門は下げる方向にだけ動かす)`,
+  ).toBe(base);
+}
 
 describe('マニュアルの書き方 ── 移行期の門(ratchet)', () => {
   it('BASELINE は FINAL 以上(門は下げる方向にしか動かせない)', () => {
@@ -66,29 +83,29 @@ describe('マニュアルの書き方 ── 移行期の門(ratchet)', () => {
     expect(totalLines(MANUAL)).toBeGreaterThan(1000);
   });
 
-  it('条 3 ── 30 字を超える見出しを増やさない', () => {
-    expect(longHeadings(MANUAL).length).toBeLessThanOrEqual(BASELINE.longHeadings);
+  it('条 3 ── 30 字を超える見出しを増やさない(等値)', () => {
+    expectRatchet('longHeadings', longHeadings(MANUAL).length);
   });
-  it('条 3 ── 読点「、」を含む見出しを増やさない', () => {
-    expect(commaHeadings(MANUAL).length).toBeLessThanOrEqual(BASELINE.commaHeadings);
+  it('条 3 ── 読点「、」を含む見出しを増やさない(等値)', () => {
+    expectRatchet('commaHeadings', commaHeadings(MANUAL).length);
   });
-  it('条 3 ── 「〜を知る」「〜を確かめる」「〜のとき」で終わる見出しを増やさない', () => {
-    expect(bannedEndingHeadings(MANUAL).length).toBeLessThanOrEqual(BASELINE.bannedEndings);
+  it('条 3 ── 「〜を知る」「〜を確かめる」「〜のとき」で終わる見出しを増やさない(等値)', () => {
+    expectRatchet('bannedEndings', bannedEndingHeadings(MANUAL).length);
   });
-  it('本文 ── 日付の印を含む行を増やさない', () => {
-    expect(dateStampLines(MANUAL).length).toBeLessThanOrEqual(BASELINE.dateStamps);
+  it('本文 ── 日付の印を含む行を増やさない(等値)', () => {
+    expectRatchet('dateStamps', dateStampLines(MANUAL).length);
   });
-  it('本文 ── 古い画面の位置の言い方を増やさない', () => {
-    expect(staleUiLines(MANUAL).length).toBeLessThanOrEqual(BASELINE.staleUi);
+  it('本文 ── 古い画面の位置の言い方を増やさない(等値)', () => {
+    expectRatchet('staleUi', staleUiLines(MANUAL).length);
   });
-  it('本文 ── 経緯の言い回しを増やさない', () => {
-    expect(historyWordLines(MANUAL).length).toBeLessThanOrEqual(BASELINE.historyWords);
+  it('本文 ── 経緯の言い回しを増やさない(等値)', () => {
+    expectRatchet('historyWords', historyWordLines(MANUAL).length);
   });
-  it('全体 ── 行数を増やさない', () => {
-    expect(totalLines(MANUAL)).toBeLessThanOrEqual(BASELINE.lines);
+  it('全体 ── 行数を増やさない(等値)', () => {
+    expectRatchet('lines', totalLines(MANUAL));
   });
-  it('全体 ── H3 の数を増やさない', () => {
-    expect(h3Count(MANUAL)).toBeLessThanOrEqual(BASELINE.h3);
+  it('全体 ── H3 の数を増やさない(等値)', () => {
+    expectRatchet('h3', h3Count(MANUAL));
   });
 });
 
@@ -117,9 +134,16 @@ describe('検査の関数そのもの(自前の原稿で効いていること)',
     expect(commaHeadings('### 保存、復元')).toHaveLength(1);
     expect(bannedEndingHeadings('### 仕組みを知る')).toHaveLength(1);
     expect(bannedEndingHeadings('### 動きを確かめる')).toHaveLength(1);
-    expect(bannedEndingHeadings('### 開いたとき')).toHaveLength(0);
+    expect(bannedEndingHeadings('### 開いたとき')).toHaveLength(1);
     expect(bannedEndingHeadings('### 保存のとき')).toHaveLength(1);
-    expect(bannedEndingHeadings('### 困ったとき')).toEqual([]);
+    expect(bannedEndingHeadings('### 困ったとき')).toHaveLength(1);
+    // 末尾のかっこの補足は外して見る(補足で逃げられない)
+    expect(bannedEndingHeadings('### 開いたとき(Ctrl + O)')).toHaveLength(1);
+    expect(bannedEndingHeadings('### 仕組みを知る(全角)')).toHaveLength(1);
+    expect(bannedEndingHeadings('### 保存のとき(Ctrl + S)')).toHaveLength(1);
+    expect(headingCore('ノートを作成する(Ctrl + N)')).toBe('ノートを作成する');
+    expect(bannedEndingHeadings('### ノートを作成する')).toEqual([]);
+    expect(bannedEndingHeadings('### 保存した結果(とき)を見る')).toEqual([]);
   });
 
   it('本文の日付の印・古い位置・経緯が鳴る', () => {
@@ -129,13 +153,70 @@ describe('検査の関数そのもの(自前の原稿で効いていること)',
     expect(staleUiLines('画面の下に出ます')).toHaveLength(1);
     expect(staleUiLines('ステータスバーに出ます')).toHaveLength(1);
     expect(staleUiLines('状態バーに出ます')).toHaveLength(1);
-    expect(staleUiLines('上のタブを押す')).toHaveLength(1);
+    // 「上のタブ」は左ペイン・スマホの正しい呼び名なので対象外
+    expect(staleUiLines('上のタブを押す')).toEqual([]);
     expect(historyWordLines('以前は左にありました')).toHaveLength(1);
     expect(historyWordLines('従来どおり')).toHaveLength(1);
-    expect(historyWordLines('旧版の仕様')).toHaveLength(1);
+    // 「旧版 PKC の zip」は機能の名前なので対象外
+    expect(historyWordLines('旧版 PKC の zip を取り込む')).toEqual([]);
+    expect(historyWordLines('旧バージョンでは動きません')).toHaveLength(1);
     expect(historyWordLines('こうなりました')).toEqual([]);
     expect(historyWordLines('名前が変わりました')).toEqual([]);
     expect(historyWordLines('ボタンが増えになりました')).toHaveLength(1);
+  });
+
+  it('画面に出る字の逐語の引用は、日付・経緯・古い位置の対象外(「…」/ `…` / 太字の画面の字)', () => {
+    expect(dateStampLines('**日付として読めません(2026-10-17 の形で書きます)**')).toEqual([]);
+    expect(dateStampLines('「保存しました(2026-10-17)」と出ます')).toEqual([]);
+    expect(dateStampLines('`(2026-10-17)` と書きます')).toEqual([]);
+    expect(historyWordLines('「このタブがメインのタブになりました」と出ます')).toEqual([]);
+    expect(historyWordLines('『従来どおり』と出ます')).toEqual([]);
+    expect(staleUiLines('画面の下に **「n 件を移しました」** と出ます')).toHaveLength(1); // 位置の案内は引用の外
+    expect(staleUiLines('「画面の下に出ます」と書いてある')).toEqual([]);
+    // 打ち消しは古い位置の案内ではない
+    expect(staleUiLines('(画面の下に常設のバーはありません)')).toEqual([]);
+    expect(staleUiLines('画面の下に常設のバーが出ます')).toHaveLength(1);
+    // ⚠ 1 文ぜんぶが太字のとき(「。」を含む)は引用ではない ── 逃げ道にしない
+    expect(dateStampLines('**2026-08-28 に割り当てを変えました。** それまでは')).toHaveLength(1);
+    expect(stripQuoted('a「b」c`d`e**f**g')).toBe('aceg');
+  });
+
+  it('括弧なしの日付 + 経緯の助詞も鳴る(日付だけの例は鳴らない)', () => {
+    expect(dateStampLines('2026-08-28 に割り当てを変えました')).toHaveLength(1);
+    expect(dateStampLines('2026-09-04 まではここが')).toHaveLength(1);
+    expect(dateStampLines('2026-09-07 に直しました')).toHaveLength(1);
+    expect(dateStampLines('日付は 2026-08-25 の形で書きます')).toEqual([]);
+    expect(dateStampLines('題名は `2026-08-23` のように')).toEqual([]);
+  });
+
+  it('囲みの種類 ── ~~~ と 4 つのバッククォート / リストの中の囲み / 閉じの字と長さ', () => {
+    const bad = '### ' + 'あ'.repeat(40);
+    // ~~~ の囲み
+    expect(longHeadings(['~~~', bad, '~~~', '### 外'].join('\n'))).toEqual([]);
+    // 4 つの囲みの中の 3 つは閉じではない
+    expect(longHeadings(['````', '```', bad, '```', '````', '### 外'].join('\n'))).toEqual([]);
+    expect(scanHeadings(['````', '```', '### 中', '```', '````', '### 外'].join('\n')).map((h) => h.title)).toEqual(['外']);
+    // ``` の囲みの中の ~~~ は閉じではない
+    expect(scanHeadings(['```', '~~~', '### 中', '```', '### 外'].join('\n')).map((h) => h.title)).toEqual(['外']);
+    // リスト(字下げ)の中の囲み
+    expect(dateStampLines(['- 項目', '  ```', '  (2026-09-01)', '  ```', '  (2026-09-02)'].join('\n'))).toHaveLength(1);
+    // 閉じていない囲みは最後まで囲み(以降を数えない)
+    expect(scanHeadings(['```', '### 中'].join('\n'))).toEqual([]);
+    // ⚠ ATX 形式(# 題)だけを見出しと数える(下線形式は数えない)
+    expect(scanHeadings('題\n====').length).toBe(0);
+  });
+
+  it('節の探索 ── 一意でなければ例外 / 自分の本文だけ / 字の出現数', () => {
+    const dup = ['## 設定 A', 'あ', '## 設定 B', 'い'].join('\n');
+    expect(() => sectionByTitle(dup, '設定')).toThrow(/2 個/);
+    expect(sectionByTitle(dup, '設定 A')).toContain('あ');
+    // 「題名に含む」までは広げない
+    expect(sectionByTitle('## 大きな設定', '設定')).toBeNull();
+    const nested = ['## 章', '本文 1', '### 小', '本文 2'].join('\n');
+    expect(sectionByTitle(nested, '章')).toContain('本文 2');
+    expect(sectionByTitle(nested, '章', { ownBodyOnly: true })).not.toContain('本文 2');
+    expect(sectionContaining(nested, '本文 1', { ownBodyOnly: true })).not.toContain('小');
+    expect(occurrences('あ あ\n```\nあ\n```\nあ', 'あ')).toBe(3);
   });
 
   it('囲みの中は見出しとしても本文としても数えない', () => {
@@ -156,9 +237,9 @@ describe('検査の関数そのもの(自前の原稿で効いていること)',
 
   it('見出しをキーワードで探す ── 段が変わっても、名前が変わっても同じ節を拾う', () => {
     const before = ['## 章', '### 割り当てを変える', '手順 A', '#### 小', '詳細', '### 次', '別'].join('\n');
-    const after = ['## 章', '#### ショートカットの割り当てを変更する', '手順 A', '##### 小', '詳細', '## 次', '別'].join('\n');
+    const after = ['## 章', '#### 割り当てを変更する手順', '手順 A', '##### 小', '詳細', '## 次', '別'].join('\n');
     for (const t of [before, after]) {
-      const s = sectionByTitle(t, '割り当て');
+      const s = sectionByTitle(t, '割り当てを変');
       expect(s, '節を拾えていない').not.toBeNull();
       expect(s).toContain('手順 A');
       expect(s).toContain('詳細');
@@ -169,16 +250,6 @@ describe('検査の関数そのもの(自前の原稿で効いていること)',
     const pri = ['### 割り当てを変える手順', '甲', '### 割り当てを変える', '乙'].join('\n');
     expect(sectionByTitle(pri, '割り当てを変える')).toContain('乙');
     expect(sectionByTitle(pri, '割り当てを変える')).not.toContain('甲');
-  });
-
-  it('題名が当たる節を全部つなぐ(入れ子は重ねない / 当たらなければ null)', () => {
-    const doc = ['## 窓 A', 'あ', '### 窓の中', 'い', '## 無関係', 'う', '## 窓 B', 'え'].join('\n');
-    const s = sectionsByTitle(doc, /窓/)!;
-    expect(s.split('い').length - 1).toBe(1);
-    expect(s).toContain('あ');
-    expect(s).toContain('え');
-    expect(s).not.toContain('う');
-    expect(sectionsByTitle(doc, /存在しない/)).toBeNull();
   });
 
   it('内容で節を探す ── 見出しの名前に頼らない / 囲みの中と見出し行は数えない', () => {
