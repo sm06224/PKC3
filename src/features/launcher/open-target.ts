@@ -11,8 +11,8 @@
  *
  * | 選んだもの | `window.open` の 3 つ目 | 画面で起きること |
  * |---|---|---|
- * | **ブラウザのタブ**(既定) | 大きさを渡さない | いまと同じ ── タブが 1 枚増える |
- * | **別の窓** | `popup` と大きさを渡す | 独立した窓が 1 つ開く。⚠ アプリとして入れているときは、その窓が**PKC の仲間**として並ぶ(実機で確かめる ── #884 段③) |
+ * | **ブラウザのタブ** | 大きさを渡さない | いまと同じ ── タブが 1 枚増える |
+ * | **別の窓**(既定) | `popup` と大きさを渡す | 独立した窓が 1 つ開く。⚠ アプリとして入れているときは、その窓が**PKC の仲間**として並ぶ(実機で確かめる ── #884 段③) |
  *
  * 🔴 **`noopener,noreferrer` は外さない。** 外部サイトを開く側に付いている
  *   この 2 つは **user への約束**である(`adapter/ui/launch-tile.ts` の注記)──
@@ -36,22 +36,21 @@ export interface AppOpenTargetSpec {
  *   あることを、見ただけで分かるようにする。
  */
 export const APP_OPEN_TARGETS = [
-  { id: 'tab', label: 'ブラウザのタブ(既定)' },
-  { id: 'window', label: '別のウィンドウ' },
+  { id: 'window', label: '別のウィンドウ(既定)' },
+  { id: 'tab', label: 'ブラウザのタブ' },
 ] as const satisfies readonly AppOpenTargetSpec[];
 
 export type AppOpenTarget = (typeof APP_OPEN_TARGETS)[number]['id'];
 
 /**
- * 🔴 **既定はブラウザのタブ**(= いまの挙動)。
+ * 🔴 **既定は別のウィンドウ**(#1442 段①。user 承認「Go」2026-11-23 ── CLAUDE.md §2-10
+ * 「組み込みアプリの基本は別ウィンドウ」に合わせる。旧い既定は #884 のときのこちらの推薦の「ブラウザのタブ」)。
  *
- * ⚠ これは**こちらの推薦**であって user の指示ではない(#884 ⑤)──
- *   既に使っている人の手触りを、頼まれていないのに変えないため。
- *   新しい出し方は**選んだ人にだけ**効く。
- * ⚠ **これが分かったら覆る**:実機で「別の窓」のほうが明らかに扱いやすいと分かったとき、
- *   または user から「入れている人は最初から別の窓で」と指示があったとき。
+ * ⚠ **選び直せる**(設定の「アプリの開き方」で「ブラウザのタブ」へ戻せる ── 片道にしない)。
+ *   すでに選んである人の値は変えない(保存値が優先)。
+ * ⚠ ポップアップが遮られたときの退避先は**左のペインのタブ**(`hasPaneHome` / `openInPane`)── 中央ではない。
  */
-export const DEFAULT_APP_OPEN_TARGET: AppOpenTarget = 'tab';
+export const DEFAULT_APP_OPEN_TARGET: AppOpenTarget = 'window';
 
 export function isAppOpenTarget(v: string): v is AppOpenTarget {
   return APP_OPEN_TARGETS.some((t) => t.id === v);

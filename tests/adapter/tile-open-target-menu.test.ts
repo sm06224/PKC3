@@ -112,24 +112,24 @@ const press = (lid: string): void => void tileEl(lid).click();
 
 describe('その 1 回だけの開き方(#884 段②)', () => {
   it('🔴 ① 右クリックすると、いまの設定に「(既定)」の印が付いた 2 項目が出る', () => {
-    // 前提: 設定は既定(ブラウザのタブ)のまま
+    // 前提: 設定は既定(別のウィンドウ ── #1442 段①)のまま
     rightClick('a1');
     const tab = menuItem('tab');
     const win = menuItem('window');
     expect(tab, 'タブの項目が出ていない').not.toBeNull();
     expect(win, '窓の項目が出ていない').not.toBeNull();
-    expect(tab!.textContent, '既定の印が無い').toContain('(既定)');
-    expect(win!.textContent, '既定でないほうにまで印が付いている').not.toContain('(既定)');
+    expect(win!.textContent, '既定の印が無い').toContain('(既定)');
+    expect(tab!.textContent, '既定でないほうにまで印が付いている').not.toContain('(既定)');
     // ⚠ 動詞で書く(設定画面の札をそのまま出さない)── 押すと何が起きるかで読める
     expect(tab!.textContent).toContain('ブラウザのタブで開く');
     expect(win!.textContent).toContain('別のウィンドウで開く');
   });
 
-  it('🔴 ①b 「別の窓」を設定にしていれば、印はそちらへ移る(対照群)', () => {
-    chooseAppOpenTarget('window');
+  it('🔴 ①b 「ブラウザのタブ」を設定にしていれば、印はそちらへ移る(対照群 ── 戻せる)', () => {
+    chooseAppOpenTarget('tab');
     rightClick('a1');
-    expect(menuItem('window')!.textContent, '設定を変えても印が動かない').toContain('(既定)');
-    expect(menuItem('tab')!.textContent).not.toContain('(既定)');
+    expect(menuItem('tab')!.textContent, '設定を変えても印が動かない').toContain('(既定)');
+    expect(menuItem('window')!.textContent).not.toContain('(既定)');
   });
 
   it('🔴 ② 選ぶと openTileAs が呼ばれる(openTile は呼ばれない)', () => {
@@ -181,7 +181,7 @@ describe('その 1 回だけの開き方(#884 段②)', () => {
    *   ── マニュアル・Office・「自分のパソコンで動かす」は押しても何も変わらないので出さない。
    */
   it('🔴 組み込みの面のタイル(予定表など)は、開き方の 2 項目だけが出る(並べ替えは出ない)', () => {
-    chooseAppOpenTarget('window'); // 設定を窓にしても、組み込みの面の印はタブのまま
+    chooseAppOpenTarget('tab'); // 組み込みの面も設定に従う(#1442 段①)── 設定をタブにすれば印はタブへ
     const dual = region.querySelector<HTMLElement>('[data-pkc-tile="builtin:dual"]');
     expect(dual, '前提が崩れている(組み込みタイルが描かれていない)').not.toBeNull();
     dual!.dispatchEvent(
@@ -189,7 +189,7 @@ describe('その 1 回だけの開き方(#884 段②)', () => {
     );
     expect(menuItem('tab'), 'タブの項目が出ていない').not.toBeNull();
     expect(menuItem('window'), '窓の項目が出ていない').not.toBeNull();
-    // 組み込みの面は設定に従わず、ふだんはいつもタブで開く ── 印はタブに付く(設定を窓にしても動かさない)
+    // 組み込みの面も設定に従う ── 印は設定(ここではタブ)に付く
     expect(menuItem('tab')!.textContent).toContain('(既定)');
     expect(menuItem('window')!.textContent).not.toContain('(既定)');
     expect(
@@ -282,6 +282,6 @@ describe('ブラウザで使っていても、ブラウザで効く開き方は�
     expect(appOpenOptions(true, 'tab', targets).map((t) => t.id)).toEqual(['tab', 'window', 'pwa-only']);
     expect(appOpenOptions(false, 'pwa-only', targets).map((t) => t.id), '選んである値を隠した(戻せない)').toContain('pwa-only');
     // 実物の表では、いまは 2 つとも効く ── 入れていなくても全部出る
-    expect(appOpenOptions(false, 'tab').map((t) => t.id)).toEqual(['tab', 'window']);
+    expect(appOpenOptions(false, 'tab').map((t) => t.id)).toEqual(['window', 'tab']);
   });
 });

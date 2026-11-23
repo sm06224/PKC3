@@ -14,6 +14,7 @@ import {
   togglePane,
   type ColumnPaneId,
   type PaneId,
+  type WindowPaneId,
 } from '@features/pane-visibility';
 import { appPhone } from './phone-layout';
 import { paintRail } from './rail';
@@ -39,6 +40,15 @@ export class PaneVisibilityStore {
   private saveFailed = false;
   /** 🔴 この窓の畳みを端末の記録から切り離したか(下の `sessionOnly`)。 */
   private detached = false;
+  /**
+   * 🔴 **左端のバーを畳んでいるか**(#1442 段①)。別のウィンドウの session だけが持つ ──
+   *   端末の記録(`pkc3.panes`)の語彙(`PaneId`)にバーは無いので、本体の窓には**書く道が無い**。
+   */
+  private railHidden = false;
+  /** 🔴 この窓がバーの畳み戻しを持つか(`sessionOnly` でバーを畳んで始めた窓だけ。本体の窓・付箋は持たない)。 */
+  private railSession = false;
+  /** 🔴 `sessionOnly` がこの窓のために畳んだ列(user が元から畳んでいた物は入れない ── 戻すときに触らない)。 */
+  private collapsedByWindow: PaneId[] = [];
   /**
    * 🔴 **こちらが一時的に見せているペイン**(#655 ①)。端末の記録には触れない。
    * ⚠ 1 枚だけ ── いま使うのは追記欄(`append`)で、同時に 2 枚を一時的に見せる
@@ -216,13 +226,62 @@ export class PaneVisibilityStore {
    *
    * @returns 切り離した時点の畳み(呼び側はそのまま `applyPaneVisibility` へ渡す)
    */
-  sessionOnly(reveal: PaneId): PaneId[] {
+  sessionOnly(reveal: PaneId | null, collapse: readonly WindowPaneId[] = []): PaneId[] {
     // ⚠ こちらの畳み(#701)も外す ── 小窓は追記欄を必ず出す(以後 `setAutoFold` は効かない)
-    if (this.auto === reveal) this.auto = null;
+    if (reveal !== null && this.auto === reveal) this.auto = null;
+    /**
+     * 🔴 **別のウィンドウの面は、`collapse` で渡された物を最初から畳んで始める**(#1442 段①)。
+     * ⚠ 畳みは**この窓の記憶だけ**(`detached`)── 本体の窓の記録には書かない。
+     */
     const seed = this.getHidden().filter((id) => id !== reveal);
+    this.collapsedByWindow = [];
+    for (const id of collapse) {
+      if (id === 'rail' || seed.includes(id)) continue;
+      seed.push(id);
+      this.collapsedByWindow.push(id);
+    }
     this.detached = true;
     this.fallback = decodeHidden(encodeHidden(seed));
+    if (collapse.includes('rail')) {
+      this.railHidden = true;
+      this.railSession = true;
+    }
     return this.fallback;
+  }
+
+  /**
+   * 🔴 **面を離れたら、この窓のために畳んだ物を戻す**(#1442 段①)。別のウィンドウで面を閉じて本文へ戻ったとき、
+   * 一覧・情報・バーが畳まれたまま残ると、本文の窓として使えない。user が元から畳んでいた物は触らない。
+   * @returns 戻した後の畳み(`applyPaneVisibility` へ渡す)。畳んでいなければ `null`(何もしない)
+   */
+  releaseWindowCollapse(): PaneId[] | null {
+    if (!this.railSession && this.collapsedByWindow.length === 0) return null;
+    const mine = this.collapsedByWindow;
+    this.collapsedByWindow = [];
+    this.railHidden = false;
+    this.railSession = false;
+    this.fallback = decodeHidden(encodeHidden(this.fallback.filter((id) => !mine.includes(id))));
+    return this.getHidden();
+  }
+
+  /** バーを畳んでいるか(`applyPaneVisibility` が属性へ写す)。 */
+  isRailHidden(): boolean {
+    return this.railHidden;
+  }
+
+  /** バーの畳み戻しを持つ窓か(別のウィンドウの面。ボタンを出す条件)。 */
+  hasRailToggle(): boolean {
+    return this.railSession;
+  }
+
+  /**
+   * バーを畳む / 戻す。⚠ **バーを畳んで始めた窓だけ**(本体の窓では何も起きない ── 本体の版面は変えない)。
+   * @returns 動かしたら `true`
+   */
+  toggleRail(): boolean {
+    if (!this.railSession) return false;
+    this.railHidden = !this.railHidden;
+    return true;
   }
 
   toggle(id: PaneId): PaneId[] {
@@ -283,7 +342,14 @@ export function applyPaneVisibility(root: HTMLElement, hidden: readonly PaneId[]
    *   boot で属性を書く前にここが走った回だけ列が畳まれる(順番で守る形になる)。
    */
   const shown = appPhone.isPhone() ? hidden.filter((id) => !COLUMN_SET.has(id)) : hidden;
-  const value = encodeHidden(shown);
+  /**
+   * 🔴 **左端のバーの畳み**(#1442 段①)も同じ属性の 1 語(`rail`)で写す ── 別のウィンドウの面だけ。
+   * ⚠ スマホ用画面ではバーが無い(`paintRail` が隠す)ので写さない(列の畳みと同じ)。
+   */
+  const railHidden = appPanes.isRailHidden() && !appPhone.isPhone();
+  const value = [encodeHidden(shown), railHidden ? 'rail' : ''].filter((t) => t !== '').join(' ');
+  if (appPanes.hasRailToggle()) shell.setAttribute('data-pkc-rail-toggle', '');
+  else shell.removeAttribute('data-pkc-rail-toggle');
   if (value === '') shell.removeAttribute('data-pkc-hidden-panes');
   else shell.setAttribute('data-pkc-hidden-panes', value);
   /**
@@ -305,7 +371,8 @@ export function applyPaneVisibility(root: HTMLElement, hidden: readonly PaneId[]
   for (const btn of root.querySelectorAll<HTMLElement>('[data-pkc-action="toggle-pane"]')) {
     const id = btn.getAttribute('data-pkc-pane');
     if (id === null) continue;
-    btn.setAttribute('aria-pressed', shown.includes(id as PaneId) ? 'false' : 'true');
+    if (id === 'rail') btn.setAttribute('aria-pressed', railHidden ? 'false' : 'true');
+    else btn.setAttribute('aria-pressed', shown.includes(id as PaneId) ? 'false' : 'true');
   }
   /**
    * 🔴 **畳んだら段組みを採り直す**(#525。2026-08-28)。

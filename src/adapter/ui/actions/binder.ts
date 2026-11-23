@@ -10783,6 +10783,15 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'toggle-pane': (dispatcher, target) => {
     const id = target.getAttribute('data-pkc-pane');
+    /**
+     * 🔴 **左端のバーの畳み戻し**(#1442 段①)── 別のウィンドウの面だけ。端末の記録には触れない
+     *   (`toggleRail` は session だけ。本体の窓では `false` で何も起きない)。
+     */
+    if (id === 'rail') {
+      const rootEl = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
+      if (appPanes.toggleRail()) applyPaneVisibility(rootEl, appPanes.getHidden());
+      return;
+    }
     if (id === null || !isPaneId(id)) return;
     /**
      * 🔴 **スマホでは列そのものが無いので、押しても何も起きない**(#632 段① の
@@ -24706,7 +24715,7 @@ export function bindActions(
      * ⚠ 出すのは**開き方が効くタイルだけ**(別窓で開く面のタイル = `isViewMode`)。マニュアル・Office・
      *   「自分のパソコンで動かす」は開き方を持たない(窓の作りが固定 / zip を落とすだけ)ので、
      *   押しても何も変わらない選択肢を置かない。
-     * ⚠ 印は「ブラウザのタブ」に付ける ── 組み込みの面は設定の開き方に従わず、ふだんはいつもタブで開く。
+     * ⚠ 印はいまの設定に付ける(#1442 段①)── 組み込みの面も設定の開き方に従う(既定は別のウィンドウ)。
      */
     const builtinHit = target.closest('[data-pkc-tile][data-pkc-tile-kind]:not([draggable="true"])');
     if (builtinHit !== null) {
@@ -24717,7 +24726,7 @@ export function bindActions(
         openContextMenu(
           root,
           { x: ev.clientX, y: ev.clientY },
-          tileOpenTargetMenuActions('tab'),
+          tileOpenTargetMenuActions(currentAppOpenTarget(), appOpenIds()),
           root.ownerDocument.activeElement,
           { 'data-pkc-tile': tileLid },
         );

@@ -970,6 +970,20 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const rail = document.createElement('div');
   rail.setAttribute('data-pkc-region', 'rail');
+  /**
+   * 🔴 **バーを畳む / 戻す帯**(#1442 段①)。別のウィンドウの面だけ出る(CSS が `data-pkc-rail-toggle` を読む)。
+   * ⚠ 受け手は既存の `toggle-pane`(`data-pkc-pane="rail"`)── 新しい口を増やさない。
+   *   畳むと、バーは 12px の細い帯になり、この物だけが残る(戻す口が画面から消えない)。
+   */
+  const railToggle = document.createElement('button');
+  railToggle.type = 'button';
+  railToggle.setAttribute('data-pkc-region', 'rail-toggle');
+  railToggle.setAttribute('data-pkc-action', 'toggle-pane');
+  railToggle.setAttribute('data-pkc-pane', 'rail');
+  railToggle.setAttribute('aria-pressed', 'true');
+  railToggle.setAttribute('aria-label', '左端のバーを折りたたむ / 戻す');
+  railToggle.title = '左端のバーを折りたたむ・戻す';
+  rail.append(railToggle);
 
   // ── 中央(いま開いているもの)────────────────────────
   // 🔑 本文と**追記欄は別の器**にする(P8 段⑧)。本文は書き換わるたびに作り直すので、

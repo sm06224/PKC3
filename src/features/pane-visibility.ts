@@ -27,6 +27,15 @@ export const COLUMN_PANES = ['sidebar', 'inspector'] as const;
 
 export type ColumnPaneId = (typeof COLUMN_PANES)[number];
 
+/**
+ * 🔴 **別のウィンドウだけが畳める物**(#1442 段①)。列の 2 枚に、左端の縦のバー(`rail`)を足した 3 つ。
+ *
+ * ⚠ `PaneId` には**入れない** ── `PaneId` は端末の記録(`pkc3.panes`)と設定ファイルの語彙で、
+ *   バーを混ぜると本体の窓の記録へバーの畳みが書ける道ができる(本体の窓の版面は変えない)。
+ *   バーの畳みはウィンドウの session だけが持つ(`PaneVisibilityStore.sessionOnly`)。
+ */
+export type WindowPaneId = ColumnPaneId | 'rail';
+
 /** 押しボタンに出す名前。⚠ 変えたらマニュアルも直す(`docs-parity`)。 */
 export const PANE_LABELS: Readonly<Record<PaneId, string>> = {
   sidebar: '一覧',

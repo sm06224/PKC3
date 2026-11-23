@@ -32,7 +32,7 @@ let fallback: AppOpenTarget | null = null;
 /** 🔴 直近の書き込みが失敗したか(容量不足など)。真の間は読みも控えを返す。 */
 let saveFailed = false;
 
-/** いまの出し先 ── **保存されていれば それ、無ければブラウザのタブ**。 */
+/** いまの出し先 ── **保存されていれば それ、無ければ別のウィンドウ**。 */
 export function currentAppOpenTarget(): AppOpenTarget {
   try {
     const s = readStorage();

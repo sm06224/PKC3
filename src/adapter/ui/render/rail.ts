@@ -124,6 +124,9 @@ export function paintRail(shell: HTMLElement, phone: boolean): HTMLElement | nul
     bar.setAttribute('aria-label', RAIL_BAR_LABEL);
     nameButtons(bar);
   }
+  // 🔴 畳み戻しの帯(#1442 段①)は**いつも最後** ── 上の 2 つが prepend / append で入れ替わっても動かさない
+  const toggle = childOf(rail, 'rail-toggle');
+  if (toggle !== null && rail.lastElementChild !== toggle) rail.append(toggle);
   return rail;
 }
 
