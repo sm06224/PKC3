@@ -191,12 +191,16 @@ export function installSidebarBarOverflow(sidebar: HTMLElement): void {
       candidates: (b) => [...b.querySelectorAll<HTMLElement>('button[data-pkc-bar-tile]')],
       // 🔴 添付・録音・画面録画・時間は幅に関係なく「その他 ▾」の下へ(#1982 ③-b ── 行は「+ ノート ▼」「今日」「その他 ▾」の 3 点)
       forced: (el) => el.hasAttribute(CREATE_TOOL_ATTR),
+      // 🔴 スマホ幅の一覧のページでは、メッセージの入口がこの行の末尾に居る(`rail.ts` の `placeMessageEntry`)── 畳まない
+      protect: (el) => el.getAttribute('data-pkc-field') === 'message-entry',
       more: CREATE_MORE,
     });
   const collection = bar('collection-bar');
   if (collection !== null)
     installBarOverflow(collection, {
       candidates: (b) => [...b.querySelectorAll<HTMLElement>('button[data-pkc-bar-tile]')],
+      // 🔴 メッセージの入口は「⋯」の下へ畳まない(どの画面からも届く常設の入口。バッジ・状態の説明を持つ。2026-11-23)
+      protect: (el) => el.getAttribute('data-pkc-field') === 'message-entry',
     });
 }
 

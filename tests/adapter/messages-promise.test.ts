@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
-import { paintStatusMessages } from '../../src/adapter/ui/render/status-open';
+import { entryLabel } from '../../src/adapter/ui/render/message-entry';
 import { QUOTA_ALARM_RATIO, quotaText } from '../../src/features/storage/quota-watch';
 
 const MANUAL = readFileSync('docs/manual.md', 'utf-8');
@@ -39,15 +39,13 @@ describe('書き出しボタンの下に、書き込まないものを字で言�
 });
 
 describe('マニュアル「メッセージ」と実装の数字', () => {
-  it('🔴 未読が出る条件(注意と問題だけ)と、押すと開いて既読になることを言っている', () => {
+  it('🔴 未読が出る条件(注意と問題だけ)と、詳細を開く / 既読にするで既読になることを言っている', () => {
     const sec = sectionOf('メッセージ');
-    expect(sec).toContain('画面下に**未読のメッセージ N 件**と出るのは、**注意**と**問題**が読まれていないときです');
+    expect(sec).toContain('**未読 N 件**と出るのは、**注意**と**問題**が読まれていないときです');
     expect(sec).toContain('結果・配信・処理は数えません');
     // 画面の字(「未読 N 件」)は実装から引く ── 手で書いた字と食い違ったら落ちる
-    const btn = document.createElement('button');
-    paintStatusMessages(btn, 3);
-    expect(btn.textContent).toBe('未読のメッセージ 3 件');
-    expect(sec).toContain('未読のメッセージ N 件');
+    expect(entryLabel({ unread: 3, state: [], captureRecovery: 0, detail: '' })).toBe('メッセージ(未読 3 件)');
+    expect(sec).toContain('既読にする');
   });
 
   it('🔴 「注意」が溜まる場面を、2 つだけと言い切っていない', () => {

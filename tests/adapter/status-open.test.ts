@@ -286,7 +286,7 @@ describe('保存が止まった断り書きの隣の「ノートの保存デー�
       .split('\n')
       .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
       .join('\n');
-    expect(code).toContain('paintStatusRescue(regions.statusRescue, text);');
+    expect(code).toContain('paintStatusRescue(regions.statusRescue, model.toast);');
   });
 
   it('🔴 ③ 押すと「システム」が開き、「保存領域の点検」の節へ送られる', async () => {
@@ -456,7 +456,9 @@ describe('保存領域が使えない警告の隣の「バックアップを書�
     expect(b.getAttribute('data-pkc-action')).toBe('export-archive');
     expect(b.textContent).toBe('バックアップを書き出す');
     expect(b.hidden).toBe(true);
-    expect(regions.status.contains(b)).toBe(true);
+    // 🔴 帯が無くなったので、警告の隣のバックアップは簡易履歴の「いまの状態」へ移った(浮き札の中ではない)
+    expect(regions.messagePopover.contains(b)).toBe(true);
+    expect(regions.status.contains(b)).toBe(false);
     paintStatusBackup(b, true);
     expect(b.hidden, '警告の隣に出ていない').toBe(false);
     paintStatusBackup(b, false);
@@ -480,6 +482,6 @@ describe('保存領域が使えない警告の隣の「バックアップを書�
       .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
       .join('\n');
     expect(code).toContain('paintStatusBackup(regions.statusBackup, statusBaseSevere);');
-    expect(code.match(/statusBaseSevere,/g)?.length, 'paint の 2 か所').toBe(2);
+    expect(code.match(/statusBaseSevere,/g)?.length, 'paint の 1 か所(初回の描きも paint に一本化した)').toBe(1);
   });
 });

@@ -24,6 +24,8 @@
 import { syncNeonPhone } from './neon-glow';
 
 const RAIL = 'rail';
+const CREATE_BAR = 'create-bar';
+const MESSAGE_ENTRY = '[data-pkc-field="message-entry"]';
 const TABS = 'browse-tabs';
 const BAR = 'collection-bar';
 /** バーの中のタブ群の読み上げ名。 */
@@ -56,6 +58,27 @@ function nameButtons(group: HTMLElement): void {
 }
 
 /**
+ * 🔴 **メッセージの入口をスマホ幅では「作る」の行へ移す**(2026-11-23)。
+ *
+ * ⚠ 左のペインの下の操作の列(`collection-bar`)は、スマホ幅で**8 個が 1 行**に収まる幅しか無い(44px のタイル)── 9 個目の入口を
+ *   足すと、いちばん後ろから「⋯」の下へ畳まれて**システムが 1 段奥へ行く**。そこで**同じボタンを**一覧のページの「作る」の行の末尾へ
+ *   移す(新しく作らない ── 登記は `collectionBarItems()` の 1 件のまま)。PC の幅では元の場所(バーの下の群の最後)へ戻す。
+ * ⚠ 本文のページは上のバー(`phone-bar`)の入口がある。一覧のページ・本文のページのどちらからも届く。
+ */
+function placeMessageEntry(shell: HTMLElement, phone: boolean): void {
+  const entry = shell.querySelector<HTMLElement>(`[data-pkc-region="collection-bar"] ${MESSAGE_ENTRY}, [data-pkc-region="${CREATE_BAR}"] ${MESSAGE_ENTRY}`);
+  const bar = find(shell, BAR);
+  const create = find(shell, CREATE_BAR);
+  if (entry === null || bar === null || create === null) return;
+  if (phone) {
+    if (entry.parentElement !== create) create.append(entry);
+    return;
+  }
+  const group = bar.querySelector<HTMLElement>('[data-pkc-field="collection-app-group"]');
+  if (group !== null && entry.parentElement !== group) group.append(entry);
+}
+
+/**
  * バーへ載せる / 左のペインへ戻す。
  *
  * @param phone スマホ用画面か(バーを出さず、元の場所へ戻す)
@@ -69,6 +92,7 @@ export function paintRail(shell: HTMLElement, phone: boolean): HTMLElement | nul
   const bar = find(shell, BAR);
   // 🔴 輪郭の近接発光(B2。左のバーのボタン・ログ・情報ペイン共通)の付け外しも版面の入れ替えと同じ 1 か所で(スマホ用画面では付けない)
   syncNeonPhone(phone);
+  placeMessageEntry(shell, phone);
   if (phone) {
     rail.hidden = true;
     // 🔑 元の場所: タブは「探す欄」の前、操作は左のペインの最後(`shell.ts` の建て順)

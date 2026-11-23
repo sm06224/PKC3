@@ -1,7 +1,14 @@
 /**
- * 🔴 **画面いちばん下の行の先頭に「いま何をしているか」の 1 語を出す**
- * (C4 / #1038 台帳③ 段 D。設計 `docs/development/touch-and-unity-design-2026-09.md`
- * §1 P3 / §11 Q2 の裁定 A)。
+ * 🔴 **「いまの状態」と「一時の知らせ」を 1 か所で決める**(旧「ステータスバーの 1 行」の組み立て。
+ * 画面いちばん下の常設の帯は無くなった ── user 指示 2026-11-23「最下段のステータスメッセージが表示されると
+ * 非常に見にくい上に消すことも叶わないため邪魔」)。
+ *
+ * - **いまの状態**(編集中 / 保存先の注意 / 複数タブ / 同期 / 保存中 …)= `StatusModel.state`。左のバーの
+ *   「メッセージ」ボタン(バッジ・説明)と、その簡易履歴(ポップオーバー)の「いまの状態」に出す。
+ * - **一時の知らせ**(結果・注意・エラー・進行中)= `StatusModel.toast`。消せる浮き札(トースト)に出す。
+ * - 読み上げ = `StatusModel.live`(知らせとエラーだけ。常設の見えない領域へ書く)。
+ *
+ * ## 元の設計(C4 / #1038 台帳③ 段 D。`docs/development/touch-and-unity-design-2026-09.md` §1 P3 / §11 Q2)
  *
  * ## 何が変わるか
  *
@@ -61,8 +68,8 @@ export interface StatusLineParts {
   readonly statusBase: string;
   /**
    * 🔴 **保存先の注意が「実害のある警告」か**(#1038 D1。保存領域が使えず閉じると消えるとき)。
-   * ⚠ 省略 = 控えめな知らせ。立てると `paintStatusText` が `statusBase` の字だけを危険色 + 太字の器に入れる
-   *   (行の字は変わらない)。
+   * ⚠ 省略 = 控えめな知らせ。立てると、状態の 1 件(`kind: 'storage'`)が `severe` になり、
+   *   メッセージのボタンのバッジが危険色になる(ポップオーバーの「いまの状態」は字を危険色 + 太字にする)。
    */
   readonly statusBaseSevere?: boolean;
   /** 複数タブ / follower のバッジ。 */
@@ -89,68 +96,75 @@ export interface StatusLineParts {
   readonly fileDragLine?: string;
 }
 
-/**
- * 🔴 **ステータスバーの 1 行を組む**(`main.ts` の `paint` から取り出した)。
- *
- * ⚠ 順は**状態語が先頭**(見本 3「編集中 — 保存先の注意 …」)。並びそのものは
- * 直す前と同じ(状態語を足しただけ)── 優先順位は変えていない。
- * 🔴 **進行中は知らせより先**(#1017 C5 Q3)── 「書き出しています…」の後ろに
- * 別の知らせが続く並びにする(進行中が後ろへ押し出されると、定位置で探せない)。
- */
-export function composeStatusLine(parts: StatusLineParts): string {
-  return [
-    editingStateWord(parts.phase),
-    parts.fileDragLine ?? '',
-    parts.statusBase,
-    parts.sync,
-    parts.folderSyncLine ?? '',
-    parts.portableAssetNote,
-    parts.persistState,
-    parts.savingLine,
-    parts.progressLine,
-    parts.noticeLine,
-    parts.errorLine,
-  ]
-    .filter((t) => t !== '')
-    .join(' — ');
+
+/** 「いまの状態」の 1 件の種類。⚠ 並びは `composeStatusModel` が決める(画面の並びの正本)。 */
+export type StateItemKind = 'editing' | 'storage' | 'sync' | 'folder-sync' | 'portable' | 'persist' | 'saving';
+
+/** 「いまの状態」の 1 件。`severe` = 閉じると消える等の実害のある警告(危険色)。 */
+export interface StateItem {
+  readonly kind: StateItemKind;
+  readonly text: string;
+  readonly severe: boolean;
+  /** `editing` のときだけ: その phase(エラーで止まったときは危険色に使う)。 */
+  readonly phase?: AppPhase;
 }
 
 /**
- * 🔴 **外のファイルをドラッグしている間の 1 行の出し先を決める**(#1380)。
+ * 🔴 **画面に何を出すかを決める唯一の関数**(旧 `composeStatusLine` / `statusBarWithFileDrag` の後継)。
  *
- * ⚠ ふだん(ready・通知なし)はステータスバーが畳まれている ── そこへ字を足すと現れて
- *   **左と中央が縮む**(配置が動く)。だから:
- * - ステータスバーが**見えている**なら、そこに足す(`text`)
- * - **畳まれている**なら畳んだまま、字は別のラベルに出す(`floating`。`paintFileDragLabel`)
- * 🔑 畳むかの判定は `shouldHideStatusBar` に**ドラッグの字を除いた行**を渡す(1 か所)。
+ * | 欄 | 出し先 |
+ * |---|---|
+ * | `state` | メッセージのボタン(バッジ・説明)と簡易履歴の「いまの状態」。常設の帯は無い |
+ * | `toast` | 消せる浮き札。進行中 → 知らせ → エラーの順(旧い行の並びのまま) |
+ * | `live` | 常設の見えない読み上げ領域(知らせ + エラーだけ。状態語・保存中の出入りでは読まない) |
+ * | `fileDrag` | 外のファイルをドラッグしている間の 1 行(左の一覧の下端のラベル。`paintFileDragLabel`) |
  */
-export function statusBarWithFileDrag(
-  parts: StatusLineParts,
-  ctx: { readonly hasTooNarrow: boolean; readonly hasUnreadMessages: boolean },
-): { text: string; hide: boolean; floating: string } {
-  /**
-   * 🔴 **「保存中…」も同じ作法で出す**(混んだ保存で、押そうとしたボタンが 20px ずれる不具合の根治)。
-   * ⚠ 保存が `SAVING_DELAY_MS` を超えると、畳まれていたバーが**現れて左・中央・右が 20px 縮む** ──
-   *   user が狙っていたボタンが、押す直前にずれる(smoke の `docx-export:222` が 1 割強の頻度で踏んだ)。
-   *   「保存中…」は一時の状態の字なので、バーが畳まれているなら畳んだまま、別のラベルに出す。
-   */
-  const line = [parts.fileDragLine ?? '', parts.savingLine].filter((t) => t !== '').join(' — ');
-  const base = composeStatusLine({ ...parts, fileDragLine: '', savingLine: '' });
-  const hide = shouldHideStatusBar({ text: base, ...ctx });
-  if (line === '') return { text: base, hide, floating: '' };
-  if (hide) return { text: base, hide: true, floating: line };
-  return { text: composeStatusLine(parts), hide: false, floating: '' };
+export interface StatusModel {
+  readonly state: readonly StateItem[];
+  readonly toast: string;
+  readonly live: string;
+  readonly fileDrag: string;
+}
+
+export function composeStatusModel(parts: StatusLineParts): StatusModel {
+  const state: StateItem[] = [];
+  const add = (kind: StateItemKind, text: string, severe = false, phase?: AppPhase): void => {
+    if (text !== '') state.push({ kind, text, severe, ...(phase === undefined ? {} : { phase }) });
+  };
+  add('editing', editingStateWord(parts.phase), false, parts.phase);
+  add('storage', parts.statusBase, parts.statusBaseSevere === true);
+  add('sync', parts.sync);
+  add('folder-sync', parts.folderSyncLine ?? '');
+  add('portable', parts.portableAssetNote);
+  add('persist', parts.persistState);
+  add('saving', parts.savingLine);
+  const toast = [parts.progressLine, parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
+  const live = [parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
+  return { state, toast, live, fileDrag: parts.fileDragLine ?? '' };
 }
 
 /**
- * 🔴 **読み上げの対象になる子の印**(#1017 C5 着地後レビュー ⚠1)。
- * `shell.ts` が `aria-live` つきで作り、`paintStatusText` が**同じ要素を使い続ける**。
+ * 🔴 **浮き札を出すか**。字があるか、画面幅不足の断り書き(`OK` を押す口を持つ。#671)が出ている間は出す
+ * ── 畳むと `OK` ごと画面から消え、user は消し方を持たない。
  */
+export function shouldShowToast(options: { readonly toast: string; readonly hasTooNarrow: boolean }): boolean {
+  return options.hasTooNarrow || options.toast !== '';
+}
+
+/**
+ * 🔴 **状態の言葉を 1 行に連ねる**(メッセージのボタンの説明に使う)。⚠ 「編集中」の次に保存先の注意…という
+ * 並びは `composeStatusModel` の `state` の並びのまま。
+ */
+export function stateSummary(items: readonly StateItem[]): string {
+  return items.map((i) => i.text).join(' / ');
+}
+
+/** 読み上げの子の印(常設の見えない領域。`shell.ts` が作り、`paintStatusLive` が書く)。 */
 export const STATUS_LIVE_FIELD = 'status-live';
 
-/** 読み上げの子を作る(`shell.ts` と `paintStatusText` の 2 か所が同じ形で作る ── 形はここが正本)。 */
+/** 読み上げの領域を作る(`shell.ts` が 1 度だけ作る)。⚠ `hidden` にしない ── 畳むと読まれない。見えなくするのは CSS の視覚的な隠し方。 */
 export function createStatusLive(doc: Document): HTMLElement {
-  const live = doc.createElement('span');
+  const live = doc.createElement('div');
   live.setAttribute('data-pkc-field', STATUS_LIVE_FIELD);
   live.setAttribute('aria-live', 'polite');
   live.setAttribute('aria-atomic', 'true');
@@ -158,91 +172,14 @@ export function createStatusLive(doc: Document): HTMLElement {
 }
 
 /**
- * 🔴 **状態の 1 語だけを別の器に入れて描く**(#1038 台帳③ C4 の着地前レビュー)。
- *
- * ⚠ 1 稿目は行全体を 1 つの字として出していた ──「編集中」が「複数タブ: …」のような
- *   控えめな知らせと**同じ色・同じ大きさ**で並び、user 目線のレビューが
- *   「気づかれない字は無いのと同じ」と指摘した(設計 doc §9「気づきにくければ色を付ける」)。
- * 🔑 付けるのは色相ではなく**濃さ**(本文と同じ濃い字 + 太字)── 主のボタンと同じ
- *   「色ではなく濃さで段を作る」(user 裁定 2026-09-06)。保存に失敗して止まったときだけ
- *   危険の赤(CSS の `[data-pkc-phase='error']`)。
- * ⚠ 行の字(`textContent`)は `composeStatusLine` と**1 字も変わらない** ── 字を読む
- *   受け手(smoke・状態の比較)はそのまま動く。
- *
- * 🔴 **読み上げに載せるのは「知らせ」と「エラー」だけ**(#1017 C5 着地後レビュー ⚠1)。
- * ⚠ 1 稿目は footer 全体に `aria-live` を付けたので、状態語・保存先の注意・`⏳ 保存中…` の
- *   出入りのたびに読み上げが起きた(ここが毎回子を作り直すので、`aria-atomic=false` でも
- *   全部が「追加」に見える)。🔑 だから**知らせとエラーを写す子 1 つ**(`status-live`)だけに
- *   `aria-live` を付け、その外(状態語・保存先・保存中)は読み上げの外に置く。
- * ⚠ **その子は作り直さない** ── 外して付け直すと、読み上げの対象として登録される前の
- *   要素に字が入った形になり、読まれないことがある。字が**変わったときだけ**書く。
- *
- * @returns 描いた行の字(`composeStatusLine` と同じ値)
+ * 🔴 **読み上げの領域に知らせとエラーを書く**。⚠ 作り直さず、字が**変わったときだけ**書く
+ * (外して付け直すと、登録される前の要素に字が入った形になり、読まれないことがある。#1017 C5 着地後レビュー ⚠1)。
  */
-export function paintStatusText(el: HTMLElement, parts: StatusLineParts): string {
-  const text = composeStatusLine(parts);
-  const word = editingStateWord(parts.phase);
-  const doc = el.ownerDocument;
-  // 読み上げに載せる尾 = 行の末尾(知らせ + エラー)。⚠ 区切りの ' — ' は頭の側に置く
-  const liveText = [parts.noticeLine, parts.errorLine].filter((t) => t !== '').join(' — ');
-  const head = text.slice(0, text.length - liveText.length);
-
-  let live: HTMLElement | null = null;
-  for (const c of Array.from(el.children)) {
-    if (c.getAttribute('data-pkc-field') === STATUS_LIVE_FIELD) live = c as HTMLElement;
-  }
-  if (live === null) {
-    live = createStatusLive(doc);
-    el.append(live);
-  }
-  // 🔑 live 以外を消す(live 自体は触らない ── 登録済みの要素を作り直さない)
-  for (const c of Array.from(el.childNodes)) if (c !== live) c.remove();
-  /** 頭の字(状態語の後ろ)を置く。🔑 重大な保存先の警告はその字だけ別の器に入れる(#1038 D1) */
-  const putRest = (rest: string): void => {
-    const base = parts.statusBase;
-    const at = parts.statusBaseSevere === true && base !== '' ? rest.indexOf(base) : -1;
-    if (at < 0) {
-      if (rest !== '') el.insertBefore(doc.createTextNode(rest), live);
-      return;
-    }
-    if (at > 0) el.insertBefore(doc.createTextNode(rest.slice(0, at)), live);
-    const warn = doc.createElement('span');
-    warn.setAttribute('data-pkc-field', 'status-warning');
-    warn.textContent = base;
-    el.insertBefore(warn, live);
-    const after = rest.slice(at + base.length);
-    if (after !== '') el.insertBefore(doc.createTextNode(after), live);
-  };
-  if (word !== '') {
-    const state = doc.createElement('span');
-    state.setAttribute('data-pkc-field', 'status-state');
-    state.setAttribute('data-pkc-phase', parts.phase);
-    state.textContent = word;
-    el.insertBefore(state, live);
-    putRest(head.slice(word.length));
-  } else {
-    putRest(head);
-  }
-  if (live.textContent !== liveText) live.textContent = liveText;
-  return text;
+export function paintStatusLive(live: HTMLElement, text: string): void {
+  if (live.textContent !== text) live.textContent = text;
 }
 
-/**
- * 🔴 **ステータスバーの行を畳むかどうかを判定する**(#1071、#671 の裁定 3)。
- *
- * 以下のいずれかに当てはまる場合は、行のテキストが空でも畳まず表示する（hidden = false）:
- * 1. 画面幅不足の断り書きが出ている（`hasTooNarrow === true`）── #671
- * 2. 未読メッセージが 1 件以上ある（`hasUnreadMessages === true`）── #1071
- *
- * それ以外は、行のテキスト（`text === ''`）が空であれば畳む（hidden = true）。
- */
-export function shouldHideStatusBar(options: {
-  readonly text: string;
-  readonly hasTooNarrow: boolean;
-  readonly hasUnreadMessages: boolean;
-}): boolean {
-  if (options.hasTooNarrow) return false;
-  if (options.hasUnreadMessages) return false;
-  return options.text === '';
+/** 浮き札の字を書く。⚠ 同じ字なら触らない(打鍵ごとの DOM の変異を避ける)。 */
+export function paintToastText(el: HTMLElement, text: string): void {
+  if (el.textContent !== text) el.textContent = text;
 }
-

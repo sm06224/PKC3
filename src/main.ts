@@ -95,7 +95,6 @@ import {
   paintStatusCaptureRecovery,
   paintStatusCopyRef,
   paintStatusCreate,
-  paintStatusMessages,
   paintStatusOpen,
   paintStatusRescue,
   paintStatusTrash,
@@ -106,7 +105,8 @@ import {
   paintFileDragLabel,
   subscribeFileDragHint,
 } from '@adapter/ui/actions/file-drag-hint';
-import { paintStatusText, statusBarWithFileDrag } from '@adapter/ui/render/status-line';
+import { composeStatusModel, paintStatusLive, paintToastText, shouldShowToast } from '@adapter/ui/render/status-line';
+import { installMessagePopover } from '@adapter/ui/render/message-entry';
 import { createStatusNotices, type StatusNotices } from '@adapter/ui/render/status-lifetime';
 import {
   createStatusPoster,
@@ -2272,7 +2272,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const statusBaseSevere = isStorageFallback(init.fallbackReason);
   // 🔴 警告の隣の「バックアップを書き出す」(#1038 D1)── 常設の警告と同じ寿命なので 1 度だけ出し入れする
   paintStatusBackup(regions.statusBackup, statusBaseSevere);
-  regions.status.title = storageStatusTitle(`${versionText()} — ${init.vfs}`, init.fallbackReason);
+  // 🔴 版・保存先の説明は、簡易履歴の「いまの状態」の見出しの `title` へ(画面いちばん下の常設の帯が無くなったので)
+  const statusDetail = storageStatusTitle(`${versionText()} — ${init.vfs}`, init.fallbackReason);
+  /**
+   * 🔴 **メッセージの入口と簡易履歴(ポップオーバー)を据える**(user 指示 2026-11-23。`message-entry.ts`)。
+   * 最近のメッセージは `appMessagePost` の記憶(起動時にノート本文から種まき)── 変わったら開いていれば描き直す。
+   */
+  const messageEntry = installMessagePopover(root, { recent: () => appMessagePost.recent() });
+  appMessagePost.onRecentChanged(() => messageEntry.refresh());
   /**
    * #177: メインのタブ経由(follower)で開いているときの常設バッジ。fallback 警告と
    * 同型(「意図と違う接続形態は user が知るべき事実」)。昇格で空にする。
@@ -2289,24 +2296,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *   新しい旗を作らない(CLAUDE.md §7)。
    */
   let syncLine = followerConn ? '複数タブ: このタブの保存はメインのタブ経由です' : '';
-  // textContent の setter は同一文字列でも子ノードを全置換する ── 打鍵ごとの
-  // state 変化で無駄な DOM 変異を起こさないよう、変わったときだけ書く
-  let statusShown = statusBase;
-  // ⚠ `textContent` で書かない ── 読み上げの子(`status-live`)ごと消える(着地後レビュー ⚠1)
-  paintStatusText(regions.statusText, {
-    phase: 'initializing',
-    statusBase,
-    statusBaseSevere,
-    sync: '',
-    portableAssetNote: '',
-    persistState: '',
-    savingLine: '',
-    progressLine: '',
-    noticeLine: '',
-    errorLine: '',
-  });
-  // 🔑 **空なら場所を取らない**(notices / update と同じ作法)
-  regions.status.hidden = statusBase === '';
+  // 🔑 浮き札は字が無い間は畳む(`paint` が出し入れする)。⚠ 画面いちばん下の常設の帯は無い
+  regions.status.hidden = true;
   /**
    * 🔴 **2 つの経路を分けて持つ**(P10)。以前は 1 つの `showStatus` を
    * 「状態(エラー)」と「一時の知らせ(コピーした・取り込んだ)」が**共有**して
@@ -2318,6 +2309,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * **エラー > 一時の知らせ > 常設(保存先の警告)**。
    */
   let errorLine = '';
+  /** 🔴 浮き札の × で閉じたエラー / 進行中の字(同じ字の間は出さない。字が変わる・消えると解く)。 */
+  let dismissedError: string | null = null;
+  let dismissedProgress: string | null = null;
+  let toastShown = '';
   /** 🔴 復元できる途中で終わった録音・録画の区間数(#1985。`captureRecovery` が更新する)。 */
   let captureRecoveryCount = 0;
   /**
@@ -2352,6 +2347,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   ── CLAUDE.md §2)。この窓 / 付箋の窓のどちらでも同じ `paint` が走るので、
      *   `heldNoteWindow` でも状態語は出る(K16。畳むのは上の `sync` だけ)。
      */
+    // 🔴 × で閉じたエラー・進行中は、字が変わる(または消える)まで出さない(`dismissToast`)
+    if (errorLine === '') dismissedError = null;
+    const progress = progressLine();
+    if (progress === '') dismissedProgress = null;
     const parts = {
       phase: dispatcher.getState().phase,
       statusBase,
@@ -2361,43 +2360,54 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       portableAssetNote,
       persistState,
       savingLine: saving.line(),
-      progressLine: progressLine(),
+      progressLine: progress === dismissedProgress ? '' : progress,
       noticeLine: noticeLine(),
-      errorLine,
+      errorLine: errorLine === dismissedError ? '' : errorLine,
       fileDragLine: fileDragHintLine(root),
     };
     /**
-     * 🔴 **断り書きが出ている間、および未読メッセージがある間は、字が空でも器を畳まない**(#671 の裁定 3 / #1071)。
-     * ⚠ 畳むと **`OK` や「未読 N 件」ごと画面から消える** ── 押す口が無いまま出しっぱなしに
-     *   なるのと同じで、user は消し方を持たない。
-     * 🔑 器を畳むかどうかを決めるのは**この 1 か所**である ── 判断は `status-line.ts` が持つ。
+     * 🔴 **何を出すかを決めるのは `composeStatusModel` 1 本**(`status-line.ts`。判断は `main.ts` に置かない ──
+     *   この file はどの test からも実行されない)。
+     * - いまの状態(編集中 / 保存先の注意 / 複数タブ / 同期 / 保存中)→ メッセージの入口のバッジ・説明と簡易履歴
+     * - 一時の知らせ(進行中 / 結果 / 注意 / エラー)→ 消せる浮き札(`status`)
+     * - 読み上げ → 常設の見えない領域(`status-live`)
+     * 画面幅不足の断り書きが出ている間は、字が空でも浮き札を畳まない(`OK` が消す口 ── #671 の裁定 3)。
      */
-    // 🔴 途中で終わった録音・録画の入口(#1985)も、未読のメッセージと同じく「押す口が在る間は畳まない」
-    const hasUnreadMessages = dispatcher.getState().messagesUnread > 0 || captureRecoveryCount > 0;
-    const { text, hide, floating } = statusBarWithFileDrag(parts, {
-      hasTooNarrow: !regions.tooNarrow.hidden,
-      hasUnreadMessages,
+    const model = composeStatusModel(parts);
+    // 🔴 外のファイルをドラッグしている間の 1 行(#1380)── 常に左の一覧の下端のラベルへ(帯が無いので、足す先は無い)
+    paintFileDragLabel(root, model.fileDrag);
+    const st = dispatcher.getState();
+    messageEntry.setModel({
+      unread: st.messagesUnread,
+      state: model.state,
+      captureRecovery: captureRecoveryCount,
+      detail: statusDetail,
     });
-    /**
-     * 🔴 **外のファイルをドラッグしている間の 1 行**(#1380)。ステータスバーが畳まれているときは、
-     * 畳んだまま(= 左と中央を縮めない)左の一覧の下端のラベルに出す。⚠ 下の「変わらないなら塗らない」より前。
-     */
-    paintFileDragLabel(root, floating);
-    if (text === statusShown && regions.status.hidden === hide) return;
-    statusShown = text;
+    paintStatusLive(regions.statusLive, model.live);
+    const show = shouldShowToast({ toast: model.toast, hasTooNarrow: !regions.tooNarrow.hidden });
+    if (model.toast === toastShown && regions.status.hidden === !show) return;
+    toastShown = model.toast;
     // 🔴 保存が止まった断り書きの隣の入口(#1010 B)── 判断は `status-open.ts`
-    paintStatusRescue(regions.statusRescue, text);
+    paintStatusRescue(regions.statusRescue, model.toast);
     // 🔴 見つからないノートの知らせの隣の「ゴミ箱を開く」(#1648)── 判断は `status-open.ts`
-    paintStatusTrash(regions.statusTrash, text);
-    // ⚠ 状態の 1 語だけを別の器に入れる(`status-line.ts` の `paintStatusText`)── 字は同じ
-    paintStatusText(
-      regions.statusText,
-      floating === '' ? parts : { ...parts, fileDragLine: '', savingLine: '' },
-    );
-    regions.status.hidden = hide;
+    paintStatusTrash(regions.statusTrash, model.toast);
+    paintToastText(regions.statusText, model.toast);
+    regions.status.hidden = !show;
   };
   /** 🔑 ここで初めて `paint` に繋がる(それまでの `onState` は落としてよい)。 */
   repaintStatus = paint;
+  /**
+   * 🔴 **浮き札の ×**(`dismiss-toast`。user 指示 2026-11-23「消すことも叶わない」)。消すのは画面の札だけ ──
+   * 同じ字はメッセージに残っている(結果・注意・問題は post 済み)。知らせは寿命の持ち主(`statusNotices.dismiss`)へ、
+   * エラー・進行中は字を覚えて隠す(状態を直すものではない ── 保存に失敗して止まっている間の「状態」は入口に残る)。
+   */
+  regions.status.addEventListener('pkc-toast-dismiss', () => {
+    if (errorLine !== '') dismissedError = errorLine;
+    const progress = progressLine();
+    if (progress !== '') dismissedProgress = progress;
+    statusNotices?.dismiss();
+    paint();
+  });
 
   /**
    * 🔴 **窓の題名を塗る**(#300 段③ / #685 着地前レビュー ⚠3)。
@@ -2478,12 +2488,6 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     const undo = paintStatusUndo(regions.statusUndo, dispatcher.getState(), shown);
     // 🔴 日付のノートが無かった直後の「○○のノートを作る」も同じ口で出し入れする(#1169)
     const create = paintStatusCreate(regions.statusCreate, dispatcher.getState(), shown);
-    /**
-     * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。「開く」「元に戻す」と
-     * 同じ作法 ── 常設で置いて、未読が 1 件以上あるときだけ出す。
-     */
-    // ⚠ 字の組み方は `status-open.ts`(test が届く所)── ここは渡すだけ
-    paintStatusMessages(regions.statusMessages, dispatcher.getState().messagesUnread);
     paintStatusCaptureRecovery(regions.statusCaptureRecovery, captureRecoveryCount);
     // 🔴 いま押す口を持つ知らせか(持つなら自動で消さない ── `status-lifetime.ts`)
     return open || undo || create || copyRef;

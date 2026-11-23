@@ -346,7 +346,7 @@ describe('小さい字(右のペイン・ステータスバー・設定の注記
     ["[data-pkc-field='inspector-editing-note']", 12],
     ["[data-pkc-field='inspector-asset-link']", 12],
     ["[data-pkc-field='inspector-body-tag-where']", 11],
-    ["[data-pkc-region='status']", 11],
+    ["[data-pkc-region='status']", 12],
     ["[data-pkc-field='status-undo']", 11],
     ["[data-pkc-field='status-create-date']", 11],
     [".settings-note", 11],

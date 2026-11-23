@@ -376,11 +376,11 @@ describe('字', () => {
     const css = withoutMedia(stripComments(readFileSync('src/styles/app.css', 'utf-8')));
     const band = blocksFor(css, `[data-pkc-field='too-narrow-text']`).join(' ');
     expect(band, '字の色を決めていない(親の薄い灰を継ぐ)').toMatch(decl('color', 'var\\(--fg'));
-    // ⚠ 空振り防止 ── 親は薄い色のままである(親を変えて満たしていない)
+    // 🔴 2026-11-23 に常設の薄い灰の帯を廃止した ── 親(浮き札)も本文の濃い色(`--fg`)で、薄い色に埋もれない。
+    //   ⚠ 空振り防止 ── 親が薄い色(`--muted`)に戻ったら、字の色を自前で決めていることが守っているものに戻る
     const status = blocksFor(css, `[data-pkc-region='status']`).join(' ');
-    expect(status, '親の色が薄くない(この検査は何も守っていない)').toMatch(
-      decl('color', 'var\\(--muted'),
-    );
+    expect(status, '浮き札の字が本文の濃い色でない').toMatch(decl('color', 'var\\(--fg'));
+    expect(status, '浮き札が薄い色に戻った').not.toMatch(decl('color', 'var\\(--muted'));
   });
 
   /**

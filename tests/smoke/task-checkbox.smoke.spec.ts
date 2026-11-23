@@ -94,7 +94,7 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
   await expect(back.nth(3), '🔴 繰り返しの行まで完了にした').not.toBeChecked();
   await expect(progress, '一括で完了にしたのに右の数が動かない').toHaveText('3 / 3 完了 (100%)');
   await expect(
-    page.getByText('1 件は繰り返しなので触りませんでした'),
+    page.locator('[data-pkc-region="status"]').getByText('1 件は繰り返しなので触りませんでした'),
     '繰り返しを飛ばした知らせが出ていない',
   ).toBeVisible();
 
@@ -126,7 +126,7 @@ test('🔴 チェックを押すと本文に残り、開き直しても消えな
    *   知らせの字は「戻しました」(「未完了にしました」ではない)。⚠ 新しい起動は足さない(この道中の続き)。
    */
   await expect(
-    page.getByText('3 件を未完了に戻しました'),
+    page.locator('[data-pkc-region="status"]').getByText('3 件を未完了に戻しました'),
     '未完了に戻した知らせの字が違う / 出ていない',
   ).toBeVisible();
   const undo = page.locator('[data-pkc-action="restore-revision"][data-pkc-undo="1"]');

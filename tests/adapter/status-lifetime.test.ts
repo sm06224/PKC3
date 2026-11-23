@@ -15,10 +15,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initialState, reduce } from '../../src/adapter/state/app-state';
-import { buildShell } from '../../src/adapter/ui/render/shell';
 import {
-  composeStatusLine,
-  paintStatusText,
+  composeStatusModel,
+  stateSummary,
   type StatusLineParts,
 } from '../../src/adapter/ui/render/status-line';
 import {
@@ -210,6 +209,50 @@ describe('新しい知らせが来たら、前の時計は捨てる', () => {
   });
 });
 
+describe('× で知らせを消す(2026-11-23。注意・問題・ボタン付きの知らせも消せる)', () => {
+  it('🔴 注意の知らせ(次が来るまで残る)も dismiss で消え、state の知らせを降ろす合図が出て、描き直される', () => {
+    const r = rig();
+    r.n.show('保存先の空きが少なくなっています', { kind: 'caution' });
+    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 10);
+    expect(r.n.noticeLine(), '前提: 注意は時間で消えない').toBe('保存先の空きが少なくなっています');
+    const paints = r.painted.length;
+    r.n.dismiss();
+    expect(r.n.noticeLine()).toBe('');
+    expect(r.expired).toEqual(['保存先の空きが少なくなっています']);
+    expect(r.painted.length, '描き直されていない').toBeGreaterThan(paints);
+  });
+
+  it('🔴 操作のボタンを持つ知らせ(「元に戻す」等)も消せる ── 消すとボタンの出し入れ(paintActions)も走る', () => {
+    let actions = 0;
+    const r = rig({ actionShown: () => ((actions += 1), true) });
+    r.n.show('本文の塊を動かしました');
+    const before = actions;
+    r.n.dismiss();
+    expect(r.n.noticeLine()).toBe('');
+    expect(actions, 'ボタンの出し入れが走っていない').toBeGreaterThan(before);
+  });
+
+  it('🔴 結果の時計は止まる(消した後に古い時計が走って二重に降ろさない)/ 進行中の欄は触らない', () => {
+    const r = rig();
+    r.n.show('書き出しています…');
+    r.n.show('コピーしました');
+    r.n.dismiss();
+    vi.advanceTimersByTime(STATUS_RESULT_VISIBLE_MS * 2);
+    expect(r.expired, '時計が二重に降ろした').toEqual(['コピーしました']);
+    expect(r.n.progressLine(), '進行中は結果の知らせが来た時点で終わる(別の話)').toBe('');
+    const p = rig();
+    p.n.show('書き出しています…');
+    p.n.dismiss();
+    expect(p.n.progressLine(), '× が進行中の欄を消した').toBe('書き出しています…');
+  });
+
+  it('知らせが無いときの dismiss は何も降ろさない', () => {
+    const r = rig();
+    r.n.dismiss();
+    expect(r.expired).toEqual([]);
+  });
+});
+
 describe('Q3 全体の処理の進行中は別の欄', () => {
   it('🔴 進行中の字は進行中の欄に入り、知らせの欄には入らない。時間では消えない', () => {
     const r = rig();
@@ -315,32 +358,26 @@ describe('行の組み立て ── 進行中は知らせより先に出て、�
   });
 
   it('🔴 進行中が在れば知らせの前に出る(エラーの前でもある)', () => {
-    const t = composeStatusLine(
+    const t = composeStatusModel(
       parts({ progressLine: '書き出しています…', noticeLine: 'コピーしました', errorLine: '⚠ エラー: x' }),
-    );
+    ).toast;
     expect(t).toBe('書き出しています… — コピーしました — ⚠ エラー: x');
   });
 
-  it('🔴 消えた後は他の欄(状態語 / 保存先)だけに戻る', () => {
-    const t = composeStatusLine(parts({ phase: 'editing', statusBase: '保存先の注意' }));
-    expect(t).toBe('編集中 — 保存先の注意');
+  it('🔴 消えた後は他の欄(状態語 / 保存先)だけに戻る ── 状態は浮き札ではなく入口へ出る', () => {
+    const m = composeStatusModel(parts({ phase: 'editing', statusBase: '保存先の注意' }));
+    expect(m.toast).toBe('');
+    expect(stateSummary(m.state)).toBe('編集中 / 保存先の注意');
   });
 
-  it('🔴 進行中は読み上げの子に入らない(知らせとエラーだけ)', () => {
-    const root = document.createElement('div');
-    document.body.append(root);
-    const regions = buildShell(root);
-    paintStatusText(
-      regions.statusText,
-      parts({ progressLine: '書き出しています…', noticeLine: 'コピーしました' }),
-    );
-    const live = regions.statusText.querySelector('[data-pkc-field="status-live"]') as HTMLElement;
-    expect(live.textContent, '読み上げが進行中を含んでいる').toBe('コピーしました');
-    expect(regions.statusText.textContent).toBe('書き出しています… — コピーしました');
-    // 進行中だけのとき、読み上げの子は空
-    paintStatusText(regions.statusText, parts({ progressLine: '書き出しています…' }));
-    expect(live.textContent, '進行中だけで読み上げが起きる').toBe('');
-    expect(regions.statusText.textContent).toBe('書き出しています…');
+  it('🔴 進行中は読み上げに入らない(知らせとエラーだけ)', () => {
+    const m = composeStatusModel(parts({ progressLine: '書き出しています…', noticeLine: 'コピーしました' }));
+    expect(m.live, '読み上げが進行中を含んでいる').toBe('コピーしました');
+    expect(m.toast).toBe('書き出しています… — コピーしました');
+    // 進行中だけのとき、読み上げは空
+    const only = composeStatusModel(parts({ progressLine: '書き出しています…' }));
+    expect(only.live, '進行中だけで読み上げが起きる').toBe('');
+    expect(only.toast).toBe('書き出しています…');
   });
 });
 
@@ -384,7 +421,7 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
   });
 
   it('🔴 行へ進行中の欄を渡している', () => {
-    expect(code).toContain('progressLine: progressLine(),');
+    expect(code).toContain("progressLine: progress === dismissedProgress ? '' : progress,");
   });
 });
 

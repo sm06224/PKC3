@@ -49,11 +49,15 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
   await expect(openBtn, '「メッセージ」を開くボタンが無い').toBeVisible();
 
   /**
-   * 🔴 **ノートを選ばないまま、画面下の「未読のメッセージ N 件」を押して開く**(台帳 #1852 束 L1)。
-   * 未読は、読めない Office 一式のファイルを入れて「問題」を 1 件起こして作る(起動直後は未読 0 件で、入口が出ていない)。
-   * ⚠ 入口が出ない場合は assert で落とす(押せる場面を作れていない = 確かめていない)。
+   * 🔴 **ノートを選ばないまま、左のバーの「メッセージ」→ 簡易履歴の「詳細メッセージ画面を開く」で開く**(台帳 #1852 束 L1。
+   * 2026-11-23 に画面下の「未読のメッセージ N 件」の押し口を、どの画面からも届く入口 + 簡易履歴へ移した)。
+   * 未読は、読めない Office 一式のファイルを入れて「問題」を 1 件起こして作る(起動直後は未読 0 件で、バッジが出ていない)。
+   * ⚠ バッジが出ない場合は assert で落とす(押せる場面を作れていない = 確かめていない)。
    */
-  const unread = page.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]');
+  const entry = page.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]');
+  const unread = entry.locator('[data-pkc-field="message-badge"]');
+  const popover = page.locator('[data-pkc-region="message-popover"]');
+  await expect(entry, '左のバーにメッセージの入口が無い').toBeVisible();
   await expect(unread, '前提が崩れている(起動直後から未読が出ている)').toBeHidden();
   const chooser = page.waitForEvent('filechooser');
   await clickReal(page, pane.locator('[data-pkc-field="office-pack-file"]'));
@@ -62,9 +66,16 @@ test('🔴 メッセージ: 一覧に出ない / 開くと中央に出る / 編�
     mimeType: 'application/zip',
     buffer: Buffer.from('not a pack'),
   });
-  await expect(unread, '問題を起こしても「未読のメッセージ」の入口が出ない').toBeVisible({ timeout: 15_000 });
-  await expect(unread).toContainText('未読のメッセージ');
-  await clickReal(page, unread);
+  await expect(unread, '問題を起こしてもバッジが出ない').toBeVisible({ timeout: 15_000 });
+  await expect(unread).toHaveText(/^[1-9]\d*$/);
+  await expect(entry, '説明に未読の数が入っていない').toHaveAttribute('aria-label', /未読 \d+ 件/);
+  // 🔴 押すと簡易履歴が開く(詳細へ行く前に、最近の問題が 1 件読める)
+  await clickReal(page, entry);
+  await expect(popover, '簡易履歴が開かない').toBeVisible();
+  await expect(entry).toHaveAttribute('aria-expanded', 'true');
+  await expect(popover.locator('[data-pkc-field="popover-list"] [data-pkc-kind="problem"]').first(), '最近のメッセージに問題が出ていない').toBeVisible();
+  await clickReal(page, popover.locator('[data-pkc-action="open-messages"]'));
+  await expect(popover, '詳細を開いたのに簡易履歴が残った').toBeHidden();
 
   // 中央に題名「メッセージ」が出る(detail 面)
   const detailPane = page.locator('[data-pkc-view-pane="detail"]');

@@ -85,6 +85,12 @@ export interface StatusNotices {
   show(text: string, opts?: StatusOptions): void;
   /** 状態が動いた後に呼ぶ ── 押す口が引っ込んだ知らせは、そこから数え始める。 */
   settle(): void;
+  /**
+   * 🔴 **浮き札の × で、いまの知らせを消す**(user 指示 2026-11-23「消すことも叶わない」)。
+   * ⚠ 注意・問題・操作のボタンを持つ知らせも消せる(消すのは画面の札だけ ── 同じ字はメッセージに残っている)。
+   * 進行中の欄は触らない(終わりの合図で空になる)。
+   */
+  dismiss(): void;
   /** いま画面下に出している知らせの字(空 = 無し)。 */
   noticeLine(): string;
   /** いま画面下に出している進行中の字(空 = 無し)。 */
@@ -164,6 +170,15 @@ export function createStatusNotices(deps: StatusNoticesDeps): StatusNotices {
       kind = opts?.kind ?? 'result';
       deps.paint();
       apply(deps.paintActions());
+    },
+    dismiss() {
+      cancel();
+      const text = notice;
+      notice = '';
+      kind = null;
+      if (text !== '') deps.expire(text);
+      deps.paint();
+      deps.paintActions();
     },
     settle() {
       // 押す口の出入りは `paintActions` が描く ── ここは時計だけ

@@ -3,7 +3,7 @@
  * happy-dom の e2e が保証しない層(実座標のクリック・可視高さ・pageerror 0)を検品。
  */
 import { test, expect } from '@playwright/test';
-import { clickInspectorMoreItem, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, openBrowse } from './helpers';
+import { openMessagePopover, clickInspectorMoreItem, gotoApp, collectPageErrors, clickReal, createEntry, useSplitEditor, openBrowse } from './helpers';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -24,27 +24,34 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
    * 実物の DOM に届くかはここでしか分からない(main.ts はどの test からも
    * 実行されない ── CLAUDE.md §2)。
    */
-  const statusText = page.locator('[data-pkc-field="status-text"]');
-  await expect(statusText, '編集中の状態語が画面いちばん下に出ていない').toContainText('編集中');
-  expect(
-    (await statusText.textContent()) ?? '',
-    '状態語が先頭に無い(見本 3「編集中 — …」の順)',
-  ).toMatch(/^編集中/);
   /**
-   * 🔴 **状態語は行の地の字より濃い**(#1038 台帳③ C4 の着地前レビュー。設計 doc §9)。
+   * 🔴 **2026-11-23: 画面いちばん下の常設の行を廃止した** ── 状態語「編集中」は、左のバーの「メッセージ」の説明と、
+   * 簡易履歴の「いまの状態」の先頭に出る(判断は `composeStatusModel` 1 本)。浮き札(知らせ)には出ない。
+   */
+  const statusText = page.locator('[data-pkc-field="status-text"]');
+  const entry = page.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]');
+  await expect(entry, '編集中の状態語が入口の説明に入っていない').toHaveAttribute('aria-label', /編集中/);
+  await expect(statusText, '状態語が浮き札(知らせ)に出ている ── 状態は入口へ移した').not.toContainText('編集中');
+  const pop = await openMessagePopover(page);
+  const stateWord = pop.locator('[data-pkc-field="popover-state-list"] > li').first();
+  await expect(stateWord, '簡易履歴の「いまの状態」の先頭に「編集中」が出ていない').toHaveText('編集中');
+  /**
+   * 🔴 **状態語は地の字より濃い**(#1038 台帳③ C4 の着地前レビュー。設計 doc §9)。
    * ⚠ 字だけ見ると、濃くする規則を消しても緑 ── 実ブラウザで**計算された見た目**を、
-   *   同じ行の地の字(`--muted`)と比べる(対照群を同じ行に置く)。
+   *   同じ窓の地の字(`--muted` の見出し)と比べる(対照群を同じ窓に置く)。
    */
   const look = await page.evaluate(() => {
-    const state = document.querySelector('[data-pkc-field="status-state"]');
-    const line = document.querySelector('[data-pkc-region="status"]');
-    if (state === null || line === null) return null;
+    const state = document.querySelector('[data-pkc-region="message-popover"] [data-pkc-field="status-state"]');
+    const head = document.querySelector('[data-pkc-region="message-popover"] h3');
+    if (state === null || head === null) return null;
     const a = getComputedStyle(state);
-    return { weight: Number(a.fontWeight), color: a.color, lineColor: getComputedStyle(line).color };
+    return { weight: Number(a.fontWeight), color: a.color, headColor: getComputedStyle(head).color };
   });
   expect(look, '状態語の器(status-state)が無い').not.toBeNull();
-  expect(look!.weight, '状態語が太字でない(控えめな知らせと同じ重さ)').toBeGreaterThanOrEqual(700);
-  expect(look!.color, '状態語が行の地の字と同じ色(濃くなっていない)').not.toBe(look!.lineColor);
+  expect(look!.weight, '状態語が太字でない(控えめな字と同じ重さ)').toBeGreaterThanOrEqual(700);
+  expect(look!.color, '状態語が見出しの薄い字と同じ色(濃くなっていない)').not.toBe(look!.headColor);
+  await page.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await expect(ta).toBeVisible();
   await ta.click();
@@ -52,7 +59,11 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
 
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   // ⚠ 対照群 ── 保存して読んでいるだけになったら、状態語は消える
-  await expect(statusText, '保存した後も「編集中」が残っている').not.toContainText('編集中');
+  // ⚠ 閉じたままだと隠れているだけで緑になる ── 入口の説明と、開き直した窓の両方で「残っていない」を見る
+  await expect(entry, '保存した後も入口の説明に「編集中」が残っている').not.toHaveAttribute('aria-label', /編集中/);
+  const pop2 = await openMessagePopover(page);
+  await expect(pop2.locator('[data-pkc-field="status-state"]'), '保存した後も「編集中」が残っている').toHaveCount(0);
+  await page.keyboard.press('Escape');
   const h1 = page.locator('[data-pkc-field="detail-body"] h1');
   await expect(h1).toBeVisible();
   await expect(h1).toContainText('視覚検品');
@@ -68,7 +79,7 @@ test('boot → ノート作成 → 編集 → 保存が画面に反映される'
   // ── P5b: 2 回目の編集 → 履歴 → 復元(前進変異)が画面に反映される ──
   await clickReal(page, '[data-pkc-action="start-edit"]');
   // 🔴 C4:状態語が戻る(保存で消え、次の編集開始でまた出ることを見る)
-  await expect(statusText, '2 回目の編集で「編集中」が戻っていない').toContainText('編集中');
+  await expect(entry, '2 回目の編集で「編集中」が入口の説明に戻っていない').toHaveAttribute('aria-label', /編集中/);
   // 🔴 #1982 段 3: 追記欄の下の帯は「編集中。保存・編集をやめるは、上のボタンから」の 1 行だけ。
   //   保存 / やめるのボタンは**上の帯(題名の隣)の 1 か所**で、下には置かない(同じ操作の入口を 2 つにしない)
   await expect(

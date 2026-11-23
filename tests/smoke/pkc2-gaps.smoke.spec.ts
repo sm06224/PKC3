@@ -16,6 +16,7 @@ import {
   createEntry,
   gotoApp,
   useSplitEditor,
+  openMessagePopover,
 } from './helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -178,7 +179,14 @@ test('🔴 保存領域が使えない警告が危険色・太字になり、隣
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
-  const warn = page.locator('[data-pkc-region="status"] [data-pkc-field="status-warning"]');
+  // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 警告は入口の赤い「!」と、簡易履歴の「いまの状態」に出る
+  await expect(
+    page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]'),
+    '実害の警告なのに入口のバッジが赤い「!」になっていない',
+  ).toHaveText('!');
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]')).toHaveAttribute('data-pkc-tone', 'danger');
+  const warnPop = await openMessagePopover(page);
+  const warn = warnPop.locator('[data-pkc-field="status-warning"]');
   await expect(warn, '保存領域が取れなかったのに警告が出ていない(前提: 退避経路を通れていない)').toContainText(
     '保存領域が使えません',
   );
@@ -196,9 +204,11 @@ test('🔴 保存領域が使えない警告が危険色・太字になり、隣
 
   // 空のコレクションは書き出せない(「書き出せるノートが 1 件もありません」)── 書いたものがある状態で押す
   await makeNote(page, 'MemoryNote', 'memory-body');
+  // ⚠ 外を押すと簡易履歴は閉じる ── 押す前に開き直す
+  await openMessagePopover(page);
   const [dl] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-field="status-backup"]'),
+    clickReal(page, warnPop.locator('[data-pkc-field="status-backup"]')),
   ]);
   expect(dl.suggestedFilename(), '隣のボタンのバックアップの末尾が .pkc3-full.zip ではない').toMatch(
     /\.pkc3-full\.zip$/,

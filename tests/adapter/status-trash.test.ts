@@ -77,6 +77,6 @@ describe('見つからないノートの知らせの隣の「ゴミ箱を開く�
       .split('\n')
       .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
       .join('\n');
-    expect(code).toContain('paintStatusTrash(regions.statusTrash, text);');
+    expect(code).toContain('paintStatusTrash(regions.statusTrash, model.toast);');
   });
 });

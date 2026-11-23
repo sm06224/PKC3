@@ -116,8 +116,17 @@ export function showPasteToast(host: HTMLElement, opts: PasteToastOptions): () =
   btn.textContent = opts.actionLabel;
   // 焦点を本文の欄から奪わない(戻すとき、欄の選択範囲を使う)
   btn.addEventListener('mousedown', (ev) => ev.preventDefault());
-  box.append(text, btn);
-  // 🔴 入れ物(`status-stack`)の**先頭**へ ── 状態バーの真上に積む(下に回すと、状態バーの下に出る)
+  // 🔴 × で閉じられる(user 指示 2026-11-23。知らせは消せるもの)── 押し先は `dismiss-toast`(`binder.ts`)が合図 `pkc-toast-dismiss` を撃つ
+  const close = doc.createElement('button');
+  close.type = 'button';
+  close.setAttribute('data-pkc-field', 'paste-toast-close');
+  close.setAttribute('data-pkc-action', 'dismiss-toast');
+  close.setAttribute('aria-label', '知らせを閉じる');
+  close.title = '知らせを閉じる';
+  close.textContent = '×';
+  close.addEventListener('mousedown', (ev) => ev.preventDefault());
+  box.append(text, btn, close);
+  // 🔴 入れ物(`status-stack`)の**先頭**へ ── 知らせの浮き札(`status`)の真上に積む(下に回すと、その下に出る)
   host.prepend(box);
 
   let timer: unknown = null;

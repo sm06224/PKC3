@@ -350,7 +350,7 @@ test('🔴 メニューの項目を押すと、その操作が実際に走る', 
   const ask = await answerAppDialogWith(page, '「ログ」に変える');
   expect(ask, '確認に「本文はそのまま残ります」が出ていない').toContain('本文はそのまま残ります');
   await expect(kindRow, '「ログに変える」を押しても種類がログにならない').toHaveAttribute('data-pkc-archetype', 'textlog');
-  await expect(page.getByText('種類を「ログ」に変えました'), '変えた知らせが出ていない').toBeVisible();
+  await expect(page.locator('[data-pkc-region="status"]').getByText('種類を「ログ」に変えました'), '変えた知らせが出ていない').toBeVisible();
   await kindRow.click({ button: 'right' });
   await page.locator(`${MENU} button[data-pkc-action="change-entry-kind"]`).click();
   await answerAppDialogWith(page, '「ノート」に変える');
@@ -449,12 +449,11 @@ test('🔴 編集中に行を右クリックすると「別のウィンドウで
   // 下書きに 1 行足す ── 「残る」を見るための印(保存していない字)
   await editor.fill('2 件目\n書きかけ\n');
   /**
-   * 🔴 **編集中は、画面下の行に状態の 1 語「編集中」が常に出ている**(#1038 段 D / C4)。
-   * ⚠ だから帯が見えているかでは断り文の有無を言えない ── 見るのは行の字が
-   *   「編集中」の 1 語**だけ**かどうか(後ろに断り文が続いていないか)。
+   * 🔴 **2026-11-23 から、編集中の状態の 1 語「編集中」は浮き札(知らせ)ではなく入口(メッセージのボタン)に出る**
+   *   (画面下の常設の行を廃止した)。浮き札の字は知らせ・エラーだけなので、見るのは浮き札が**空**かどうか(断り文が出ていないか)。
    */
   const statusText = page.locator('[data-pkc-field="status-text"]');
-  await expect(statusText, '前提: 編集に入った時点で既に理由が出ている').toHaveText('編集中');
+  await expect(statusText, '前提: 編集に入った時点で既に理由が出ている').toHaveText('');
 
   // 🔑 押すのは**選ばれていない行**(選ばれている行なら、動かないのは当然で何も見ていない)
   const rows = page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
@@ -487,7 +486,7 @@ test('🔴 編集中に行を右クリックすると「別のウィンドウで
     otherLid!,
   );
   // ⚠ 断り文(「編集を保存するか、編集をやめてから…」)は**もう出ない** ── 断っていないので
-  await expect(statusText, '出しているのに断り文が出ている').toHaveText('編集中');
+  await expect(statusText, '出しているのに断り文が出ている').toHaveText('');
 
   // ① 押すと窓が開き、その窓は押した行のノートを指す
   const popup = context.waitForEvent('page');

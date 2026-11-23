@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { clickReal, collectPageErrors, createEntry, gotoApp, openTile, openBrowse } from './helpers';
+import { clickReal, collectPageErrors, createEntry, gotoApp, openTile, openBrowse, openMessagePopover } from './helpers';
 
 /**
  * 🔴 **アプリの窓では、常設の「メインのタブ経由です」を出さない**(#300 段④、2026-08-22。
@@ -24,7 +24,11 @@ import { clickReal, collectPageErrors, createEntry, gotoApp, openTile, openBrows
  * 消したのは「アプリの窓のときだけ」であって、機能ごとではない。
  */
 const BADGE = '複数タブ: このタブの保存はメインのタブ経由です';
-const STATUS = '[data-pkc-region="status"]';
+/**
+ * 🔴 2026-11-23: 画面下の常設の行を廃止した ── この状態の字は、左のバー(スマホ幅は上のバー)の「メッセージ」の説明(`aria-label`)と、
+ * 簡易履歴の「いまの状態」に出る(判断は `composeStatusModel` 1 本)。観測点は入口の説明(開かなくても読める)。
+ */
+const ENTRY = '[data-pkc-field="message-entry"]';
 
 test('🔴 アプリの窓は常設バッジを出さない / ふつうの 2 枚目は出す (#300 段④)', async ({
   page,
@@ -43,9 +47,12 @@ test('🔴 アプリの窓は常設バッジを出さない / ふつうの 2 枚
   const plain = await context.newPage();
   await gotoApp(plain);
   await expect(
-    plain.locator(STATUS),
+    plain.locator(ENTRY).first(),
     '前提が崩れている(ふつうの 2 枚目でバッジが出ていない)',
-  ).toContainText(BADGE, { timeout: 15_000 });
+  ).toHaveAttribute('aria-label', new RegExp(BADGE), { timeout: 15_000 });
+  // 簡易履歴の「いまの状態」にも出る(開いて読める)
+  const plainPop = await openMessagePopover(plain);
+  await expect(plainPop.locator('[data-pkc-field="popover-state-list"]')).toContainText(BADGE);
   await plain.close();
 
   // ② 🔴 **アプリの窓**をタイルから開く(user と同じ手)
@@ -63,9 +70,9 @@ test('🔴 アプリの窓は常設バッジを出さない / ふつうの 2 枚
    *   最初から出ないのは別である。面が見えてから読む(上で待っている)。
    */
   await expect(
-    win.locator(STATUS),
+    win.locator(ENTRY).first(),
     'アプリの窓に常設バッジが出ている(読ませたい文を押し出す)',
-  ).not.toContainText(BADGE);
+  ).not.toHaveAttribute('aria-label', new RegExp(BADGE));
 
   /**
    * ③ 🔴 **その窓が「ふつうの PKC」に戻ったら、バッジも戻る。**
@@ -80,9 +87,9 @@ test('🔴 アプリの窓は常設バッジを出さない / ふつうの 2 枚
   await win.keyboard.press('Alt+1');
   await expect(win.locator('[data-pkc-view-pane="detail"]')).toBeVisible();
   await expect(
-    win.locator(STATUS),
+    win.locator(ENTRY).first(),
     '面を離れてもバッジが戻らない(follower の判定ごと消している)',
-  ).toContainText(BADGE, { timeout: 15_000 });
+  ).toHaveAttribute('aria-label', new RegExp(BADGE), { timeout: 15_000 });
   await win.close();
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);

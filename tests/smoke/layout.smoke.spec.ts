@@ -44,29 +44,49 @@ test('🔴 枠が組めている(3 列 / 重なりなし)', async ({ page }) => 
   // 右端が本文の左端を越えない = 重なっていない
   expect(sidebar!.x + sidebar!.width).toBeLessThanOrEqual(detail!.x + 1);
 
-  // ② 🔴 **下の帯は言うことがあるときだけ出る**(P10、user 指示「上下の帯は不要」)。
-  //    直す前は 99% の時間「pkc3 v3.0.0」を出す常設の帯だった。
-  //    ⚠ 消してはいない ── **エラーの唯一の出口**なので、出たときは
-  //    「いちばん下にあって本文と重ならない」ことを見る
+  // ② 🔴 **画面いちばん下の常設の帯は無い**(2026-11-23、user 指示「最下段のステータスメッセージが表示されると非常に見にくい上に
+  //    消すことも叶わないため邪魔」)。知らせは**消せる浮き札**(一覧のマスの左下に重ねる)で、出ても**配置が 1px も動かない**。
+  //    ⚠ 知らせ・エラーの唯一の出口は残っている(浮き札 + システムのメッセージ + 入口のバッジ)── 出たときの契約をここで見る
   const statusRegion = page.locator('[data-pkc-region="status"]');
-  expect(await statusRegion.isVisible(), '言うことが無いのに下の帯が出ている').toBe(false);
-  // 出したときの位置を見る(場所の契約はここでしか確かめられない)
+  expect(await statusRegion.isVisible(), '言うことが無いのに浮き札が出ている').toBe(false);
+  // 🔴 shell の行に status の行が無い(grid の行トラックの数 = 区画の行の数で、status の行は入っていない)
+  const rowsInfo = await page.evaluate(() => {
+    const shell = document.querySelector('[data-pkc-region="shell"]') as HTMLElement;
+    const cs = getComputedStyle(shell);
+    return {
+      tracks: cs.gridTemplateRows.split(' ').length,
+      stackArea: getComputedStyle(document.querySelector('[data-pkc-region="status-stack"]')!).gridArea,
+    };
+  });
+  expect(rowsInfo.stackArea, '知らせの入れ物が一覧のマスに重なっていない(専用の行を取っている)').toContain('sidebar');
+  expect(rowsInfo.tracks, 'grid に status の行が残っている(区画 8 行 = 本文 1 + 帯 7)').toBeLessThanOrEqual(8);
   /**
-   * ⚠ **器ではなく字の所に書く**(#671、2026-09-04)── 状態の行は
-   *   `status-text` の span と、狭すぎる端末への断り書き(押す口つき)を
-   *   子に持つようになった。器へ `textContent` を書くと**その子が丸ごと消える**。
+   * ⚠ **器ではなく字の所に書く**(#671、2026-09-04)── 浮き札は `status-text` の span と、狭すぎる端末への断り書き(押す口つき)を
+   *   子に持つ。器へ `textContent` を書くと**その子が丸ごと消える**。
    */
   const statusText = page.locator('[data-pkc-field="status-text"]');
+  const detailBefore = await page.locator('[data-pkc-region="detail"]').boundingBox();
+  const docBefore = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, ih: window.innerHeight }));
+  expect(docBefore.sh, '浮き札が無いのに文書が画面より高い').toBeLessThanOrEqual(docBefore.ih);
   await statusRegion.evaluate((el) => ((el as HTMLElement).hidden = false));
   await statusText.evaluate((el) => (el.textContent = '検査用'));
   const status = await statusRegion.boundingBox();
   expect(status, '出しても場所を持たない').not.toBeNull();
-  // ⚠ **本文を測り直す** ── 帯が出ると grid が組み替わって本文が縮むので、
-  //    出す前に測った箱と比べると必ずずれる(実際に落ちた)
+  // 🔴 **出ても配置が動かない**(旧い帯は出ると grid が組み替わって本文が縮んだ)
   const detailNow = await page.locator('[data-pkc-region="detail"]').boundingBox();
-  expect(status!.y).toBeGreaterThanOrEqual(detailNow!.y + detailNow!.height - 1);
-  await statusText.evaluate((el) => (el.textContent = ''));
+  expect(detailNow, '浮き札が出て本文の配置が動いた').toEqual(detailBefore);
+  const docNow = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, ih: window.innerHeight, iw: window.innerWidth }));
+  expect(docNow.sh, '浮き札が出て文書が画面より高くなった(下に空白 / スクロール)').toBeLessThanOrEqual(docNow.ih);
+  // 一覧のマスの左下に重なる(左の縦のバーの右・一覧の幅の内側・画面の下端の内側)
+  const sideBox = (await page.locator('[data-pkc-region="sidebar"]').boundingBox())!;
+  expect(status!.x + status!.width, '浮き札が一覧の幅をはみ出して本文(追記欄)に被る').toBeLessThanOrEqual(sideBox.x + sideBox.width + 1);
+  expect(status!.y + status!.height, '浮き札が画面の外へ出ている').toBeLessThanOrEqual(docNow.ih);
+  expect(status!.x, '浮き札が左の縦のバーに重なっている').toBeGreaterThanOrEqual(40);
+  // 🔴 × が在り、押すと閉じる(消せない知らせを作らない)
+  await clickReal(page, '[data-pkc-region="status"] [data-pkc-field="status-close"]');
+  await expect(statusRegion, '× を押しても浮き札が残っている').toBeHidden();
   await statusRegion.evaluate((el) => ((el as HTMLElement).hidden = true));
+  await statusText.evaluate((el) => (el.textContent = ''));
 
   // ③ 面(更新の案内 / 注意)は**既定で場所を取らない**
   //    ⚠ `hidden` が grid item に効かないと、空の箱が行を占めて本文が縮む
@@ -266,9 +286,9 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
    *   250px 前後の列に 32px の正方形タイル 7 個(+ gap 6px = 230px)は
    *   1 行に入る幅がある。
    */
-  expect(m.tileCount, '前提が崩れている(8 個そろっていない ── #1982 ③-d でゴミ箱が加わった)').toBe(8);
+  expect(m.tileCount, '前提が崩れている(9 個そろっていない ── #1982 ③-d でゴミ箱、2026-11-23 でメッセージが加わった)').toBe(9);
   expect(m.tops, `縦のバーの 1 列に揃っていない(左端): ${JSON.stringify(m.tops)}`).toEqual(
-    new Array(8).fill(m.tops[0]),
+    new Array(9).fill(m.tops[0]),
   );
 
   /**
@@ -293,7 +313,7 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
         return { top: Math.round(r.left), w: Math.round(r.width), folded: b.hasAttribute('data-pkc-overflow') };
       }),
     );
-    expect(rects, `${width}px: 前提が崩れている(8 個そろっていない)`).toHaveLength(8);
+    expect(rects, `${width}px: 前提が崩れている(9 個そろっていない)`).toHaveLength(9);
     /**
      * 🔴 **#1621 で「塊ごと次の行へ」から「入りきらない分は畳む」へ変わった**。
      *   見えているタイルは**全部同じ段**(1 個だけずれない)で、残りは畳んだ印を持つ
@@ -303,7 +323,7 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
     expect(
       rects.filter((r) => r.folded).length + shown.length,
       `${width}px: 畳んだ物でも見えている物でもないタイルがある: ${JSON.stringify(rects)}`,
-    ).toBe(8);
+    ).toBe(9);
     // ⚠ 空振り防止 ── 列が畳まれて全部 0 だと「同じ段」が必ず成り立つ
     expect(
       shown.length > 0 && shown.every((r) => r.w > 0),
@@ -314,7 +334,7 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
       `${width}px: 見えているタイルが列をまたいでいる: ${JSON.stringify(rects)}`,
     ).toBe(1);
     // 🔴 縦のバーでは畳まない(高さが足りなければ上の群が送る ── 下の群は全部見えて押せる)
-    expect(shown.length, `${width}px: 縦のバーで畳まれたタイルがある`).toBe(8);
+    expect(shown.length, `${width}px: 縦のバーで畳まれたタイルがある`).toBe(9);
   }
 
   /**
@@ -342,7 +362,7 @@ test('🔴 上の帯は無く、設定は左端の縦のバーから押せる', 
   await page.setViewportSize({ width: 1366, height: 500 });
   const low = await railAt();
   expect(low.scrolls, '低い窓で上の群が送っていない(はみ出しを切っている / 下の群を押し出している)').toBe(true);
-  expect(low.tiles, '下の群のタイルが 8 つでない(#1982 ③-d でゴミ箱が加わった)').toBe(8);
+  expect(low.tiles, '下の群のタイルが 9 つでない(#1982 ③-d でゴミ箱、2026-11-23 でメッセージが加わった)').toBe(9);
   expect(low.hit, `低い窓で下の群のうち ${low.tiles - low.hit} 個が押せない`).toBe(low.tiles);
 
   /**
@@ -768,7 +788,7 @@ test('🔴 まとめ操作は縦のバーの 1 列に収まり、ボタンは 1 
 }) => {
   /** 帯に在るはずの 7 つ。⚠ **等値で pin する** ── 「7 個ある」だけだと、
    *  1 つ消して 1 つ足す変更が素通りする。 */
-  const WANT = ['取り込む', 'バックアップ', 'ゴミ箱', '操作を探す', '集計', 'システム', 'フラグ', 'ヘルプ'];
+  const WANT = ['取り込む', 'バックアップ', 'ゴミ箱', '操作を探す', '集計', 'システム', 'フラグ', 'ヘルプ', 'メッセージ'];
   const seen: { w: number; rows: number }[] = [];
   for (const w of [1440, 1280, 1024, 950]) {
     await page.setViewportSize({ width: w, height: 800 });

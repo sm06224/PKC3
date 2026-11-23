@@ -88,7 +88,8 @@ test('🔴 コピーした物が残り、選ぶともう一度コピーされる
    *   (消えない実装は何秒待っても落ちる / 遅い環境でも消える側は通る)。
    */
   await expect(
-    page.locator('[data-pkc-region="status"] [data-pkc-field="status-live"]'),
+    // 🔴 2026-11-23: 読み上げの領域は浮き札の外(常設)へ移った
+    page.locator('[data-pkc-region="status-stack"] [data-pkc-field="status-live"]'),
     '結果の知らせ(コピーしました)が居座っている',
   ).toHaveText('', { timeout: 15_000 });
   const pasted = await page.evaluate(() => navigator.clipboard.readText());

@@ -1,19 +1,23 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **ステータスバーの先頭に「いま何をしているか」の 1 語**(C4 / #1038 台帳③ 段 D。
- * 設計 `docs/development/touch-and-unity-design-2026-09.md` §1 P3 / §11 Q2 裁定 A)。
+ * 🔴 **「いまの状態」と「一時の知らせ」の組み立て**(旧: ステータスバーの 1 行。2026-11-23 に常設の帯を廃止した)。
+ * 元は C4 / #1038 台帳③ 段 D の「いま何をしているか」の 1 語。設計 `docs/development/touch-and-unity-design-2026-09.md`。
  *
- * `main.ts` は**どの test からも実行されない**(CLAUDE.md §2)ので、判断を
- * `status-line.ts` へ取り出して、ここで直接見る。
+ * `main.ts` は**どの test からも実行されない**(CLAUDE.md §2)ので、判断を `status-line.ts` へ取り出して、ここで直接見る。
+ * 旧い検査との対応: `composeStatusLine`(1 行の並び)→ `composeStatusModel` の `state` の並び / `toast` の並び、
+ * `paintStatusText`(状態語を別の器へ)→ 簡易履歴の「いまの状態」(`message-popover.test.ts`)、
+ * `shouldHideStatusBar` → `shouldShowToast`。
  */
 import { describe, expect, it } from 'vitest';
 import { blockedActionNote } from '../../src/adapter/state/app-state';
 import {
-  composeStatusLine,
+  composeStatusModel,
   editingStateWord,
   EDITING_STATE_WORD,
-  paintStatusText,
-  shouldHideStatusBar,
+  paintStatusLive,
+  paintToastText,
+  shouldShowToast,
+  stateSummary,
   type StatusLineParts,
 } from '../../src/adapter/ui/render/status-line';
 
@@ -42,8 +46,7 @@ describe('editingStateWord(phase) ── 状態語そのもの', () => {
   });
   it('🔴 error は新しい語を作らず、C11 で 1 本化した断り文をそのまま使う', () => {
     expect(editingStateWord('error')).toBe(blockedActionNote('error'));
-    // 空振り防止 ── blockedActionNote が null を返すと上の等値は '' === '' で
-    // 常に真になる。C11 が生きていることを確かめる。
+    // 空振り防止 ── blockedActionNote が null を返すと上の等値は '' === '' で常に真になる
     expect(blockedActionNote('error')).not.toBeNull();
   });
   it('initializing は空(起動直後の一瞬に、押せない理由の長文を出さない)', () => {
@@ -51,168 +54,109 @@ describe('editingStateWord(phase) ── 状態語そのもの', () => {
   });
 });
 
-describe('composeStatusLine ── main.ts の paint() から取り出した組み立て', () => {
-  it('🔴 editing: 先頭が「編集中」で始まる(他の知らせが同時に在っても)', () => {
-    const text = composeStatusLine(partsFor('editing', { statusBase: '保存先の注意' }));
-    expect(text.startsWith(EDITING_STATE_WORD)).toBe(true);
-    // 並びの確認(見本 3):状態語 → 他の知らせ の順で ' — ' で繋がる
-    expect(text).toBe(`編集中 — 保存先の注意`);
-  });
-
-  it('🔴 ready: 「編集中」を 1 文字も含まない(読んでいるだけのときは今までどおり)', () => {
-    const text = composeStatusLine(partsFor('ready', { statusBase: '保存先の注意' }));
-    expect(text).not.toContain(EDITING_STATE_WORD);
-    expect(text).toBe('保存先の注意');
-  });
-
-  it('🔴 error: 他の知らせが無ければ、blockedActionNote(\'error\') とちょうど等しい', () => {
-    const text = composeStatusLine(partsFor('error'));
-    expect(text).toBe(blockedActionNote('error'));
-  });
-
-  it('全部空なら空文字(器を畳む判定はここではなく main.ts が持つ)', () => {
-    expect(composeStatusLine(partsFor('ready'))).toBe('');
-  });
-});
-
-/**
- * 🔴 **状態の 1 語だけを別の器に入れる**(#1038 台帳③ C4 の着地前レビュー)。
- * ⚠ 1 稿目は行全体を 1 つの字で出していたので、「編集中」を控えめな知らせと
- *   違う濃さにできなかった。🔑 見るのは 3 つ ── ①状態語が器に入る ②行の字は
- *   `composeStatusLine` と 1 字も違わない(字を読む受け手が壊れない)③状態語が
- *   無いときは器を作らない(前の描画の器が残らない)。
- */
-describe('paintStatusText ── 状態の 1 語を別の器に入れる', () => {
-  it('🔴 editing: 先頭の器に「編集中」、行の字は composeStatusLine と同じ', () => {
-    const el = document.createElement('span');
-    const parts = partsFor('editing', { sync: '複数タブ: このタブの保存はメインのタブ経由です' });
-    const text = paintStatusText(el, parts);
-    const state = el.querySelector('[data-pkc-field="status-state"]');
-    expect(state?.textContent, '状態語が器に入っていない').toBe(EDITING_STATE_WORD);
-    expect(state?.getAttribute('data-pkc-phase')).toBe('editing');
-    expect(el.firstChild, '状態語が先頭に無い').toBe(state);
-    expect(el.textContent, '行の字が変わった(字を読む受け手が壊れる)').toBe(composeStatusLine(parts));
-    expect(text).toBe(composeStatusLine(parts));
-  });
-
-  it('🔴 error: 器の phase が error(赤くする印)', () => {
-    const el = document.createElement('span');
-    paintStatusText(el, partsFor('error'));
-    expect(el.querySelector('[data-pkc-field="status-state"]')?.getAttribute('data-pkc-phase')).toBe(
-      'error',
+describe('composeStatusModel().state ── いまの状態(入口の説明・簡易履歴の「いまの状態」)', () => {
+  it('🔴 editing: 先頭が「編集中」(他の状態が同時に在っても)。並びは 状態語 → 保存先 → 複数タブ → … → 保存中', () => {
+    const m = composeStatusModel(
+      partsFor('editing', {
+        statusBase: '保存先の注意',
+        sync: '複数タブ: x',
+        folderSyncLine: '同期しています…',
+        portableAssetNote: '添付の注意',
+        persistState: '保存の状態',
+        savingLine: '⏳ 保存中…',
+      }),
     );
+    expect(m.state.map((i) => i.kind)).toEqual(['editing', 'storage', 'sync', 'folder-sync', 'portable', 'persist', 'saving']);
+    expect(m.state[0]?.text).toBe(EDITING_STATE_WORD);
+    expect(stateSummary(m.state)).toBe('編集中 / 保存先の注意 / 複数タブ: x / 同期しています… / 添付の注意 / 保存の状態 / ⏳ 保存中…');
   });
 
-  it('🔴 知らせ + エラー + 状態語が全部在っても、行の字は 1 字も変わらず、読み上げの子には尾(知らせ + エラー)だけが入る', () => {
-    const el = document.createElement('span');
-    const parts = partsFor('editing', {
-      statusBase: '保存先の注意',
-      savingLine: '⏳ 保存中…',
-      noticeLine: 'コピーしました',
-      errorLine: '⚠ エラー: 失敗',
-    });
-    paintStatusText(el, parts);
-    expect(el.textContent).toBe(composeStatusLine(parts));
-    const live = el.querySelector('[data-pkc-field="status-live"]');
-    expect(live?.textContent, '尾以外が読み上げの子に入った').toBe('コピーしました — ⚠ エラー: 失敗');
-    // 区切りの ' — ' は読み上げの外(頭の側)に置く
-    expect(el.lastChild).toBe(live);
+  it('🔴 ready: 「編集中」を 1 文字も含まない', () => {
+    const m = composeStatusModel(partsFor('ready', { statusBase: '保存先の注意' }));
+    expect(stateSummary(m.state)).not.toContain(EDITING_STATE_WORD);
+    expect(stateSummary(m.state)).toBe('保存先の注意');
   });
 
-  it('⚠ ready に戻ったら器は残らない(前の描画の「編集中」を消す)', () => {
-    const el = document.createElement('span');
-    paintStatusText(el, partsFor('editing'));
-    expect(el.querySelector('[data-pkc-field="status-state"]'), '前提: editing で器が出ていない').not.toBeNull();
-    paintStatusText(el, partsFor('ready', { noticeLine: 'コピーしました' }));
-    expect(el.querySelector('[data-pkc-field="status-state"]'), '読んでいるのに状態語の器が残った').toBeNull();
-    expect(el.textContent).toBe('コピーしました');
-  });
-});
-
-describe('shouldHideStatusBar ── ステータスバーの行を畳むかどうか(#1071、#671)', () => {
-  it('テキストがある場合は畳まない', () => {
-    expect(
-      shouldHideStatusBar({
-        text: '保存しました',
-        hasTooNarrow: false,
-        hasUnreadMessages: false,
-      }),
-    ).toBe(false);
+  it('🔴 error: 状態の先頭は blockedActionNote(\'error\') とちょうど等しく、その phase を運ぶ(危険色に使う)', () => {
+    const m = composeStatusModel(partsFor('error'));
+    expect(m.state).toHaveLength(1);
+    expect(m.state[0]?.text).toBe(blockedActionNote('error'));
+    expect(m.state[0]?.phase).toBe('error');
   });
 
-  it('テキストが空で断り書きも未読も無い場合は畳む', () => {
-    expect(
-      shouldHideStatusBar({
-        text: '',
-        hasTooNarrow: false,
-        hasUnreadMessages: false,
-      }),
-    ).toBe(true);
+  it('🔴 保存領域が使えない警告(statusBaseSevere)だけが severe', () => {
+    const WARN = '⚠ 保存領域が使えません。このタブで書いたものは、閉じると消えます';
+    expect(composeStatusModel(partsFor('ready', { statusBase: WARN, statusBaseSevere: true })).state[0]?.severe).toBe(true);
+    // 対照群 ── severe でなければ同じ字でも重大にならない
+    expect(composeStatusModel(partsFor('ready', { statusBase: WARN })).state[0]?.severe).toBe(false);
+    // 空なら出ない
+    expect(composeStatusModel(partsFor('ready', { statusBaseSevere: true })).state).toEqual([]);
   });
 
-  it('🔴 #671: テキストが空でも、幅不足の断り書きがある場合は畳まない(OKボタンを残す)', () => {
-    expect(
-      shouldHideStatusBar({
-        text: '',
-        hasTooNarrow: true,
-        hasUnreadMessages: false,
-      }),
-    ).toBe(false);
-  });
-
-  it('🔴 #1071: テキストが空でも、未読メッセージがある場合は畳まない(未読ボタンへの入口を残す)', () => {
-    expect(
-      shouldHideStatusBar({
-        text: '',
-        hasTooNarrow: false,
-        hasUnreadMessages: true,
-      }),
-    ).toBe(false);
-  });
-
-  it('テキストがあり、かつ未読メッセージもある場合は畳まない', () => {
-    expect(
-      shouldHideStatusBar({
-        text: '編集中',
-        hasTooNarrow: false,
-        hasUnreadMessages: true,
-      }),
-    ).toBe(false);
+  it('全部空なら空', () => {
+    const m = composeStatusModel(partsFor('ready'));
+    expect(m.state).toEqual([]);
+    expect(m.toast).toBe('');
+    expect(m.live).toBe('');
   });
 });
 
-describe('保存領域が使えない警告の重大度(#1038 D1)', () => {
-  const WARN = '⚠ 保存領域が使えません。このタブで書いたものは、閉じると消えます';
-
-  it('🔴 重大な statusBase だけが status-warning の器に入り、行の字は変わらない', () => {
-    const el = document.createElement('span');
-    const parts = partsFor('editing', { statusBase: WARN, statusBaseSevere: true, noticeLine: 'コピーしました' });
-    const text = paintStatusText(el, parts);
-    const warn = el.querySelector('[data-pkc-field="status-warning"]');
-    expect(warn?.textContent, '警告が器に入っていない').toBe(WARN);
-    expect(el.querySelector('[data-pkc-field="status-state"]')?.textContent).toBe('編集中');
-    expect(el.textContent).toBe(text);
-    expect(text).toBe(composeStatusLine(parts));
-    // 知らせは読み上げの子に残る(警告を巻き込まない)
-    expect(el.querySelector('[data-pkc-field="status-live"]')?.textContent).toBe('コピーしました');
-    expect(warn?.closest('[data-pkc-field="status-live"]')).toBeNull();
+describe('composeStatusModel().toast / live ── 一時の知らせ', () => {
+  it('🔴 状態(編集中・保存先・保存中)は浮き札に出ない ── 常設の帯が無い代わりに入口へ移った', () => {
+    const m = composeStatusModel(
+      partsFor('editing', { statusBase: '保存先の注意', sync: '複数タブ: x', savingLine: '⏳ 保存中…', persistState: 'p' }),
+    );
+    expect(m.toast).toBe('');
   });
 
-  it('対照群 ── severe でなければ同じ字でも器に入らない / 空なら出ない', () => {
-    const el = document.createElement('span');
-    paintStatusText(el, partsFor('ready', { statusBase: WARN }));
-    expect(el.querySelector('[data-pkc-field="status-warning"]')).toBeNull();
-    expect(el.textContent).toBe(WARN);
-    paintStatusText(el, partsFor('ready', { statusBaseSevere: true }));
-    expect(el.querySelector('[data-pkc-field="status-warning"]')).toBeNull();
+  it('🔴 進行中 → 知らせ → エラーの順で連なる(旧い行の並びのまま)', () => {
+    const m = composeStatusModel(partsFor('ready', { progressLine: '書き出しています…', noticeLine: 'コピーしました', errorLine: 'エラー: x' }));
+    expect(m.toast).toBe('書き出しています… — コピーしました — エラー: x');
   });
 
-  it('警告の前後に別の部品があっても順序が保たれる', () => {
-    const el = document.createElement('span');
-    const text = paintStatusText(el, partsFor('ready', { statusBase: WARN, statusBaseSevere: true, sync: '複数タブ: x' }));
-    expect(el.textContent).toBe(text);
-    expect(text).toBe(`${WARN} — 複数タブ: x`);
-    expect(el.querySelector('[data-pkc-field="status-warning"]')?.textContent).toBe(WARN);
+  it('🔴 読み上げは知らせとエラーだけ(進行中・状態語・保存中の出入りでは読み上げない)', () => {
+    const m = composeStatusModel(
+      partsFor('editing', { savingLine: '⏳ 保存中…', progressLine: '書き出しています…', noticeLine: 'コピーしました', errorLine: '⚠ エラー: 失敗' }),
+    );
+    expect(m.live).toBe('コピーしました — ⚠ エラー: 失敗');
+  });
+
+  it('ファイルを掴んでいる間の 1 行は fileDrag に分かれる(浮き札には出ない)', () => {
+    const m = composeStatusModel(partsFor('ready', { fileDragLine: 'ここへ落とすと取り込みます' }));
+    expect(m.fileDrag).toBe('ここへ落とすと取り込みます');
+    expect(m.toast).toBe('');
   });
 });
 
+describe('shouldShowToast ── 浮き札を出すか(#671 の OK は畳まない)', () => {
+  it('字があれば出す', () => {
+    expect(shouldShowToast({ toast: '保存しました', hasTooNarrow: false })).toBe(true);
+  });
+  it('字が空で断り書きも無ければ畳む', () => {
+    expect(shouldShowToast({ toast: '', hasTooNarrow: false })).toBe(false);
+  });
+  it('🔴 #671: 字が空でも、幅不足の断り書き(OK を押す口)がある間は畳まない', () => {
+    expect(shouldShowToast({ toast: '', hasTooNarrow: true })).toBe(true);
+  });
+});
+
+describe('paintToastText / paintStatusLive ── 同じ字なら DOM を触らない', () => {
+  it('字が変わったときだけ書く(子ノードの全置換を避ける)', () => {
+    const el = document.createElement('span');
+    paintToastText(el, 'a');
+    const node = el.firstChild;
+    paintToastText(el, 'a');
+    expect(el.firstChild, '同じ字で子ノードが作り直された').toBe(node);
+    paintToastText(el, 'b');
+    expect(el.textContent).toBe('b');
+  });
+  it('読み上げの領域は作り直さず、字だけ書く', () => {
+    const live = document.createElement('div');
+    live.setAttribute('aria-live', 'polite');
+    paintStatusLive(live, 'x');
+    expect(live.textContent).toBe('x');
+    paintStatusLive(live, '');
+    expect(live.textContent).toBe('');
+    expect(live.getAttribute('aria-live')).toBe('polite');
+  });
+});

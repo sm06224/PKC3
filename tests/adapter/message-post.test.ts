@@ -473,3 +473,50 @@ describe('書き込みの合図(onWritten。開いているノートの読み直
     expect(none, '書けていないのに合図した').toEqual([]);
   });
 });
+
+describe('簡易履歴の記憶(直近の知らせのリング)', () => {
+  const body = (n: number): string =>
+    Array.from({ length: n }, (_, i) => `## 2026-11-23 10:${String(10 + i).padStart(2, '0')}:00\n**注意** m${String(i)}\n\n`).join('');
+
+  it('🔴 積んだ知らせが新しい順に入る(結果・注意・問題・配信)。処理の記録(job)は入らない', () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    post.post({ kind: 'result', source: 'app', text: 'a' });
+    post.post({ kind: 'caution', source: 'app', text: 'b' });
+    post.post({ kind: 'job', source: 'app', text: 'j' });
+    expect(post.recent().map((m) => [m.kind, m.text])).toEqual([['caution', 'b'], ['result', 'a']]);
+  });
+
+  it('🔴 上限 20 件(古い方から落とす)', () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    for (let i = 0; i < 25; i += 1) post.post({ kind: 'result', source: 'app', text: `n${String(i)}` });
+    expect(post.recent()).toHaveLength(20);
+    expect(post.recent()[0]!.text).toBe('n24');
+    expect(post.recent()[19]!.text).toBe('n5');
+  });
+
+  it('🔴 起動時にノート本文の末尾から種まきする(新しい順・最大 20 件)。同じ節は二重に入らない', () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    post.seedRecent(body(30));
+    expect(post.recent()).toHaveLength(20);
+    expect(post.recent()[0]!.text).toBe('m29');
+    post.seedRecent(body(30));
+    expect(post.recent(), '同じ本文を 2 度読んで増えた').toHaveLength(20);
+  });
+
+  it('変化は onRecentChanged で届き、解除できる', () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    let n = 0;
+    const off = post.onRecentChanged(() => (n += 1));
+    post.post({ kind: 'result', source: 'app', text: 'a' });
+    expect(n).toBe(1);
+    off();
+    post.post({ kind: 'result', source: 'app', text: 'b' });
+    expect(n).toBe(1);
+  });
+
+  it('🔴 ディスクの本文から読み出した分が、新しい順に並ぶ', async () => {
+    const post = new MessagePost({ list: async () => [], count: async () => 0, push: async () => undefined, remove: async () => undefined });
+    await post.seedUnreadFromDisk(async () => body(3));
+    expect(post.recent().map((m) => m.text)).toEqual(['m2', 'm1', 'm0']);
+  });
+});

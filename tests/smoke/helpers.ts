@@ -458,6 +458,24 @@ export async function clickReal(page: Page, target: Target): Promise<void> {
 }
 
 /**
+ * 🔴 **メッセージの簡易履歴(ポップオーバー)を開く**(2026-11-23。画面いちばん下の常設の帯を廃止し、状態・未読・録音の復元の入口は
+ * 左のバーの「メッセージ」から開く窓へ移った)。実クリックで押し(`clickReal`)、開くまで待つ。開いていれば押さない(押すと閉じる)。
+ * ⚠ 状態の字(`status-state` / `status-warning`)・「バックアップを書き出す」(`status-backup`)・録音の復元(`status-capture-recovery`)は
+ *   この窓の中にある ── 開いてから読む。閉じているときに「出ていない」を assert すると、隠れているだけで緑になる(空振り)。
+ */
+export async function openMessagePopover(page: Page): Promise<Locator> {
+  const pop = page.locator('[data-pkc-region="message-popover"]');
+  if (!(await pop.isVisible())) {
+    const entry = page.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]');
+    // スマホ・タブレット幅では縦のバーが無い ── 上のバーの入口を押す
+    const target = (await entry.isVisible()) ? entry : page.locator('[data-pkc-region="phone-bar"] [data-pkc-field="message-entry"]');
+    await clickReal(page, target);
+  }
+  await pop.waitFor({ state: 'visible' });
+  return pop;
+}
+
+/**
  * 🔴 **探し方のタブを開く**(#1982 ③-a-1)。⚠ 左端の縦のバーでは、**いま開いているタブをもう一度押すと
  * 左のペインを畳む**(user 裁定 2026-11-22)── 「念のため押す」と一覧が消える。だから既に開いていて
  * 左のペインも出ていて、わきの面も開いていない(押すと畳むだけ)なら押さない。押すときは実クリック(`clickReal`)。

@@ -26,6 +26,7 @@ import {
 } from './shortcut-hint';
 import { COLLECTION_COMMANDS } from './commands';
 import { iconButton, markBarTile } from './icons';
+import { decorateMessageEntry } from './message-entry';
 
 /**
  * 🔴 **上下の帯を撤去した**(P10、user 指示 2026-08-05
@@ -115,6 +116,8 @@ export interface CollectionBarItem {
   readonly view?: string;
   /** 区切りの塊。`app` = 設定・フラグ・ヘルプなど「アプリ全体」の側。 */
   readonly group: 'main' | 'app';
+  /** メッセージの入口(バッジ・状態の説明・簡易履歴のポップオーバー。`message-entry.ts`)。 */
+  readonly messageEntry?: true;
 }
 
 /**
@@ -183,6 +186,19 @@ export function collectionBarItems(): readonly CollectionBarItem[] {
       group: 'app',
     });
   }
+  /**
+   * 🔴 **メッセージ**(user 指示 2026-11-23。画面いちばん下の常設のステータスの帯を廃止した代わりの、どの画面からも届く入口)。
+   * ⚠ **縦のバーの一番下**に置く(旧い帯と同じ「画面の下」の位置)。未読(注意 + 問題)の数のバッジ・警告色・保存中の点を持ち、
+   *   ホバー / クリックで簡易履歴(ポップオーバー)が開く。詳細は既存の「メッセージ」のノート(`open-messages`)。
+   * ⚠ スマホ幅(縦のバーが無い)の入口は上の帯(`shell.ts` の `phone-messages`)── 登記はこの 1 件と、その帯のボタンの 2 つだけ。
+   */
+  out.push({
+    action: 'toggle-message-popover',
+    label: 'メッセージ',
+    iconKey: 'toggle-message-popover',
+    group: 'app',
+    messageEntry: true,
+  });
   return out;
 }
 
@@ -222,5 +238,6 @@ export function collectionBarButton(item: CollectionBarItem): HTMLButtonElement 
     btn.title = hintTitle(item.hint.base, item.hint.command, undefined, null, item.hint.also ?? null);
   }
   if (item.title !== undefined) btn.title = item.title;
+  if (item.messageEntry === true) decorateMessageEntry(btn);
   return btn;
 }

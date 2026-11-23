@@ -191,6 +191,8 @@ export function installTooltip(doc: Document = document, opts: TooltipOptions = 
     }
     const text = el.getAttribute(TIP_STASH_ATTR) ?? '';
     if (text === '') return;
+    // 🔴 簡易メッセージ履歴が開いている入口には出さない(ホバーで開く 0.3 秒後に、同じ場所へ重ねない)
+    if (el.getAttribute('aria-expanded') === 'true' && el.getAttribute('aria-haspopup') === 'dialog') return;
     place(el, text);
     shown = true;
     if (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-describedby')) {

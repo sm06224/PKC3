@@ -206,6 +206,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'show-history': 'clock',
   'delete-entry': 'trash',
   'open-trash': 'trash',
+  // 🔴 メッセージの入口(左のバーの一番下。バッジが付く。`message-entry.ts`)
+  'toggle-message-popover': 'chat',
   // まとめてゴミ箱へ(#240 段③)── 1 件の削除と**同じ図案**(同じ意味だから)
   'delete-selected': 'trash',
   /** 図を保存(`mermaid-hydrate` が手組みしていた ⬇ をここへ寄せた)。 */
