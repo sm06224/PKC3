@@ -411,34 +411,7 @@ body {
   background: var(--bg);
   overflow: hidden;
 }
-/**
- * 🔴 **近接発光**(#1982 ③-a-2。user 裁定 = G1「色の無い淡い光:`--fg` 10% 前後」)。
- * 光は**要素 1 つ**(`rail-glow.ts` が初めて入ったときに作る 144px の円)で、`transform` だけで動く ──
- * 塗り直しも、バーの中のボタンの style の再計算も起こさない(合成だけ)。
- * ⚠ 色相は持たない(`--fg` の透かし)。`filter` / 重ねた影は使わない。
- * ⚠ 印(`data-pkc-glow`)はバーに入っている間だけ付く ── 動きを減らす設定・指の端末では JS がそもそも付けない。
- * ⚠ バーを重なりの基準にして(`isolation`)、光をボタンの**下**に敷く(`z-index: -1`)。
- */
-[data-pkc-region='rail'] {
-  position: relative;
-  isolation: isolate;
-}
-[data-pkc-field='rail-glow'] {
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: -1;
-  width: 144px;
-  height: 144px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--fg) 10%, transparent), transparent);
-  pointer-events: none;
-  opacity: 0;
-  will-change: transform;
-}
-[data-pkc-region='rail'][data-pkc-glow] [data-pkc-field='rail-glow'] {
-  opacity: 1;
-}
+/* 🔴 輪郭の近接発光(B2。左のバーのボタンも対象)は末尾の「輪郭の近接発光」の塊(`render/neon-glow.ts`)。旧い灰色の光(G1)は置き換えた */
 [data-pkc-region='rail'][hidden],
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='rail'] {
   display: none;
@@ -15179,5 +15152,116 @@ h6:hover > .pkc-heading-anchor,
   /* 行が 1 つも出ていない(畳まれた)カードは出さない */
   [data-pkc-region='inspector'] > dl[data-pkc-card]:not(:has(> dt:not([hidden]))) {
     display: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * 輪郭の近接発光(ネオン。B2)── ここから末尾まで 1 つの塊(`render/neon-glow.ts` が印と局所座標を書く)
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+/**
+ * 🔴 **輪郭の近接発光**── ポインタの近く(半径内)のカードの**輪郭線そのもの**が光る。対象は 3 か所を同じ仕組みで:
+ * ログの記録(`[data-pkc-log-card]`)/ 情報ペインのカード / 左端の縦のバーのボタン。
+ *
+ * - 光るのは `::before`(`mask-composite: exclude` で内側を抜いた**線だけ**)。内側の地は光らない。近くないカードは疑似要素ごと作らない
+ *   (静止はヘアラインだけ・塗りの追加ゼロ)。⚠ 疑似要素は画面だけ(`@media screen`)── 印刷には出さない。強制色(`forced-colors`)でも出さない。
+ * - 線の太さは 2px(静止のヘアライン 1px に重ねて、内側へ 1px 太らせる)。色は `--neon`(外へ向かって薄く)、ポインタの真下は `--neon-core`(芯)。
+ *   ⚠ 色は各テーマの `tokens.css` の `--neon` / `--neon-core`(`--accent` の色相から導いた。暗いテーマは白に寄せ、明るいテーマは最も濃く)。
+ * - 位置は**カードの局所座標**(`--gx` / `--gy`)。⚠ `background-attachment: fixed` や `:root` の変数は使わない(実測で再計算 40 秒 / 600 回)。
+ * - 線は元の輪郭と同じ角丸(`border-radius: inherit`)・同じ辺(`--nb-*` = そのカードが実際に枠を持つ辺。記録の途中の塊は上下に線を引かない)。
+ * - ⚠ `--neon-r`(光の半径)は `features/neon/near-cards.ts` の `NEON_RADIUS` と揃える(`tests/adapter/neon-glow.test.ts` が突き合わせる)。
+ * - にじみの幅 `--nh` は単位なしの数(長さどうしの掛け算はできないので、`--nb-*`(長さ)に掛ける)。
+ * - 飾りだけ: `pointer-events: none`・読み上げの対象なし(疑似要素)。
+ */
+@media screen {
+  [data-pkc-log-days] > [data-pkc-log-card] {
+    --neon-r: 160px;
+    --nh: 5;
+    --nb-t: 0px;
+    --nb-b: 0px;
+    --nb-l: 1px;
+    --nb-r: 1px;
+  }
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='first'],
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='solo'] {
+    --nb-t: 1px;
+  }
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='last'],
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='solo'] {
+    --nb-b: 1px;
+  }
+  [data-pkc-region='inspector'] > [data-pkc-card] {
+    --neon-r: 160px;
+    --nh: 5;
+    --nb-t: 1px;
+    --nb-b: 1px;
+    --nb-l: 1px;
+    --nb-r: 1px;
+    position: relative;
+  }
+  /* 左端の縦のバーのボタンは静止の枠を持たない(透明の 1px)── 光る間だけ線が出る。半径は小さめ(ボタンが 32px なので隣まで届く程度) */
+  [data-pkc-region='rail'] button {
+    --neon-r: 56px;
+    --nh: 2;
+    --nb-t: 1px;
+    --nb-b: 1px;
+    --nb-l: 1px;
+    --nb-r: 1px;
+    position: relative;
+  }
+}
+@media screen and (forced-colors: none) {
+  /* 線(芯の明るい 2px) */
+  :is([data-pkc-log-days] > [data-pkc-log-card], [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::before {
+    content: '';
+    position: absolute;
+    inset: calc(-1 * var(--nb-t)) calc(-1 * var(--nb-r)) calc(-1 * var(--nb-b)) calc(-1 * var(--nb-l));
+    border: solid transparent;
+    border-width: calc(2 * var(--nb-t)) calc(2 * var(--nb-r)) calc(2 * var(--nb-b)) calc(2 * var(--nb-l));
+    border-radius: inherit;
+    background: radial-gradient(
+      circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px),
+      var(--neon-core),
+      var(--neon) 34%,
+      color-mix(in srgb, var(--neon) 70%, transparent) 66%,
+      transparent
+    );
+    /* ⚠ 局所座標は枠の外側から測り、繰り返さない(既定の padding-box + repeat だと、枠の線に反対側の端が回り込む) */
+    background-origin: border-box;
+    background-repeat: no-repeat;
+    pointer-events: none;
+    -webkit-mask:
+      linear-gradient(#000 0 0) padding-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) padding-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+  }
+  /* にじみ(線の外へ `--nh`(数。ログ・情報ペインは 5、バーは 2)px の淡い帯)。⚠ 枠を持たない辺(記録の途中の塊の上下)へは広げない(`--nb-*` が 0 のまま) */
+  :is([data-pkc-log-days] > [data-pkc-log-card], [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::after {
+    content: '';
+    position: absolute;
+    inset: calc(-1 * (1 + var(--nh)) * var(--nb-t)) calc(-1 * (1 + var(--nh)) * var(--nb-r)) calc(-1 * (1 + var(--nh)) * var(--nb-b)) calc(-1 * (1 + var(--nh)) * var(--nb-l));
+    border: solid transparent;
+    border-width: calc((2 + var(--nh)) * var(--nb-t)) calc((2 + var(--nh)) * var(--nb-r)) calc((2 + var(--nh)) * var(--nb-b)) calc((2 + var(--nh)) * var(--nb-l));
+    border-radius: inherit;
+    background: radial-gradient(
+      circle var(--neon-r) at calc(var(--gx, -500px) + var(--nh) * var(--nb-l)) calc(var(--gy, -500px) + var(--nh) * var(--nb-t)),
+      color-mix(in srgb, var(--neon) 55%, transparent),
+      color-mix(in srgb, var(--neon) 28%, transparent) 45%,
+      transparent
+    );
+    background-origin: border-box;
+    background-repeat: no-repeat;
+    pointer-events: none;
+    -webkit-mask:
+      linear-gradient(#000 0 0) padding-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) padding-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
   }
 }
