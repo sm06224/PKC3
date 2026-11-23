@@ -176,7 +176,6 @@ body {
   /* ⚠ お知らせ(P11)も**自分の行**。相乗りさせない理由は `shell.ts` に書いた */
   /* ⚠ **行の数は area の行と合わせる**(#413 で 1 行増えた)── 足りない分は
    * 暗黙の行になって同じ `auto` に落ちるが、読み手が数を検算できなくなる */
-  grid-template-rows: 1fr auto auto auto auto auto;
   grid-template-areas:
     'rail sidebar gripl detail gripr inspector'
     'capture capture capture capture capture capture'
@@ -187,6 +186,12 @@ body {
     'draft draft draft draft draft draft'
     'notices notices notices notices notices notices'
     'status status status status status status';
+  /* 🔴 **本文の行は `minmax(0, 1fr)`**(画面全体が下へスクロールする不具合)。素の `1fr` は
+   *   `minmax(auto, 1fr)` なので、ペインの中身の最小の丈が残りの高さを上回ると行が押し広げられ、
+   *   shell が画面より背が高くなって文書ルートがスクロールする(下に空白が出る)。スマホ用画面と同じ書き方。
+   * ⚠ **`grid-template-areas` の直後に置く** ── `announce.test.ts` は「区画の行数と丈の数が合う /
+   *   伸びる行が `detail`」をこの並びで読む。丈の数は区画の行数(9)と同じ。 */
+  grid-template-rows: minmax(0, 1fr) auto auto auto auto auto auto auto auto;
   height: 100%;
   /* 🔑 **ペインは線ではなく地の段差で分ける**(#1982 段 2。旧い「`gap: 1px` に線色を透かせた格子」は
    * 画面を灰色の升目にしていた)。机(= 左右の列と、その間の掴む帯)は `--bg`、
@@ -15314,5 +15319,21 @@ h6:hover > .pkc-heading-anchor,
       1px 100%, 1px 100%, 100% 1px, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl);
     background-position: 2px var(--rl), var(--rl) 2px, left var(--rl) bottom 2px, left top, right top, left bottom, right bottom, 0 0,
       left top, right top, left top, left bottom, left top, right top, left bottom, right bottom;
+  }
+}
+
+/**
+ * 🔴 **アプリの画面では文書ルートをスクロールさせない**(画面全体が下へスクロールする不具合)。
+ * PKC の画面は shell が画面ちょうどの高さを取り、スクロールはペインの中だけで起きる。ルートがスクロールできると、
+ * 何かの要素が少しでも下へはみ出したとき(測るための見えない箱・押し広げられた行)に、ホイールや
+ * `scrollIntoView` で画面全体が持ち上がり、追記欄の下に空白が出る。
+ * ⚠ shell を持つ文書だけ(マニュアルなど別の文書はふつうにスクロールする)。⚠ 画面だけ ── 紙は全部刷る。
+ * ⚠ これは保険 ── はみ出しの元は直してあり、smoke は `scrollHeight <= innerHeight` で見張る(隠しても数は残る)。
+ */
+@media screen {
+  /* ⚠ **`html` だけ**。`body` にも付けると body 自身がスクロールする箱になり、`scrollIntoView` で
+   *   body が持ち上がる(shell ごと上へずれ、下に空白が出る ── 直したい症状そのもの。smoke で踏んだ) */
+  html:has([data-pkc-region='shell']) {
+    overflow: hidden;
   }
 }

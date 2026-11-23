@@ -586,6 +586,7 @@ import {
 } from '@adapter/ui/render/app-dialog';
 import { printNote } from '@adapter/platform/print-note';
 import { installNeonGlow, revalidateNeonGlow } from '@adapter/ui/render/neon-glow';
+import { installRootScrollGuard } from '@adapter/ui/render/root-scroll-guard';
 import { bodyEmbedsLoading } from '@adapter/ui/render/fence-asset-hydrate';
 import { SECTION_LOADING_SELECTOR } from '@adapter/ui/render/section-embed';
 
@@ -7814,6 +7815,8 @@ function bootstrap(): void {
       root.setAttribute('data-pkc-boot', 'ready');
       // 🔴 輪郭の近接発光(B2)。付けない環境(動きを減らす / 指の端末 / マウス無し / スマホ幅)ではリスナーを付けない
       installNeonGlow(document);
+      // 🔴 文書ルートを動かさない(画面全体が下へスクロールして追記欄の下に空白が出る不具合)
+      installRootScrollGuard(window);
       // 描き直しでゾーン(ログの本文・情報ペイン)が差し替わっても、ポインタが止まったまま付け直す(ゾーンの外にいる間の仕事は 0)
       app.dispatcher.onState(() => revalidateNeonGlow());
       preboot?.booted(); // 以後は勝手に読み直さない(下書きを巻き込まない)

@@ -30,7 +30,8 @@ export async function rasterizeIcon(
   const host = document.createElement('span');
   host.setAttribute('data-pkc-icon', '');
   host.setAttribute('data-pkc-symbol', name);
-  host.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none';
+  // ⚠ `fixed`: 文書のスクロール範囲に入れない(`current-line.ts` の影の箱と同じ理由)
+  host.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none';
   document.body.appendChild(host);
   let under: string | null;
   let line: string | null;
