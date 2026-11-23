@@ -7344,41 +7344,389 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-view-pane='sql'] {
   display: flex;
   flex-direction: column;
-  gap: var(--s2);
-  padding: var(--s2);
+  padding: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+/**
+ * 🔴 **3 ペイン**(#1442 段②。pgAdmin / DBeaver / A5:SQL Mk-2 の並び)。
+ *
+ * 左 = スキーマの木 / 右 = 上に SQL 欄・下に結果(境目は掴める)/ 「ER 図」はタブで切り替える。
+ * 🔑 区切りは**背景の段差**(木の地は一段濃い `--surface-2`)── 枠で格子にしない。
+ * 🔑 幅は **器(`sql-shell`)の幅**で決める(`container-type: inline-size`)── 窓が狭い / 中央ペインが狭いときは
+ *   木が上に積まれる(画面幅ではなく**この面の幅**を見るので、一覧を開いて狭くなった中央でも崩れない)。
+ */
+[data-pkc-field='sql-shell'] {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+/* ⚠ 器(container)は面そのもの ── @container は**子孫**にしか効かないので、`sql-shell` 自身を器にしても狭い所の規則が当たらない */
+[data-pkc-view-pane='sql'] {
+  container-type: inline-size;
+  container-name: sql-pane;
+}
+[data-pkc-field='sql-shell'][data-pkc-tree='closed'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+[data-pkc-field='sql-main'] {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+/* 上の帯: スキーマの出し入れ / 題名 / 「クエリ・ER 図」のタブ */
+[data-pkc-field='sql-tabs-bar'] {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+}
+/* 題名は読み上げ用に残し、目には出さない(窓・ペインの見出しが既に在る。帯はタブに使う) */
+[data-pkc-field='sql-tabs-bar'] [data-pkc-field='pane-title'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+[data-pkc-field='sql-tree-toggle'][hidden] {
+  display: none;
+}
+[data-pkc-field='sql-tree-reload'],
+[data-pkc-field='sql-tree-close'] {
+  flex: none;
+  padding: 0 var(--s2);
+  min-width: var(--row-h);
+}
+[data-pkc-field='sql-tabs'] {
+  display: flex;
+  gap: var(--s1);
+}
+/* タブ = 地も枠も無く、選ばれている方は**太字 + 下の線**(現在地は形で示す) */
+[data-pkc-field='sql-tabs'] [role='tab'] {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+}
+[data-pkc-field='sql-tabs'] [role='tab'][aria-selected='true'] {
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+[data-pkc-field='sql-query-panel'] {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  --sql-split: 40;
+}
+[data-pkc-field='sql-query-panel'][hidden],
+[data-pkc-field='sql-er-panel'][hidden] {
+  display: none;
+}
+[data-pkc-field='sql-er-panel'] {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  padding: var(--s3);
 }
-[data-pkc-field='sql-head'] {
+/* 「ER 図」の下に出る、いま書かれている SQL(読み取り専用の 1 かたまり) */
+[data-pkc-field='sql-er-sql'] {
+  flex: none;
+  margin: 0;
+  max-height: 6.5rem;
+  overflow: auto;
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+}
+[data-pkc-field='sql-er-sql'][hidden] {
+  display: none;
+}
+/* 上 = 工具 + 欄。⚠ 割合は掴んで動かせる(`--sql-split` は 15〜85)。下限の高さは工具が隠れない程度 */
+[data-pkc-field='sql-editor'] {
+  flex: var(--sql-split) 1 0;
+  min-height: 9.5rem;
   display: flex;
   flex-direction: column;
   gap: var(--s2);
+  padding: var(--s3);
+  min-width: 0;
 }
-[data-pkc-field='sql-head'] [data-pkc-field='pane-title'] {
+[data-pkc-field='sql-results'] {
+  flex: calc(100 - var(--sql-split)) 1 0;
+  min-height: 5rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 var(--s3) var(--s3);
+}
+[data-pkc-field='sql-results-head'] {
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s3);
+  padding-bottom: var(--s2);
+}
+[data-pkc-field='sql-results-head'] [data-pkc-field='sql-note'] {
+  flex: 1 1 14em;
+  min-width: 0;
+}
+/**
+ * 🔴 **境目**(欄と結果)。⚠ 見た目は 1px の線 + 掴みやすい 8px の高さ。掴む / 矢印キー / ダブルクリックで戻す。
+ * 乗せる・焦点・掴んでいる間はアクセントの線(状態は形 = 太さで)。
+ */
+[data-pkc-field='sql-splitter'] {
+  flex: none;
+  height: 9px;
+  cursor: row-resize;
+  touch-action: none;
+  background: linear-gradient(var(--hairline), var(--hairline)) center / 100% 1px no-repeat;
+}
+[data-pkc-field='sql-splitter']:hover,
+[data-pkc-field='sql-splitter'][data-pkc-dragging],
+[data-pkc-field='sql-splitter']:focus-visible {
+  background: linear-gradient(var(--accent), var(--accent)) center / 100% 3px no-repeat;
+  outline: none;
+}
+/* 工具の並び: 実行(主)/ 相手 / エンジン ……(間を空けて)……履歴・持ち帰り・その他 */
+[data-pkc-field='sql-bar-spacer'] {
+  flex: 1 1 0;
+}
+[data-pkc-field='sql-run']::before {
+  content: '\25b6';
+  font-size: 0.8em;
+}
+[data-pkc-field='sql-more'],
+[data-pkc-field='sql-out'] {
+  position: relative;
+}
+[data-pkc-field='sql-more'] > summary,
+[data-pkc-field='sql-out'] > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--row-h);
+  padding: 0 var(--s3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  cursor: pointer;
+  user-select: none;
+}
+[data-pkc-field='sql-more'] > summary::-webkit-details-marker,
+[data-pkc-field='sql-out'] > summary::-webkit-details-marker {
+  display: none;
+}
+[data-pkc-field='sql-more'] > summary::after,
+[data-pkc-field='sql-out'] > summary::after {
+  content: '\25be';
+}
+[data-pkc-field='sql-more'] > summary:hover,
+[data-pkc-field='sql-out'] > summary:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+[data-pkc-field='sql-more'] > summary:focus-visible,
+[data-pkc-field='sql-out'] > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+[data-pkc-field='sql-menu-list'] {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 2px);
+  z-index: 20;
+  min-width: 14em;
+  display: flex;
+  flex-direction: column;
+  padding: var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+[data-pkc-field='sql-menu-list'] button {
+  justify-content: flex-start;
+  background: transparent;
+  border-color: transparent;
+}
+[data-pkc-field='sql-menu-list'] button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+/* 使い方と例は 1 段奥(開くと欄の下に出る。出すぎるなら中で転がる) */
+[data-pkc-field='sql-help'] {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 45%;
+  overflow: auto;
+  font-size: var(--fs-sm);
+}
+[data-pkc-field='sql-help'] > summary {
+  cursor: pointer;
+  color: var(--muted);
+  width: fit-content;
+}
+/**
+ * 🔴 **左のスキーマの木**。地は一段濃い `--surface-2`(段差で区切る)。行は 1 本 24px・字は `--fs-sm`。
+ * 表 = 名前 / 種類(薄)/ 行数(右寄せ・桁をそろえる)。列 = 名前 / 型(薄)/ PK・FK の印。
+ * 現在地(焦点)は**左端の線**(形)で示す。
+ */
+[data-pkc-region='sql-tree'] {
+  width: 15rem;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+[data-pkc-field='sql-shell'][data-pkc-tree='closed'] > [data-pkc-region='sql-tree'] {
+  display: none;
+}
+[data-pkc-field='sql-tree-head'] {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s3) var(--s3) var(--s2);
+}
+[data-pkc-field='sql-tree-title'] {
+  font-weight: 600;
+}
+[data-pkc-field='sql-tree-source'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+[data-pkc-field='sql-tree-filter'] {
+  flex: none;
+  margin: 0 var(--s3) var(--s2);
+  width: auto;
+}
+[data-pkc-field='sql-tree-note'] {
   margin: 0;
-  font-size: var(--fs-lg);
+  padding: var(--s2) var(--s3);
+  color: var(--muted);
+}
+[data-pkc-field='sql-tree-note'][hidden] {
+  display: none;
+}
+[data-pkc-field='sql-tree-list'] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: var(--s3);
+}
+[data-pkc-field='sql-tree-table'],
+[data-pkc-field='sql-tree-column'] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 24px;
+  padding: 0 var(--s3);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: inset 2px 0 0 transparent;
+}
+[data-pkc-field='sql-tree-column'] {
+  padding-left: calc(var(--s3) + 1.1rem);
+}
+[data-pkc-field='sql-tree-table']:hover,
+[data-pkc-field='sql-tree-column']:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+[data-pkc-field='sql-tree-table']:focus-visible,
+[data-pkc-field='sql-tree-column']:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+[data-pkc-field='sql-tree-chevron'] {
+  flex: none;
+  width: 1rem;
+  text-align: center;
+  color: var(--muted);
+}
+[data-pkc-field='sql-tree-name'],
+[data-pkc-field='sql-tree-colname'] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-pkc-field='sql-tree-name'] {
+  font-weight: 600;
+}
+[data-pkc-field='sql-tree-kind'] {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+[data-pkc-field='sql-tree-rows'] {
+  flex: 1 0 auto;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+[data-pkc-field='sql-tree-type'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+[data-pkc-field='sql-tree-badge'] {
+  flex: none;
+  padding: 0 4px;
+  border-radius: var(--radius);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+[data-pkc-badge='fk'] {
+  font-weight: 400;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+/* 狭いとき(器が 40rem 未満): 木は上に積み、背を低くする */
+@container sql-pane (max-width: 40rem) {
+  [data-pkc-field='sql-shell'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  [data-pkc-field='sql-shell'][data-pkc-tree='closed'] {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  [data-pkc-region='sql-tree'] {
+    width: auto;
+    max-height: 11rem;
+  }
 }
 /* ⚠ 打つ欄は**等幅** ── SQL は桁を数える字である(記号の見分けもつく) */
 /**
- * 🔴 **打った行数に合わせて伸びる**(#918 段②b。user 裁定 2026-09-14)。
- *
- * 🔑 **下限はこれまでの既定のまま**(`min-height: 5em`)── 選んでいただいた札は
- *   「**伸びる**」なので、**縮む向きへは動かさない**(いまより小さくならない)。
- * 🔑 **上限はここで持つ** ── 高さを決めるのは描画器(`fitSqlInput`)だが、
- *   `max-height` を CSS に置けば**器が狭い日**にも答えの表の場所が残る
- *   (行数で切ると、縦の狭い窓で表が画面から消える)。
+ * 🔴 **打つ欄は上の領域いっぱいに広がる**(#1442 段②。以前の「打った行数に合わせて伸びる」〈#918 段②b〉は、
+ *   境目を掴んで高さを決める形に置き換えた)。
  * ⚠ 上限に当たったら**この欄自身が転がる**(`overflow-y: auto`)── 打てなくならない。
- * ⚠ `resize: vertical` は**残す** ── 手で決めた高さのほうが強い
- *   (片道の操作を作らない ── user 指示 2026-08-23)。
  */
 [data-pkc-field='sql-input'] {
   width: 100%;
-  min-height: 5em;
-  max-height: min(40vh, 22em);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   font-family: var(--font-mono);
   font-size: var(--fs-md);
-  resize: vertical;
+  /* 高さは境目(`sql-splitter`)が決める ── 掴む・矢印キーで変える */
+  resize: none;
 }
 /**
  * 🔴 **色分けと行番号の層**(#918 段②c/②d)。
@@ -7394,6 +7742,11 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  */
 [data-pkc-field='sql-input-wrap'] {
   position: relative;
+  /* 欄は上の領域の残りを埋める(行数で伸び縮みしない。高さは境目が決める) */
+  flex: 1 1 6rem;
+  min-height: 4.5rem;
+  display: flex;
+  flex-direction: column;
   /* ⚠ 番号の幅は**この 1 か所**で持つ ── 層の升と、欄の左余白の両方がこれを読む */
   --sql-gutter: 3ch;
   --sql-gap: var(--s2);
@@ -7496,7 +7849,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
  *   幅に上限を置けば、デスクトップでは今までどおり横に並び、狭い画面でだけ折り返す。
  */
 [data-pkc-field='sql-bar'] select {
-  max-width: min(22em, 100%);
+  /* 🔴 1 行に収める(#1442 段②)── 選び所は縮められる(幅が足りなければ「…」で切る)。広いときは 14em まで */
+  flex: 0 1 14em;
+  min-width: 6em;
+  max-width: min(14em, 100%);
   text-overflow: ellipsis;
 }
 /**

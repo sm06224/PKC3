@@ -41,7 +41,7 @@ describe('reducer slices (#1383)', () => {
 
   it('同じ action を 2 つの slice が持たない', () => {
     const all = files.flatMap((f) => labelsOf(readFileSync(f, 'utf-8')));
-    expect(all.length).toBe(262);
+    expect(all.length).toBe(263);
     expect(new Set(all).size).toBe(all.length);
   });
 

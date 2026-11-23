@@ -20,6 +20,7 @@ import { PANES } from '../../src/features/pane-visibility';
 import { SIZED_PANES } from '../../src/features/pane-size';
 import { PaneVisibilityStore } from '../../src/adapter/ui/render/pane-visibility';
 import { PaneSizeStore } from '../../src/adapter/ui/render/pane-size';
+import { SqlLayoutStore } from '../../src/adapter/ui/render/sql-layout';
 import { OpenInEditStore } from '../../src/adapter/ui/render/open-in-edit';
 import { KeymapStore } from '../../src/adapter/ui/render/keymap';
 import { BrowseModeStore } from '../../src/adapter/ui/render/browse-mode';
@@ -119,6 +120,18 @@ function validSamples(): Record<string, string[]> {
     const s = fakeStorage();
     new PaneSizeStore(s).set(SIZED_PANES[0]!, 300);
     out['pkc3.pane-sizes'] = [s.dump()['pkc3.pane-sizes']!];
+  }
+  {
+    // 🔑 SQL 画面の並び(#1442 段②)── 木と境目の両方が書かれた形・木だけ・境目だけの 3 通り
+    const a = fakeStorage();
+    const both = new SqlLayoutStore(a);
+    both.setTree(false);
+    both.setSplit(45);
+    const b = fakeStorage();
+    new SqlLayoutStore(b).setTree(true);
+    const c = fakeStorage();
+    new SqlLayoutStore(c).setSplit(30);
+    out['pkc3.sql-layout'] = [a.dump()['pkc3.sql-layout']!, b.dump()['pkc3.sql-layout']!, c.dump()['pkc3.sql-layout']!];
   }
   {
     const s = fakeStorage();
@@ -260,6 +273,8 @@ describe('設定ファイル: 値の検査(#1087)', () => {
     expect(validOf('pkc3.panes')!(`${PANES[0]} banana`)).toBe(false);
     expect(validOf('pkc3.pane-sizes')!(`${SIZED_PANES[0]}:-5`)).toBe(false);
     expect(validOf('pkc3.pane-sizes')!(`${SIZED_PANES[0]}:300 junk`)).toBe(false);
+    expect(validOf('pkc3.sql-layout')!('1:90')).toBe(false);
+    expect(validOf('pkc3.sql-layout')!('2:40')).toBe(false);
     expect(validOf('pkc3.schedule-lead')!('7')).toBe(false);
     expect(validOf('pkc3.schedule-week-start')!('2')).toBe(false);
     expect(validOf('pkc3.schedule-week-start')!('月曜')).toBe(false);

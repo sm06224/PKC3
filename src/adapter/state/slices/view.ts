@@ -12,6 +12,7 @@ import {
   type Dispatchable,
   type ReduceResult,
   attachmentEntries,
+  erWhenEntered,
   isAsidePane,
   searchRefreshEvents,
   viewModeLabel,
@@ -50,7 +51,7 @@ export function reduceView(state: AppState, action: ViewAction): ReduceResult {
        *   user が「いま何を見ているか」を変える出来事ではない。
        */
       return { state: { ...state, openExtensions: action.open }, events: [] };
-    case 'SET_VIEW_MODE':
+    case 'SET_VIEW_MODE': {
       // selection は消さない(PKC2 規約)。panel は view に従属するので畳む
       /**
        * 🔴 **編集中でも「ノートを映さない面」は開ける**(user 裁定 2026-08-08。
@@ -105,9 +106,15 @@ export function reduceView(state: AppState, action: ViewAction): ReduceResult {
           },
           events: [],
         };
+      /**
+       * 🔴 **SQL 画面を開いたら、左のスキーマの木のために構造を採る**(#1442 段②)。
+       * ⚠ 採り直しの判定は `erWhenEntered` 1 か所(採っている最中・相手を開いている最中は頼まない)。
+       */
+      const sqlEnter = action.mode === 'sql' ? erWhenEntered(state.sqlPage) : null;
       return {
         state: {
           ...state,
+          ...(sqlEnter === null ? {} : { sqlPage: { ...state.sqlPage, er: sqlEnter.er } }),
           viewMode: action.mode,
           revisionPanel: null,
           // ⚠ 見ていた版も畳む(#398 段②)── 一覧が畳まれたら差分は孤児になる
@@ -135,8 +142,11 @@ export function reduceView(state: AppState, action: ViewAction): ReduceResult {
         events:
           action.mode === 'query'
             ? [{ type: 'REQUEST_QUERY_SCAN', key: state.queryKey }]
-            : [],
+            : sqlEnter === null
+              ? []
+              : sqlEnter.events,
       };
+    }
     case 'REFRESH_TASK_SCAN':
       return { state, events: [{ type: 'REQUEST_TASK_SCAN' }] };
     /**

@@ -33,6 +33,7 @@ import { parseMessageCap } from '@features/message/message-log';
 import { isOpenPlace } from '@features/open-place';
 import { isPageFormat } from '@features/page-format';
 import { isPaneSizes } from '@features/pane-size';
+import { isSqlLayout } from '@features/query/sql-layout';
 import { isHiddenPanes } from '@features/pane-visibility';
 import { isProseAlign } from '@features/prose-align';
 import { isReadColumns } from '@features/read-columns';
@@ -99,6 +100,8 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
    * (`pkc3.text-scale` と同じ考え方 ── 使い方の好みは人に付く)。
    */
   { key: 'pkc3.pane-sizes', label: 'ペインの幅', valid: isPaneSizes },
+  // ⚠ SQL 画面の「スキーマの木の出し入れ・欄と結果の境目」(#1442 段②)。幅と同じく使い方の好みなので運ぶ(狭い端末では木を畳む既定が効く)
+  { key: 'pkc3.sql-layout', label: 'SQL 画面の並び', valid: isSqlLayout },
   { key: 'pkc3.editor-mode', label: '編集の仕方', valid: (v) => isEditorMode(v) },
   { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか', valid: isOnOff },
   { key: 'pkc3.page-format', label: 'ページ設定', valid: (v) => isPageFormat(v) },

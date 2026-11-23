@@ -529,26 +529,40 @@ export function erForSource(
   emit: boolean,
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
   if (er.source === source && er.model !== null) return { er, events: [] };
-  // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)
-  // 🔑 `mine` / `pendingFrom` も `model` と一緒に捨てる(#918 段⑤d-1)。
-  //   ⚠ `connecting`(入切そのもの)は持ち越す ── user の好みであって、この DB の
-  //   データではない。
-  if (!er.open) {
+  /**
+   * 🔴 **構造は図を開いているかに関わらず採る ── ただし DuckDB の器へ頼む相手(`route.duck`)は別**(#1442 段②)。
+   * 左の「スキーマの木」が同じ模型を使うので、以前の「閉じているなら捨てるだけ(開くときに採り直す)」は
+   * sqlite の相手では成り立たない(木が空のまま残る)。
+   * 🔴 **DuckDB の相手は、選んだだけでは採らない** ── 採るには**中身を全部読んで DuckDB の器を起こす**
+   *   (不可侵指示 2026-07-27「選んだだけで何十 MB も heap へ載せない」「重い処理は使うまで起こさない」)。
+   *   🔑 木は表の名前だけを出し(`guest.tables`)、列は **ER 図を開いたとき**(従来どおり)に採る。
+   * 🔑 `mine` / `pendingFrom` も `model` と一緒に捨てる(#918 段⑤d-1)。
+   *   ⚠ `connecting`(入切そのもの)は持ち越す ── user の好みであって、この DB の
+   *   データではない。
+   */
+  /**
+   * 🔴 **相手が変わる道は、すべて札(`token`)を進める**(#1442 段②、着地前レビュー R1)。
+   * ⚠ 進めないと、前の相手へ頼んだ答え(`SQL_ER_LOADED` の札 = N)が**遅れて届いたとき札が一致してしまい**、
+   *   新しい相手の木に前の相手の表が出る(名札は新しいのに中身は前の DB ── いちばん気づけない外し方)。
+   *   以前は図を開いているときしかここへ来なかったので問題にならなかったが、いまは画面を開いた時点で採る。
+   */
+  if (!er.open && route.duck !== undefined) {
     return {
-      er: { ...er, loading: false, model: null, note: '', source: '', mine: [], pendingFrom: null },
+      er: { ...er, loading: false, model: null, note: '', source: '', token: er.token + 1, mine: [], pendingFrom: null },
       events: [],
     };
   }
   if (!emit) {
     return {
-      er: { ...er, loading: true, model: null, note: '', source: '', mine: [], pendingFrom: null },
+      er: { ...er, loading: true, model: null, note: '', source: '', token: er.token + 1, mine: [], pendingFrom: null },
       events: [],
     };
   }
   const token = er.token + 1;
   return {
     er: {
-      open: true,
+      // ⚠ 開閉は**触らない**(#1442 段②。以前は「開いているときだけ来る」前提で `true` だった)
+      open: er.open,
       loading: true,
       model: null,
       note: '',
@@ -575,13 +589,43 @@ export function erAfterDuckWrite(
   source: string,
   route: SchemaRoute,
 ): { er: SqlPageState['er']; events: DomainEvent[] } {
+  // ⚠ 閉じているなら捨てるだけ(開くときに採り直す)── DuckDB の器の相手は、図を開くまで採らない(`erForSource` と同じ理由)
   if (!er.open) {
-    return { er: { ...er, loading: false, model: null, note: '', source: '', pendingFrom: null }, events: [] };
+    // ⚠ 札を進める(飛んでいる前の答えを捨てる ── `erForSource` の R1 と同じ)
+    return {
+      er: { ...er, loading: false, model: null, note: '', source: '', token: er.token + 1, pendingFrom: null },
+      events: [],
+    };
   }
   const token = er.token + 1;
   return {
     er: { ...er, loading: true, model: null, note: '', source, token, pendingFrom: null },
     events: [{ type: 'REQUEST_SQL_ER', token, ...route }],
+  };
+}
+
+/**
+ * 🔴 **SQL 画面を開いた(見せた)ときに、構造を採る**(#1442 段②)。左の「スキーマの木」は図と同じ模型を使うので、
+ *   図を開くのを待たず**画面を開いた時点で**採る。
+ *
+ * - 相手を開いている最中(`guestChosen` が在るのに `guest` が `null`)は頼まない ── 開けた回(`SQL_GUEST_OPENED`)が頼む
+ *   (頼むと前の相手へ飛ぶ)。
+ * - 採っている最中なら重ねない。
+ * - 🔴 **同じ相手の模型が既に在るなら、採り直さない**(着地前レビュー W1)。採るたびに表ごとの `count(*)` が
+ *   **共有の sqlite worker を占有する**(本体のノート操作が待たされる)ので、画面を出し入れするたびには採らない。
+ *   採るのは「模型が無い / 相手が変わった / **↻ を押した** / DuckDB で書いた後」だけ。
+ */
+export function erWhenEntered(p: SqlPageState): { er: SqlPageState['er']; events: DomainEvent[] } {
+  if (p.guestChosen !== '' && p.guest === null) return { er: p.er, events: [] };
+  if (p.er.loading) return { er: p.er, events: [] };
+  // 🔴 DuckDB の器へ頼む相手は、図を開くまで採らない(`erForSource`。中身を読んで器を起こすため)
+  if (!p.er.open && schemaRouteOf(p.guest, p.extraGuests).duck !== undefined) return { er: p.er, events: [] };
+  const source = erSourceKey(p.guest, p.extraGuests);
+  if (p.er.model !== null && p.er.source === source) return { er: p.er, events: [] };
+  const token = p.er.token + 1;
+  return {
+    er: { ...p.er, loading: true, model: null, note: '', source, token, mine: [], pendingFrom: null },
+    events: [{ type: 'REQUEST_SQL_ER', token, ...schemaRouteOf(p.guest, p.extraGuests) }],
   };
 }
 
@@ -2678,6 +2722,11 @@ export type UserAction =
    * ⚠ 中身は 1 文字も出さない ── 出すのは表・列・型・鍵・繋がり・行数だけである。
    */
   | { type: 'SQL_SCHEMA_TO_NOTE'; lid: string; relationId: string; parentLid?: string | null }
+  /**
+   * 🔴 **左のスキーマの木を、手で読み直す**(#1442 段②)。自動で採るのは画面を開いたとき・相手を変えたとき・DuckDB で書いたあとだけなので、
+   *   表を作った / 本文の csv を直した直後の読み直しに使う。⚠ DuckDB の器の相手も**明示の押しなので採る**(選んだだけでは採らない規律とは別)。
+   */
+  | { type: 'SQL_SCHEMA_RELOAD' }
   /**
    * 🔴 **つながり図を開く / 閉じる**(#918 段⑤。裁定 2026-09-15 = この窓の中)。
    * ⚠ 開いたとき構造をまだ採っていなければ、採ってくるよう頼む。
@@ -5517,6 +5566,7 @@ export function reduceCore(
     case 'SQL_HISTORY_PICK':
     case 'SQL_EXPORT_PARQUET':
     case 'SQL_SCHEMA_TO_NOTE':
+    case 'SQL_SCHEMA_RELOAD':
     case 'SQL_ER_TOGGLE':
     case 'SQL_ER_CONNECT_TOGGLE':
     case 'SQL_ER_PICK':

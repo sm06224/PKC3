@@ -256,8 +256,15 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
 
   // ── 名前を押す → `select * from 棚卸`
   const sqlInput = page.locator('[data-pkc-field="sql-input"]');
+  // 🔑 #1442 段②: 欄は「クエリ」のタブ、図は「ER 図」のタブ ── 欄を空にしてから図へ戻る
+  const queryTab = page.locator('[data-pkc-field="sql-query-tab"]');
+  const erTab = page.locator('[data-pkc-field="sql-er-toggle"]');
+  await clickReal(page, queryTab);
   await page.fill('[data-pkc-field="sql-input"]', '');
+  await clickReal(page, erTab);
   await clickReal(page, head);
+  // 図を見ている間も、書かれた SQL が読める(押した結果が隠れない)
+  await expect(page.locator('[data-pkc-field="sql-er-sql"]'), '図の下に書かれた SQL が出ない').toHaveText('select * from 棚卸');
   await expect(sqlInput, '名前を押しても select * from 棚卸 にならない').toHaveValue(
     'select * from 棚卸',
   );
@@ -270,7 +277,8 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
     'select 品名 from 棚卸',
   );
 
-  // ── 走らせる → 中身が表に出る
+  // ── 走らせる → 中身が表に出る(クエリのタブへ戻って)
+  await clickReal(page, queryTab);
   await clickReal(page, '[data-pkc-action="run-sql"]');
   const sqlTable = page.locator('[data-pkc-field="sql-table"]');
   await expect(sqlTable, '本文の表から行が返らない').toBeVisible({ timeout: 10_000 });
@@ -281,6 +289,8 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(sqlTable, '名前の無い csv が既定の表 csv で引けない').toContainText('ぶどう', { timeout: 10_000 });
   await expect(sqlTable, '名前つきの表の行が csv に混ざった').not.toContainText('りんご');
+  // ER 図のタブへ戻る(以降は図の中の確認)
+  await clickReal(page, erTab);
 
   /**
    * ── ② 線が 0 本のとき、理由が出る(#918 段⑤d-3)。
@@ -438,6 +448,7 @@ test('🔴 本文の名前つき csv が図の四角として出て引ける。�
    *   **画面まで来ているか**は実ブラウザで 1 度も見ていなかった。
    * 🔑 **同じ道中で見る**(`gotoApp` を増やさない)。
    */
+  await clickReal(page, queryTab);
   await page.fill('[data-pkc-field="sql-input"]', '');
   await page.fill(
     '[data-pkc-field="sql-input"]',

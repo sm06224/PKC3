@@ -161,7 +161,7 @@ import { join } from 'node:path';
  * - 2026-11-23(#1442 段① レビュー): **624**(そのときの実数 624)。`builtin-apps.smoke.spec.ts` の別ウィンドウの 1 本に、写した `#pkc?view=` のタブを開く確認で起動 1 つ足した。
  *   ⚠ 既存の道中には載せられない ── 見る相手は「PKC が開いた窓ではない」まっさらなタブ(`w=` の合図と sessionStorage の印が無い)で、開いた窓の続きでは作れない。
  */
-export const BOOT_BUDGET = 624;
+export const BOOT_BUDGET = 627;
 // 2026-11-22(A3 レビュー): **608**(実数 608)。`tooltip.smoke.spec.ts` に 1 本足した(起動 1 つ)。⚠ 既存の道中には載せられない ── `showModal()` で top layer に載せた
 //   ダイアログの中で、吹き出しが最前面にあるか(`elementFromPoint`)を見る。モーダルの上の当たり判定は実ブラウザでしか出ない。
 // 2026-11-22(A3 上側のツールチップ): **607**(実数 607)。`tooltip.smoke.spec.ts` を新設(起動 2 つ)。⚠ 既存の道中には載せられない ──
@@ -198,7 +198,7 @@ export const BOOT_BUDGET = 624;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 312;
+export const BOOT_FLOOR = 314;
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {

@@ -32,6 +32,17 @@ import { attachedSqlSourcesOf } from '@features/query/attached-sql-sources';
 import { sqlLineHtml } from '@features/query/sql-lines';
 import { chordLabel } from '@features/keymap';
 import { erArrowTarget, paintSqlEr, type ErSizeMemory } from './sql-er';
+import { createSqlTree, treeViewOf, type SqlTreeHandle } from './sql-tree';
+import { appSqlLayout } from './sql-layout';
+import { markPrimary, markVariant } from './icons';
+import {
+  clampSqlSplit,
+  insertionWithSpacing,
+  SQL_SPLIT_DEFAULT,
+  splitFromDrag,
+  splitFromKey,
+  treeOpenInitially,
+} from '@features/query/sql-layout';
 import {
   isDuckDbReadableSource,
   sqlGuestSourceOf,
@@ -153,6 +164,16 @@ export class SqlRenderer {
   /** 打ち始めても消えない手本(#837 K1)。⚠ 器は 1 度しか組まないので控えを持つ。 */
   private example: HTMLElement | null = null;
   private exampleMore: HTMLElement | null = null;
+  /** 3 ペインの器と部品(#1442 段②)。 */
+  private shell: HTMLElement | null = null;
+  private tree: SqlTreeHandle | null = null;
+  private treeToggle: HTMLButtonElement | null = null;
+  private queryTab: HTMLButtonElement | null = null;
+  private queryPanel: HTMLElement | null = null;
+  private erSql: HTMLElement | null = null;
+  private splitter: HTMLElement | null = null;
+  /** 上の欄が占める割合(%)。⚠ 画面に当てた値の控え(保存は `appSqlLayout`)。 */
+  private split = SQL_SPLIT_DEFAULT;
   /** 履歴の押し所(#918 段②a)。⚠ 憶えている字が無いうちは押させない。 */
   private history: HTMLButtonElement | null = null;
   /** file へ書き出す押し所(#918 段④)。⚠ 答えが無いうちは押させない。 */
@@ -183,11 +204,6 @@ export class SqlRenderer {
   /** 掴んで変えた高さと転がした位置(#918 段⑤d)。⚠ 図の DOM ではなくここに持つ ── 採り直し・畳み・開き直しをまたぐ。 */
   private readonly erSize: ErSizeMemory = { height: '', left: 0, top: 0 };
   /**
-   * 🔴 **手で高さを決めたか**(#918 段②b)。決めたら**そちらが強い** ──
-   * 打つたびに引き戻すと、掴んで広げた操作が**毎回取り消される**
-   * (片道の操作を作らない ── user 指示 2026-08-23)。
-   */
-  /**
    * 🔴 **窓で描くための持ち物**(#918 段③)。
    * ⚠ `rows` は `AppState` の配列を**そのまま指す**(写さない)── 数万行を
    *   もう 1 本持つと、それだけで常駐が倍になる(2026-07-27 の不可侵指示)。
@@ -201,9 +217,6 @@ export class SqlRenderer {
   /** いま描いてある窓。⚠ 同じ窓なら描き直さない(転がすたびの作り直しを避ける)。 */
   private drawn: SqlWindow | null = null;
 
-  private handSized = false;
-  /** 最後に高さを合わせたときの字。⚠ 同じ字で測り直さない(打鍵ごとの再計測を避ける)。 */
-  private fitted: string | null = null;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -211,8 +224,6 @@ export class SqlRenderer {
 
   private ensureFrame(): HTMLElement {
     if (this.body !== null) return this.body;
-    const head = document.createElement('div');
-    head.setAttribute('data-pkc-field', 'sql-head');
     const title = document.createElement('h2');
     title.setAttribute('data-pkc-field', 'pane-title');
     title.textContent = 'SQL で調べる';
@@ -233,37 +244,19 @@ export class SqlRenderer {
      */
     box.title =
       'Tab で字下げが入ります。この欄から出るには Shift+Tab か Esc。↑ ↓ で前に打った字が戻ります。';
-    box.rows = 4;
     box.spellcheck = false;
-    /**
-     * 🔴 **掴んで高さを変えたら、そちらが強い**(#918 段②b)。
-     *
-     * ⚠ 見分けは**押して離したときの差**で採る ── `ResizeObserver` で高さの変化を
-     *   見る形にすると、**窓の幅が変わっただけ**(= 折り返しが変わって高さが動く)でも
-     *   「手で決めた」と読んでしまう(CLAUDE.md §4「観測点が放っておいても変わるなら、
-     *   変化は届いた証拠にならない」)。
-     * ⚠ 離すのは欄の外のことがある(速く引くと外れる)ので、**離すのは document で聞く**。
-     */
-    let grabbedAt = -1;
-    box.addEventListener('pointerdown', () => {
-      grabbedAt = box.offsetHeight;
-    });
-    box.ownerDocument.addEventListener('pointerup', () => {
-      if (grabbedAt < 0) return;
-      const moved = Math.abs(box.offsetHeight - grabbedAt) > 2;
-      grabbedAt = -1;
-      if (moved) this.handSized = true;
-    });
     const bar = document.createElement('div');
     bar.setAttribute('data-pkc-field', 'sql-bar');
     const run = document.createElement('button');
     run.type = 'button';
     run.setAttribute('data-pkc-action', 'run-sql');
     run.setAttribute('data-pkc-field', 'sql-run');
-    run.textContent = 'SQL を実行';
+    run.textContent = '実行';
+    // 🔴 面の主の操作は 1 つだけ(#1982。実行)
+    markPrimary(run);
     // 🔑 近道も出す(打ち終わって手を動かさずに走らせられる)
     // ⚠ 綴りは `chordLabel` ── Mac では ⌘ と言う(固定の字だと Mac で効かない Ctrl を案内する。#1087 K5)
-    run.title = `${chordLabel('Mod+Enter')} でも実行できます`;
+    run.title = `SQL を実行します(${chordLabel('Mod+Enter')} でも実行できます)`;
     /**
      * 🔴 **答えをノートへ書き出す**(#681 段③ の 3 つ目)。
      * ⚠ 窓を閉じれば答えは消えるので、**残す道が要る** ── 無いと
@@ -342,10 +335,15 @@ export class SqlRenderer {
     er.type = 'button';
     er.setAttribute('data-pkc-action', 'sql-er-toggle');
     er.setAttribute('data-pkc-field', 'sql-er-toggle');
-    er.textContent = '構造を見る';
-    er.title = '表のつながりを図で出します。四角や線を押すと、下の欄に SQL が書かれます。';
+    er.textContent = 'ER 図';
+    er.title = '表のつながりを図で出します。四角や線を押すと、クエリの欄に SQL が書かれます。もう一度押すとクエリへ戻ります。';
+    // 🔴 「クエリ / ER 図」のタブ(#1442 段②)── 開閉の反転(`sql-er-toggle`)の意味は変えず、見た目だけタブにする
+    er.setAttribute('role', 'tab');
+    er.setAttribute('aria-selected', 'false');
+    er.tabIndex = -1;
     const erHost = document.createElement('div');
     erHost.setAttribute('data-pkc-region', 'sql-er');
+    erHost.setAttribute('role', 'tabpanel');
     erHost.hidden = true;
     /**
      * 🔴 **矢印キーで四角と列を辿る**(#918 段⑤d)。⚠ 器は作り直さない(中身だけ作り直す)ので、
@@ -365,7 +363,7 @@ export class SqlRenderer {
     history.type = 'button';
     history.setAttribute('data-pkc-action', 'sql-history-menu');
     history.setAttribute('data-pkc-field', 'sql-history');
-    history.textContent = '履歴から選ぶ';
+    history.textContent = '履歴';
     history.title = '前に実行した SQL を一覧から選びます(↑ ↓ でも戻せます)';
     /**
      * 🔴 **答えを file へ書き出す**(#918 段④。user 要望 2026-09-14「`copy to` 使えないし」)。
@@ -388,7 +386,67 @@ export class SqlRenderer {
      *   (相手を選ぶ)がいちばん右に在った。🔑 「選んでから打つ」の順に並べる。
      * ⚠ 並びだけを動かす ── `data-pkc-*` の名前も、押した先も変えない。
      */
-    bar.append(source, engine, run, save, toFile, schema, er, history, fileInput);
+    /**
+     * 🔴 **並びは「相手 → エンジン → 実行」/ 右に履歴・持ち帰り**(#992 ④ の「選んでから打つ」順を残す)(#1442 段②。pgAdmin / DBeaver の道具の並び)。
+     * ⚠ **主の操作(実行)は 1 つだけ**。副次(構造をノートへ)は「その他 ▾」の 1 段奥(常用は出す・副次は奥)。
+     * ⚠ `data-pkc-*` の名前も押した先も変えない ── 並びと字だけを動かす。
+     */
+    /**
+     * 🔴 **「書き出す ▾」と「その他 ▾」**(#1442 段②)。1 段奥のメニューを作る 1 本の関数(判定を 2 か所に書かない)。
+     * ⚠ 押したら閉じる ── ただし**次のイベントで**閉じる(`setTimeout 0`)。同じ押しで開くメニュー(ファイルへ書き出す = 形の一覧)が
+     *   押した項目の位置を読むので、先に閉じると位置が 0 になる。⚠ 外を押す / `Esc` でも閉じる。
+     */
+    /**
+     * 🔴 **外を押したら閉じる聞き手は、文書に 1 本だけ**(着地前レビュー W6)。メニューごとに足すと、器を作り直す日に
+     *   外し忘れた分が溜まる。⚠ 開いているメニューの一覧(`menus`)を見て、外を押された物だけ閉じる。
+     */
+    const menus: HTMLDetailsElement[] = [];
+    document.addEventListener('pointerdown', (ev) => {
+      for (const d of menus) {
+        if (d.open && ev.target instanceof Node && !d.contains(ev.target)) d.open = false;
+      }
+    });
+    const makeMenu = (field: string, label: string, hint: string, items: HTMLElement[]): HTMLDetailsElement => {
+      const d = document.createElement('details');
+      d.setAttribute('data-pkc-field', field);
+      const sum = document.createElement('summary');
+      sum.textContent = label;
+      sum.title = hint;
+      const list = document.createElement('div');
+      list.setAttribute('data-pkc-field', 'sql-menu-list');
+      list.setAttribute('role', 'group');
+      list.append(...items);
+      d.append(sum, list);
+      d.addEventListener('click', (ev) => {
+        const btn = ev.target instanceof Element ? ev.target.closest('button') : null;
+        if (btn === null) return;
+        /**
+         * 🔴 **形の一覧を開く項目(ファイルへ書き出す)を押したときは、メニューを開いたままにする**(着地前レビュー W6)。
+         *   一覧はこの項目を**錨**に開き(位置・閉じたあとの焦点戻し)、メニューを閉じるとその錨が消える。
+         *   開いたままなら、もう一度押す(一覧が閉じる)/ 外を押す / `Esc` が全部効く。
+         */
+        if (btn.getAttribute('data-pkc-action') === 'sql-export-menu') return;
+        // ⚠ 次のイベントで閉じる(同じ押しで開く物が、押した項目の位置を読むため)
+        setTimeout(() => {
+          d.open = false;
+        }, 0);
+      });
+      menus.push(d);
+      d.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && d.open) {
+          ev.stopPropagation();
+          d.open = false;
+          sum.focus();
+        }
+      });
+      return d;
+    };
+    const out = makeMenu('sql-out', '書き出す', 'ノートへ書き出す / ファイルへ書き出す', [save, toFile]);
+    const more = makeMenu('sql-more', 'その他', '構造をノートへ書き出す など', [schema]);
+    const spacer = document.createElement('span');
+    spacer.setAttribute('data-pkc-field', 'sql-bar-spacer');
+    spacer.setAttribute('aria-hidden', 'true');
+    bar.append(source, engine, run, spacer, history, out, more, fileInput);
     /**
      * 🔴 **足した相手を並べる行**(#918 段⑦)。各行に **×**(外す)── 片道にしない。
      * ⚠ 足していなければ `hidden`(中身は `paintExtras` が組む)。
@@ -486,7 +544,6 @@ export class SqlRenderer {
       layer.scrollTop = box.scrollTop;
       layer.scrollLeft = box.scrollLeft;
     });
-    head.append(title, erHost, wrap, historyNote, bar, extras, tip, rules, example, exampleMore);
     /**
      * 🔴 **答えの表をコピーする 2 つの口**(依頼 63-1。Gemini 裁定 2026-10-13 = 推薦どおり)。
      *
@@ -520,7 +577,121 @@ export class SqlRenderer {
     copyBar.append(copyEmbed, copyTable);
     this.copyBar = copyBar;
     this.copyEmbed = copyEmbed;
-    this.host.append(head, note, copyBar, body);
+    /**
+     * 🔴 **使い方と例は 1 段奥へ**(#1442 段②)。表の名前は左の木が出すので、案内文を常時出して欄を押し下げない。
+     * ⚠ 中身(`sql-tip` / `sql-rules` / `sql-example`)は**そのまま**(`render` が相手・エンジンに合わせて書き換える)。
+     */
+    const help = document.createElement('details');
+    help.setAttribute('data-pkc-field', 'sql-help');
+    const helpSummary = document.createElement('summary');
+    helpSummary.textContent = '使い方と例';
+    help.append(helpSummary, tip, rules, example, exampleMore);
+
+    /**
+     * 🔴 **3 ペイン**(#1442 段②)。左 = スキーマの木 / 右 = 上に SQL 欄・下に結果(境目は掴める)/ 「ER 図」はタブで切り替える。
+     * ⚠ 欄は**1 度だけ組む**(`ensureFrame`)── タブを替えても打ちかけを失わない。
+     */
+    const layout = appSqlLayout.get();
+    const tree = createSqlTree({
+      onInsert: (text, kind) => this.insertIntoEditor(text, kind),
+      onClose: () => this.setTreeOpen(false, true),
+    });
+    const shell = document.createElement('div');
+    shell.setAttribute('data-pkc-field', 'sql-shell');
+    const main = document.createElement('div');
+    main.setAttribute('data-pkc-field', 'sql-main');
+
+    const treeToggle = document.createElement('button');
+    treeToggle.type = 'button';
+    treeToggle.setAttribute('data-pkc-field', 'sql-tree-toggle');
+    treeToggle.textContent = 'スキーマを開く';
+    treeToggle.title = '左のスキーマ(表と列の木)を開きます';
+    treeToggle.setAttribute('aria-controls', 'sql-tree-region');
+    markVariant(treeToggle, 'ghost');
+    tree.el.id = 'sql-tree-region';
+
+    const queryTab = document.createElement('button');
+    queryTab.type = 'button';
+    queryTab.setAttribute('data-pkc-field', 'sql-query-tab');
+    queryTab.setAttribute('role', 'tab');
+    queryTab.textContent = 'クエリ';
+    queryTab.setAttribute('aria-selected', 'true');
+    // 「ER 図」から戻る道 ── 開閉の反転の口(`sql-er-toggle`)をそのまま使う(新しい口を作らない)
+    queryTab.addEventListener('click', () => {
+      if (this.erToggle?.getAttribute('aria-selected') === 'true') this.erToggle.click();
+    });
+    const tabs = document.createElement('div');
+    tabs.setAttribute('data-pkc-field', 'sql-tabs');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', '表示');
+    tabs.append(queryTab, er);
+    // 矢印キーでタブを替える(自動で開く)。⚠ いま選ばれている方だけが tabindex 0(ロービング)
+    tabs.addEventListener('keydown', (ev) => {
+      if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+      const to =
+        ev.key === 'ArrowRight' || ev.key === 'End'
+          ? er
+          : ev.key === 'ArrowLeft' || ev.key === 'Home'
+            ? queryTab
+            : null;
+      if (to === null) return;
+      ev.preventDefault();
+      to.focus();
+      to.click();
+    });
+    const tabsBar = document.createElement('div');
+    tabsBar.setAttribute('data-pkc-field', 'sql-tabs-bar');
+    tabsBar.append(treeToggle, title, tabs);
+
+    const editor = document.createElement('div');
+    editor.setAttribute('data-pkc-field', 'sql-editor');
+    editor.append(bar, extras, wrap, historyNote, help);
+
+    const splitter = document.createElement('div');
+    splitter.setAttribute('data-pkc-field', 'sql-splitter');
+    splitter.setAttribute('role', 'separator');
+    splitter.setAttribute('aria-orientation', 'horizontal');
+    splitter.setAttribute('aria-label', 'SQL の欄と結果の境目(上下の矢印キーで動かせます。ダブルクリックで元に戻します)');
+    splitter.tabIndex = 0;
+
+    const resultsHead = document.createElement('div');
+    resultsHead.setAttribute('data-pkc-field', 'sql-results-head');
+    resultsHead.append(note, copyBar);
+    const results = document.createElement('div');
+    results.setAttribute('data-pkc-field', 'sql-results');
+    results.append(resultsHead, body);
+
+    const queryPanel = document.createElement('div');
+    queryPanel.setAttribute('data-pkc-field', 'sql-query-panel');
+    queryPanel.setAttribute('role', 'tabpanel');
+    queryPanel.append(editor, splitter, results);
+    erHost.setAttribute('data-pkc-field', 'sql-er-panel');
+    /**
+     * 🔴 **「ER 図」を見ている間も、いま書かれている SQL が読める**(#1442 段②)。図の四角や線を押すと SQL が欄へ書かれるが、
+     *   欄はクエリのタブにあり隠れている ── 押した結果が見えないと「何も起きない」に見える。読み取り専用の 1 行(等幅)で映す。
+     */
+    const erSql = document.createElement('pre');
+    erSql.setAttribute('data-pkc-field', 'sql-er-sql');
+    erSql.setAttribute('aria-label', 'いま書かれている SQL');
+    erSql.hidden = true;
+    this.erSql = erSql;
+    main.append(tabsBar, queryPanel, erHost, erSql);
+    shell.append(tree.el, main);
+    this.host.append(shell);
+    this.shell = shell;
+    this.tree = tree;
+    this.treeToggle = treeToggle;
+    this.queryTab = queryTab;
+    this.queryPanel = queryPanel;
+    this.splitter = splitter;
+    this.split = layout.split === null ? SQL_SPLIT_DEFAULT : clampSqlSplit(layout.split);
+    this.applySplit(this.split);
+    this.setTreeOpen(treeOpenInitially(layout.tree, this.host.clientWidth || window.innerWidth), false);
+    // ⚠ 開いている間はこのボタンを隠す(タブと並ぶと「スキーマ」というタブに見える)。閉じる側は木の見出しの ×
+    treeToggle.addEventListener('click', () => {
+      this.setTreeOpen(true, true);
+    });
+    this.installSplitter(splitter, queryPanel);
     this.box = box;
     this.layer = layer;
     this.run = run;
@@ -562,6 +733,102 @@ export class SqlRenderer {
       }).observe(body);
     }
     return body;
+  }
+
+  /**
+   * 🔴 **左の木から、欄のキャレットの位置へ字を入れる**(#1442 段②)。
+   *
+   * 🔑 `execCommand('insertText')` を先に使う ── 欄(`textarea`)の**取り消し履歴を壊さない**(Ctrl+Z で戻せる)。
+   *   これは `input` も撃つので、`set-sql-text` の受け手(binder)が state へ写す(ここは dispatch を持たない)。
+   * ⚠ 使えない環境(古い箱 / unit)では `setRangeText` + 自前の `input`。どちらも**同じ位置・同じ字**。
+   * ⚠ 「ER 図」を見ている間に押されたら、クエリへ戻してから入れる(隠れた欄へ入れて「何も起きない」を作らない)。
+   */
+  private insertIntoEditor(text: string, kind: 'name' | 'statement'): void {
+    const box = this.box;
+    if (box === null) return;
+    if (this.erToggle?.getAttribute('aria-selected') === 'true') this.erToggle.click();
+    const start = box.selectionStart;
+    const end = box.selectionEnd;
+    const ins = insertionWithSpacing(box.value.slice(0, start), text, kind, box.value.slice(end));
+    box.focus();
+    box.setSelectionRange(start, end);
+    const before = box.value;
+    let done: boolean;
+    try {
+      done = typeof document.execCommand === 'function' && document.execCommand('insertText', false, ins);
+    } catch {
+      done = false;
+    }
+    if (!done || box.value === before) {
+      box.setRangeText(ins, start, end, 'end');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  /** 木を出し入れする。⚠ `remember` のときだけ端末へ憶える(初期化では憶えない ── 幅で決めた既定を固定しない)。 */
+  private setTreeOpen(open: boolean, remember: boolean): void {
+    this.shell?.setAttribute('data-pkc-tree', open ? 'open' : 'closed');
+    this.treeToggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (this.treeToggle !== null) this.treeToggle.hidden = open;
+    if (remember) appSqlLayout.setTree(open);
+  }
+
+  /** 境目を画面へ当てる(保存はしない)。 */
+  private applySplit(pct: number): void {
+    this.split = pct;
+    this.queryPanel?.style.setProperty('--sql-split', String(pct));
+    this.splitter?.setAttribute('aria-valuemin', '15');
+    this.splitter?.setAttribute('aria-valuemax', '85');
+    this.splitter?.setAttribute('aria-valuenow', String(pct));
+  }
+
+  /**
+   * 🔴 **欄と結果の境目を、掴んでも矢印キーでも動かせる**(#1442 段②。マウスで完結・キーボードは近道)。
+   * ⚠ 離したときだけ憶える(動かしている間に毎回書かない)。⚠ ダブルクリックで元へ(片道の操作を作らない)。
+   * ⚠ 器の高さが測れない所(0)では動かさない(`splitFromDrag`)。
+   */
+  private installSplitter(splitter: HTMLElement, panel: HTMLElement): void {
+    let drag: { id: number; startY: number; startPct: number; area: number } | null = null;
+    splitter.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      if (typeof splitter.setPointerCapture === 'function') splitter.setPointerCapture(ev.pointerId);
+      drag = {
+        id: ev.pointerId,
+        startY: ev.clientY,
+        startPct: this.split,
+        area: panel.getBoundingClientRect().height - splitter.offsetHeight,
+      };
+      splitter.setAttribute('data-pkc-dragging', 'true');
+    });
+    splitter.addEventListener('pointermove', (ev) => {
+      if (drag === null || ev.pointerId !== drag.id) return;
+      this.applySplit(splitFromDrag(drag.startPct, ev.clientY - drag.startY, drag.area));
+    });
+    const end = (ev: PointerEvent): void => {
+      if (drag === null || ev.pointerId !== drag.id) return;
+      const moved = this.split !== drag.startPct;
+      drag = null;
+      splitter.removeAttribute('data-pkc-dragging');
+      // ⚠ 動かさなかった(ただ押した)ときは憶えない(既定のまま = 「決めていない」を残す)
+      if (moved) appSqlLayout.setSplit(this.split);
+    };
+    splitter.addEventListener('pointerup', end);
+    splitter.addEventListener('pointercancel', end);
+    // 🔴 掴んだまま取り上げられた(別のウィンドウへ移った等)ときも、掴みを終える(着地前レビュー)
+    splitter.addEventListener('lostpointercapture', end);
+    splitter.addEventListener('keydown', (ev) => {
+      if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+      const next = splitFromKey(this.split, ev.key, ev.shiftKey);
+      if (next === null) return;
+      ev.preventDefault();
+      this.applySplit(next);
+      appSqlLayout.setSplit(next);
+    });
+    splitter.addEventListener('dblclick', () => {
+      this.applySplit(SQL_SPLIT_DEFAULT);
+      appSqlLayout.resetSplit();
+    });
   }
 
   /**
@@ -804,16 +1071,6 @@ export class SqlRenderer {
      *   **1 バイトも動かない** ── 門の後ろに置くと、押しても行が出ない。
      */
     /**
-     * 🔴 **打った行数に合わせて伸ばす**(#918 段②b)。
-     * ⚠ **指紋の門より前**で塗る ── 打っただけでは答えの指紋が動かない(段②a と同じ)。
-     * ⚠ **同じ字では測り直さない** ── 打鍵ごとに `scrollHeight` を読むと毎回 layout が走る。
-     * ⚠ 手で決めた高さが在るなら、こちらは何もしない。
-     */
-    if (this.box !== null && !this.handSized && this.fitted !== p.sql) {
-      this.fitted = p.sql;
-      fitSqlInput(this.box);
-    }
-    /**
      * 🔴 **層を塗り直す**(#918 段②c/②d)。⚠ **指紋の門より前**
      *   ── 打っただけでは答えの指紋が動かない(段②a / 段②b と同じ理由)。
      * ⚠ **同じ字では組み直さない** ── 打鍵ごとに升を作り直すと、
@@ -830,10 +1087,33 @@ export class SqlRenderer {
      *   同一性で足りる(中身を比べると表の数だけ走る)。
      */
     if (this.erToggle !== null) {
-      const label = p.er.open ? '構造を閉じる' : '構造を見る';
-      if (this.erToggle.textContent !== label) this.erToggle.textContent = label;
-      this.erToggle.setAttribute('aria-expanded', p.er.open ? 'true' : 'false');
+      // 🔴 「クエリ / ER 図」のタブ(#1442 段②)── 字は固定(開閉で字を替えると、いま居る所が読めない)。選ばれている方を `aria-selected` で言う
+      this.erToggle.setAttribute('aria-selected', p.er.open ? 'true' : 'false');
+      this.erToggle.tabIndex = p.er.open ? 0 : -1;
+      this.queryTab?.setAttribute('aria-selected', p.er.open ? 'false' : 'true');
+      if (this.queryTab !== null) this.queryTab.tabIndex = p.er.open ? -1 : 0;
+      if (this.queryPanel !== null) this.queryPanel.hidden = p.er.open;
+      if (this.erSql !== null) {
+        this.erSql.hidden = !p.er.open;
+        if (this.erSql.textContent !== p.sql) this.erSql.textContent = p.sql;
+      }
     }
+    /**
+     * 🔴 **左の木を塗る**(#1442 段②)。⚠ 模型は同一性で見る(`SqlTreeHandle.paint`)。⚠ 指紋の門より前
+     *   ── 構造が届いても答えの指紋は動かない。
+     */
+    this.tree?.paint(
+      treeViewOf(
+        p.er,
+        p.guest === null ? '' : [p.guest.name, ...p.extraGuests.map((g) => g.name)].join(' + '),
+        // 🔴 DuckDB の器へ頼む相手は、図を開くまで構造を採らない ── 名前だけ(`guest.tables`)を出す
+        p.guest !== null && schemaRouteOf(p.guest, p.extraGuests).duck !== undefined
+          ? p.extraGuests.length === 0
+            ? p.guest.tables
+            : duckDbTableNamesOfNames([p.guest.name, ...p.extraGuests.map((g) => g.name)])
+          : null,
+      ),
+    );
     /**
      * 🔴 **繋ぐモード / ここからの列も指紋に入れる**(#918 段⑤d-1)。
      * ⚠ 入れないと、繋ぐを押しても「印」も「案内」も画面に出ない
@@ -858,7 +1138,7 @@ export class SqlRenderer {
      * 🔴 **器の高さが変わったら窓を見直す**(#918 段③、着地前レビューが出した)。
      *
      * 🔴 **指紋の門より前に置く。** ⚠ ここを門の後ろに置くと、いちばん多い経路で
-     *   効かない ── すぐ上の `fitSqlInput` は**打つたびに欄の高さを変える**ので、
+     *   効かない ── すぐ上の欄(SQL を打つ所)は**打つたびに行数が変わり**(境目も掴める)ので、
      *   同じ flex 列に居る `sql-body` の高さも一緒に動く。答えは変わっていないので
      *   指紋は動かず、門の後ろでは 1 度も通らない。
      * 🔴 実害は**打った字を消したとき**に出る ── 欄が縮んで器が広がるのに、
@@ -1107,7 +1387,7 @@ export class SqlRenderer {
    *   🔑 `CLAUDE.md §10`「置き換えられる側がついでに提供していた性質」の 1 つで、
    *   これは**こちらで置き直せる**(だから置き直す)。
    * ⚠ 測れない所(happy-dom は 0 を返す)では**何もしない** ── 当てると
-   *   幅 0 の表になる(段②b の `fitSqlInput` と同じ作法)。
+   *   幅 0 の表になる(測れない所では触らない作法)。
    */
   private measureAndPin(): void {
     const tbody = this.tbody;
@@ -1182,21 +1462,6 @@ function spacerRow(cols: number, px: number): HTMLTableRowElement {
  * ⚠ 「500 行」「0 行」で止めると、マニュアルを開いていない人はそこで手が止まる。
  */
 /**
- * 🔴 **打った行数に合わせて高さを合わせる**(#918 段②b。user 裁定 2026-09-14)。
- *
- * 🔑 **下限と上限は CSS が持つ**(`min-height: 5em` / `max-height: min(40vh, 22em)`)──
- *   ここは「中身の高さ」を当てるだけで、**縮める向きの判断を持たない**
- *   (選んでいただいた札は「伸びる」なので、いまより小さくはならない)。
- * ⚠ 一度 `auto` に戻してから測る ── `scrollHeight` は**いまの高さに引きずられる**ので、
- *   そうしないと**伸びる一方**になって二度と戻らない。
- * ⚠ **測れない所では触らない** ── happy-dom は `scrollHeight` に **0** を返すので、
- *   そのまま当てると**欄が消える**(CLAUDE.md §2「本命の分岐を unit は通らない」の裏返しで、
- *   ここは**unit が通る側で壊れる**)。
- *
- * @returns 実際に付いた高さ(px)。⚠ 手で動かしたかの見分けに使うので、
- *   **上限で切られた後の値**を返す(当てた値ではない)。
- */
-/**
  * 🔴 **色分けと行番号の層を塗る**(#918 段②c/②d)。
  *
  * 🔑 **升 1 つ = 論理行 1 本。** 番号は升の先頭に置くので、折り返して背が高くなっても
@@ -1220,38 +1485,6 @@ export function paintSqlLayer(layer: HTMLElement, text: string): void {
     code.innerHTML = lines[i] === '' ? '&#8203;' : lines[i]!;
     layer.append(no, code);
   }
-}
-
-export function fitSqlInput(ta: HTMLTextAreaElement): number {
-  ta.style.height = 'auto';
-  const want = ta.scrollHeight;
-  if (want <= 0) {
-    ta.style.height = '';
-    return 0;
-  }
-  /**
-   * 🔴 **枠のぶんを足す**(2026-09-14 に実ブラウザの実測で判明)。
-   *
-   * ⚠ `scrollHeight` は**中身 + 内側の余白**で、**枠を含まない**。ところが欄は
-   *   `box-sizing: border-box` なので、その値をそのまま `height` に当てると
-   *   **枠のぶん(上下 1px ずつ)が中に食い込み、常に 2px 足りない**。
-   * 🔑 実測:`scrollHeight 141` に対し `clientHeight 139` ── **欄が 2px 転がる**
-   *   状態になっていた(段②b `7a92990` から在った。当時は気づけなかった)。
-   *
-   * ⚠ **枠の太さを直に読む** ── 数を書くと、枠を変えた日に片方だけ古くなる(§7)。
-   * ⚠ **`offsetHeight - clientHeight` では採らない** ── あれは**横の転がし棒**も
-   *   含むので、出た日に高さが増え、次の回でまた増える**伸びる一方の輪**になる。
-   *   ⚠ しかも happy-dom は `clientHeight` に 0 を返すので、差が**高さ全部**になる
-   *   (1 稿目はそれで unit が 3 件落ちた)。
-   * ⚠ **`content-box` のときは足さない** ── そこでは枠は中に食い込まない。
-   */
-  const cs = ta.ownerDocument.defaultView?.getComputedStyle(ta);
-  const frame =
-    cs !== undefined && cs.boxSizing === 'border-box'
-      ? (Number.parseFloat(cs.borderTopWidth) || 0) + (Number.parseFloat(cs.borderBottomWidth) || 0)
-      : 0;
-  ta.style.height = `${String(want + frame)}px`;
-  return ta.offsetHeight;
 }
 
 /**

@@ -19,6 +19,7 @@
  */
 
 import type { SchemaLink } from './schema-digest';
+import { NORMALIZED_CHARS } from './sql-guard';
 
 /** ⚠ 名前として裸で書くと別の意味になる語(抜粋)。ここに当たったら引用符で囲う。 */
 const RESERVED = new Set([
@@ -48,7 +49,11 @@ const JOIN_PREFIX = new Set(['inner', 'left', 'right', 'full', 'outer', 'cross',
  * ⚠ 予約語と、記号を含む名前だけ囲う(中の `"` は 2 つ重ねる)。
  */
 export function erQuote(name: string): string {
-  const bare = /^[A-Za-z_-￿][A-Za-z0-9_-￿]*$/.test(name);
+  /**
+   * 🔴 **全角 ASCII・全角空白を含む名前は囲う**(着地前レビュー R2)。⚠ 走らせる前の門(`normalizeSqlInput`)が引用符の**外**の
+   *   全角を半角へ直すので、裸で書いた `売上（月次）` は `売上(月次)` になって壊れる。引用符の中は直されない。
+   */
+  const bare = /^[A-Za-z_-￿][A-Za-z0-9_-￿]*$/.test(name) && !NORMALIZED_CHARS.test(name);
   if (bare && !RESERVED.has(name.toLowerCase())) return name;
   return `"${name.replace(/"/g, '""')}"`;
 }

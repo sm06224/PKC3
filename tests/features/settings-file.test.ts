@@ -223,6 +223,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
       // 🔴 #1087: 残りの鍵にも検査を付けた(見本の網羅は tests/adapter/settings-file-valid.test.ts が store から引く)
       'pkc3.panes': PANES[0]!,
       'pkc3.pane-sizes': `${SIZED_PANES[0]!}:300`,
+      'pkc3.sql-layout': '1:45',
       'pkc3.open-in-edit': '1',
       'pkc3.accent': 'blue',
       'pkc3.font': 'mincho',

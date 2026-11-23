@@ -1745,7 +1745,8 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   「右にある」ではなく、**読む順(上の行 → 同じ行なら右)で後ろ**であることを見る。
    *   ⚠ 折り返した行の先頭は x が同じになる(256)ので、x だけで見ると正しい並びが落ちる。
    */
-  for (const f of ['sql-run', 'sql-to-note', 'sql-to-file', 'sql-schema-to-note', 'sql-er-toggle', 'sql-history']) {
+  // 🔑 #1442 段②: 「構造をノートへ」は「その他 ▾」の中(開くまで寸法が無い)へ、「ER 図」はタブへ移った
+  for (const f of ['sql-run', 'sql-to-note', 'sql-to-file', 'sql-more', 'sql-history']) {
     const b = await boxOf(f);
     expect(
       b.y > sourceBox.y + 2 || b.x > sourceX,
@@ -1952,11 +1953,8 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   expect(fit.layerLines, `層と欄で折り返しの数が違う(色が字とずれる): ${JSON.stringify(fit)}`).toBe(
     fit.taLines,
   );
-  // 🔴 ③欄が転がっていない(`fitSqlInput` が枠のぶんを足していないと 2px 足りない)
-  expect(
-    fit.taScroll - fit.taClient,
-    `欄の高さが中身に足りていない: ${JSON.stringify(fit)}`,
-  ).toBeLessThanOrEqual(1);
+  // ③(欄が中身に合わせて伸びる)は #1442 段②で無くなった ── 欄は上の領域を埋め、足りなければ**欄自身が転がる**(境目を掴んで広げる)。
+  //   ここで見るのは①②(層と欄の重なり)だけ。
 
   await page.fill('[data-pkc-field="sql-input"]', 'SELECT * FROM csv');
   await clickReal(page, '[data-pkc-action="run-sql"]');
@@ -2017,7 +2015,10 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   expect((await erScroll.boundingBox())!.height, '描き直しで高さが元へ戻った').toBeCloseTo(hAfter, 0);
 
   // 🔑 欄を空にしてから押す ── 「空 + 表」が `select * from 表` になる道である
+  // ⚠ #1442 段②: 欄は「クエリ」のタブ、図は「ER 図」のタブ ── 欄を空にしてから図へ戻る
+  await clickReal(page, '[data-pkc-field="sql-query-tab"]');
   await page.fill('[data-pkc-field="sql-input"]', '');
+  await clickReal(page, '[data-pkc-field="sql-er-toggle"]');
   await clickReal(page, '[data-pkc-field="sql-er-table"]');
   await expect(
     page.locator('[data-pkc-field="sql-input"]'),
@@ -2025,10 +2026,14 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   ).toHaveValue('select * from csv');
 
   // ⚠ 組んだ字が**本当に走る**ところまで見る(組めただけでは「取得できた」と言えない)
+  await clickReal(page, '[data-pkc-field="sql-query-tab"]');
   await clickReal(page, '[data-pkc-action="run-sql"]');
   await expect(sqlTable.locator('tbody tr'), '図から組んだ SQL で行が返らない').toHaveCount(2);
+  await expect(erBox, '「クエリ」のタブで図が畳まれていない').toHaveCount(0);
 
-  // 🔴 畳めること ── 帰り道が無い面を作らない(#300)
+  // 🔴 畳めること ── 帰り道が無い面を作らない(#300)。開く → もう一度押して畳む(「ER 図」のタブは開閉の反転)
+  await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+  await expect(erBox, '開き直せない').toHaveCount(1, { timeout: 15_000 });
   await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
   await expect(erBox, 'もう一度押しても畳めない').toHaveCount(0);
 
@@ -2186,7 +2191,9 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    */
   await clickReal(page, '[data-pkc-action="sql-er-connect-toggle"]');
   await expect(connectBtn, '「つなぐ」が切にならない').toHaveAttribute('aria-pressed', 'false');
+  await clickReal(page, '[data-pkc-field="sql-query-tab"]');
   await page.fill('[data-pkc-field="sql-input"]', 'select * from sheet1');
+  await clickReal(page, '[data-pkc-field="sql-er-toggle"]');
   await clickReal(page, colOf(0));
   await expect(
     page.locator('[data-pkc-field="sql-input"]'),
@@ -2368,6 +2375,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   ⚠ 直前の答えは `SELECT count(*) AS n FROM made` ── 器に**作った表**を引く SQL なので、
    *   「書き出しが同じ器で、もう一度その SQL を走らせている」ことも同時に見える。
    */
+  await clickReal(page, '[data-pkc-field="sql-out"] > summary'); // 🔑 #1442 段②: 「書き出す ▾」の中
   await clickReal(page, '[data-pkc-field="sql-to-file"]');
   const parquetMenu = page.locator('[data-pkc-region="context-menu"]');
   await expect(parquetMenu.locator('button'), 'DuckDB の答えなのに Parquet が並んでいない').toHaveCount(4);
@@ -2546,7 +2554,9 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(erHost.locator('[data-pkc-field="sql-er-lines"] line'), '線が出ている(外部キーは無い)').toHaveCount(0);
   // 🔴 列を押すと、打つ欄に SELECT が入る(図を見ながら組める)
   // ⚠ 欄を**空にしてから**押す ── 打ちかけの字が在ると図は足さない(「いま打っている字は、この図からは足せません」)
+await clickReal(page, '[data-pkc-field="sql-query-tab"]');
   await page.fill('[data-pkc-field="sql-input"]', '');
+  await clickReal(page, '[data-pkc-field="sql-er-toggle"]');
   await clickReal(page, '[data-pkc-field="sql-er-table"][data-pkc-name="parquet"]');
   await expect(page.locator('[data-pkc-field="sql-input"]'), '表を押しても SELECT が入らない').toHaveValue(
     /select\s+\*\s+from\s+parquet/iu,
@@ -2785,40 +2795,23 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
   await expect(input, 'Esc で打った字まで消えた').toHaveValue(draft + '  ');
 
   /**
-   * ⑨ 🔴 **打った行数に合わせて伸びる**(#918 段②b。user 裁定 2026-09-14)。
+   * ⑨ 🔴 **欄の高さは行数で変わらず、境目が決める**(#1442 段②。旧「打った行数に合わせて伸びる」〈#918 段②b〉を置き換えた)。
    *
-   * 🔴 **ここでしか測れない** ── happy-dom は `scrollHeight` に **0** を返すので、
-   *   unit は「高さを当てない」側の枝しか通らない(CLAUDE.md §2)。
-   * 🔑 1 行の高さは**その場で実測する**(font も DPR も環境で変わるので、
-   *   値を pin しない ── 見るのは**同じ回の中での差**だけ)。
+   * 🔴 **ここでしか測れない** ── happy-dom は `scrollHeight` に **0** を返す(CLAUDE.md §2)。
+   * 🔑 見るのは**同じ回の中での差**だけ(font も DPR も環境で変わるので値を pin しない)。
    * ⚠ **新しい起動は増やしていない** ── ⑧ の続きである。
    */
   await input.fill('select 1');
   const h1 = (await input.boundingBox())!.height;
-  const eight = Array.from({ length: 8 }, (_, i) => `select ${String(i)}`).join('\n');
-  await input.fill(eight);
-  const h8 = (await input.boundingBox())!.height;
-  const lineH = (h8 - h1) / 7;
-  // ⚠ **前提を assert する** ── 伸びていなければ「一致しない」ではなく「前提が崩れている」と読める
-  expect(
-    lineH,
-    `1 行ぶん伸びていない(1 行 ${String(h1)}px → 8 行 ${String(h8)}px)`,
-  ).toBeGreaterThan(8);
-
-  // 🔴 **上限で止まる** ── 止まらないと、答えの表が画面から押し出される
-  const many = Array.from({ length: 60 }, (_, i) => `select ${String(i)}`).join('\n');
+  const many = Array.from({ length: 80 }, (_, i) => `select ${String(i)}`).join('\n');
   await input.fill(many);
-  const h60 = (await input.boundingBox())!.height;
-  const wouldBe = h1 + lineH * 59;
-  expect(
-    h60,
-    `上限が効いていない(切らなければ ${String(Math.round(wouldBe))}px になる)`,
-  ).toBeLessThan(wouldBe * 0.7);
-  // ⚠ 上限に当たっても**打てなくならない**(欄自身が転がる)
+  const h80 = (await input.boundingBox())!.height;
+  expect(Math.abs(h80 - h1), `行数で欄の高さが変わった(1 行 ${String(h1)}px → 80 行 ${String(h80)}px。境目が決めるはず)`).toBeLessThan(2);
+  // ⚠ 入りきらないときは**欄自身が転がる**(打った字が読める)
   const scrolls = await input.evaluate(
     (el) => (el as HTMLTextAreaElement).scrollHeight > (el as HTMLTextAreaElement).clientHeight,
   );
-  expect(scrolls, '上限で切られたのに、欄の中を転がせない(打った字が読めない)').toBe(true);
+  expect(scrolls, '入りきらないのに、欄の中を転がせない(打った字が読めない)').toBe(true);
 
   /**
    * ⑩ 🔴 **答えを file へ書き出す**(#918 段④。user 要望「`copy to` 使えないし」)。
@@ -2834,6 +2827,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    */
   const toFile = page.locator('[data-pkc-field="sql-to-file"]');
   await expect(toFile, '答えが出ているのに押せない').toBeEnabled();
+  await clickReal(page, '[data-pkc-field="sql-out"] > summary'); // 🔑 #1442 段②: 「書き出す ▾」の中
   await clickReal(page, '[data-pkc-field="sql-to-file"]');
   const kinds = page.locator('[data-pkc-region="context-menu"]');
   await expect(kinds, '形の一覧が出ない(押した 1 回で閉じている)').toBeVisible();
@@ -3097,7 +3091,9 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
       '線の札に「どの列どうしか」が(器での名前で)書かれていない',
     ).toHaveText('kakei_売上.客id → kakei_客.id');
     // ⚠ 欄を空にしてから押す(打ちかけの字が在ると図は足さない)
+    await clickReal(page, '[data-pkc-field="sql-query-tab"]');
     await page.fill('[data-pkc-field="sql-input"]', '');
+    await clickReal(page, '[data-pkc-field="sql-er-toggle"]');
     await clickReal(page, '[data-pkc-field="sql-er-table"][data-pkc-name="kakei_売上"]');
     await clickReal(
       page,
@@ -3106,6 +3102,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
     await expect(page.locator('[data-pkc-field="sql-input"]'), '列を押しても SELECT が入らない').toHaveValue(
       /select\s+品名\s+from\s+kakei_売上/iu,
     );
+    await clickReal(page, '[data-pkc-field="sql-query-tab"]');
     await clickReal(page, '[data-pkc-action="run-sql"]');
     await expect(sqlTable.locator('thead th:not([data-pkc-field="sql-rownum"])'), '図から組んだ SELECT が引けない').toHaveText(['品名'], {
       timeout: 60_000,
@@ -3115,7 +3112,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
       'みかん',
       'ぶどう',
     ]);
-    await clickReal(page, '[data-pkc-action="sql-er-toggle"]');
+    // (図は上の「クエリ」のタブで閉じてある)
 
     /**
      * ⑭ 🔴 **並べた全部の構造が、1 枚のノートになる**(#918。「構造をノートへ書き出す」も断らない)。
@@ -3124,6 +3121,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
      *   前提(開いている物)が変わる。🔑 新しい起動は増やさない(#820)。
      * 🔴 本文は**構造だけ**(行の中身は 1 行も入らない)── 開いたノートの目次に「表名(表・N 行)」が並ぶ。
      */
+    await clickReal(page, '[data-pkc-field="sql-more"] > summary');
     await clickReal(page, '[data-pkc-action="sql-schema-to-note"]');
     await expect(note, '「構造をノートへ」が書き出していない').toContainText('というノートに書き出しました', {
       timeout: 60_000,

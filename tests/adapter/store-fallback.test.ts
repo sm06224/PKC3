@@ -53,6 +53,7 @@ import { ColorSwatchStore } from '@adapter/ui/render/color-swatch';
 import { TooNarrowOkStore } from '@adapter/ui/render/too-narrow';
 import { EditorModeStore } from '@adapter/ui/render/editor-mode';
 import { PaneSizeStore } from '@adapter/ui/render/pane-size';
+import { SqlLayoutStore } from '@adapter/ui/render/sql-layout';
 import { QueryKeyStore } from '@adapter/ui/render/query-key-store';
 import { CalcDraftStore } from '@adapter/ui/render/calc-draft-store';
 import { ShellHistoryStore } from '@adapter/ui/render/shell-history-store';
@@ -346,6 +347,16 @@ const CASES: readonly {
     },
     a: 320,
     b: 240,
+  },
+  {
+    // 🔑 SQL 画面の並び(#1442 段②)── 境目の割合を書き読みする(木の出し入れは同じ書く口を通る)
+    name: 'SqlLayoutStore',
+    make: (st: StorageLike | null = null) => {
+      const s = new SqlLayoutStore(st);
+      return { write: (v) => void s.setSplit(v as number), read: () => s.get().split };
+    },
+    a: 30,
+    b: 70,
   },
   {
     name: 'QueryKeyStore',

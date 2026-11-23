@@ -34,7 +34,7 @@ import { sqlEngineOf } from '@features/query/sql-engine';
 import { checkReadOnlySql } from '@features/query/sql-guard';
 import { checkAddSource } from '@features/query/sql-multi-source';
 
-export type SqlAction = Extract<Dispatchable, { type: 'SET_SQL_TEXT' | 'RUN_SQL' | 'SQL_HISTORY_STEP' | 'SQL_HISTORY_PICK' | 'SQL_EXPORT_PARQUET' | 'SQL_SCHEMA_TO_NOTE' | 'SQL_ER_TOGGLE' | 'SQL_ER_CONNECT_TOGGLE' | 'SQL_ER_PICK' | 'SQL_ER_UNLINK' | 'SQL_ER_PRESS' | 'SQL_ER_LOADED' | 'SQL_ER_FAILED' | 'SET_SQL_RESULT' | 'SQL_SAVED' | 'SET_SQL_ENGINE' | 'SET_SQL_SOURCE' | 'ADD_SQL_SOURCE' | 'REMOVE_SQL_SOURCE' | 'SQL_GUEST_OPENED' | 'SQL_GUEST_FAILED' | 'SQL_SAVE_FAILED' | 'SQL_DUCK_LOADING' | 'SQL_RUN_FAILED' }>;
+export type SqlAction = Extract<Dispatchable, { type: 'SET_SQL_TEXT' | 'RUN_SQL' | 'SQL_HISTORY_STEP' | 'SQL_HISTORY_PICK' | 'SQL_EXPORT_PARQUET' | 'SQL_SCHEMA_TO_NOTE' | 'SQL_SCHEMA_RELOAD' | 'SQL_ER_TOGGLE' | 'SQL_ER_CONNECT_TOGGLE' | 'SQL_ER_PICK' | 'SQL_ER_UNLINK' | 'SQL_ER_PRESS' | 'SQL_ER_LOADED' | 'SQL_ER_FAILED' | 'SET_SQL_RESULT' | 'SQL_SAVED' | 'SET_SQL_ENGINE' | 'SET_SQL_SOURCE' | 'ADD_SQL_SOURCE' | 'REMOVE_SQL_SOURCE' | 'SQL_GUEST_OPENED' | 'SQL_GUEST_FAILED' | 'SQL_SAVE_FAILED' | 'SQL_DUCK_LOADING' | 'SQL_RUN_FAILED' }>;
 
 export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
   switch (action.type) {
@@ -244,6 +244,27 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
               : {}),
           },
         ],
+      };
+    }
+    case 'SQL_SCHEMA_RELOAD': {
+      const p = state.sqlPage;
+      // 相手を開いている最中は頼まない(開けた回が頼む)/ 🔴 採っている最中の連打は無視する(着地前レビュー W2)
+      if ((p.guestChosen !== '' && p.guest === null) || p.er.loading) return { state, events: [] };
+      const source = erSourceKey(p.guest, p.extraGuests);
+      const token = p.er.token + 1;
+      const keep = p.er.model !== null && p.er.source === source;
+      return {
+        state: {
+          ...state,
+          sqlPage: {
+            ...p,
+            // 模型は消さない(木が空に戻らない)。⚠ `loading` は立てる(木に「読み込んでいます」/ ↻ の `aria-busy`)
+            er: keep
+              ? { ...p.er, loading: true, token, note: '' }
+              : { ...p.er, loading: true, model: null, note: '', source, token, mine: [], pendingFrom: null },
+          },
+        },
+        events: [{ type: 'REQUEST_SQL_ER', token, ...schemaRouteOf(p.guest, p.extraGuests) }],
       };
     }
     case 'SQL_SCHEMA_TO_NOTE': {
@@ -733,7 +754,7 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
              *   (同じ断りが 2 行出ると、別々のことが起きたように見える)。
              * 🔑 `mine` / `pendingFrom` も一緒に捨てる(#918 段⑤d-1)。
              */
-            er: { ...state.sqlPage.er, loading: false, model: null, source: '', mine: [], pendingFrom: null },
+            er: { ...state.sqlPage.er, loading: false, model: null, source: '', token: state.sqlPage.er.token + 1, mine: [], pendingFrom: null },
           },
         },
         events: [],
