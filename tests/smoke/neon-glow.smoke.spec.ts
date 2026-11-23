@@ -39,6 +39,7 @@ const FIXTURE = [
   ...Array.from({ length: 14 }, (_, i) => [
     `## 2026-10-${String(1 + Math.floor(i / 3)).padStart(2, '0')} ${String(8 + (i % 3) * 3).padStart(2, '0')}:00:00`,
     `記録${i + 1}の本文です。作業の経過をここに書きます。`,
+    ...(i === 1 ? ['補足の段落です。数字の突き合わせは明日にまわす。'] : []),
     ...(i === 0 ? [WIDE_TABLE, `\`\`\`ts\n${WIDE_CODE}\n\`\`\``] : []),
   ]).flat(),
 ].join('\n\n');
@@ -111,6 +112,18 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
   const target = await rectOf(page, cardSel, 1);
   const ringClip = { x: target.x + 100, y: target.y - 3, width: 240, height: 8 };
   const groundClip = { x: target.x + target.width - 250, y: target.y + 10, width: 200, height: 8 };
+  // 同じカードの中の、ブロックとブロックの境目(2 つ目の記録の 1 つ目の塊と 2 つ目の塊の間)── カードの内側は光らない
+  const seamY = await page
+    .locator(cardSel)
+    .nth(1)
+    .evaluate((h) => {
+      const second = h.nextElementSibling?.nextElementSibling as HTMLElement | null;
+      if (second === null || second === undefined) return -1;
+      return second.getAttribute('data-pkc-log-card') === 'first' || second.tagName === 'H2' ? -1 : second.getBoundingClientRect().top;
+    });
+  expect(seamY, '検査の前提: 2 つ目の記録が 2 つ以上の塊を持つ').toBeGreaterThan(0);
+  const seamClip = { x: target.x + 12, y: seamY - 5, width: target.width - 24, height: 10 };
+  const seamRest = await pixels(page, seamClip);
   const ringRest = await pixels(page, ringClip);
   const groundRest = await pixels(page, groundClip);
 
@@ -153,6 +166,8 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
   const groundLit = await pixels(page, groundClip);
   expect(changed(ringRest, ringLit), '輪郭の画素が静止のときと同じ(光っていない)').toBeGreaterThan(ringClip.width * 2 * 0.5);
   expect(changed(groundRest, groundLit), '内側の地まで光った / 変わった').toBe(0);
+  // 🔴 カードの中のブロックの境目(途中の塊の上下)に、線もにじみも出ない(出るのは外周だけ)
+  expect(changed(seamRest, await pixels(page, seamClip)), 'カードの中のブロックの境目に光の線が出た').toBe(0);
 
   // ④ 🔴 スクロール: ポインタを止めたまま画面を送ると、光の位置(--gy)がそのコマで追いつく(pointermove 無し)
   const gyOf = (): Promise<{ gy: number; top: number }[]> =>
