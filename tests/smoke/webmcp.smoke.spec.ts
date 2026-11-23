@@ -293,7 +293,8 @@ test('🔴 WebMCP: OFF では登録されず / ON で 5 本 / 許可のダイア
   await useSplitEditor(pageB);
   await installModelContext(pageB);
   await gotoApp(pageB);
-  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText('保存はメインのタブ経由');
+  // 🔴 2026-11-23: 本体経由の印は「メッセージ」の入口の説明に出る(画面下の常設の行を廃止した)
+  await expect(pageB.locator('[data-pkc-field="message-entry"]').first()).toHaveAttribute('aria-label', /保存はメインのタブ経由/);
   expect(await toolNames(pageB), '2 枚目のタブにも道具が登録された').toEqual([]);
   // ⚠ お知らせは 1 枚目で既読にした(同じ profile)── 2 枚目には出ない
   await clickReal(pageB, '[data-pkc-action="set-view"][data-pkc-view="settings"]');

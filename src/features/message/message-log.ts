@@ -367,6 +367,35 @@ export function countUnread(body: string, readAtIso: string | null): number {
 }
 
 /**
+ * 🔴 **簡易メッセージ履歴(ポップオーバー)の 1 件**。`at` は見出しの時刻(`YYYY-MM-DD HH:MM:SS`)。
+ * ⚠ 節の字は `formatMessageSection` が組んだ後(出所の見出し + 無害化済みの字)のまま ── 整形し直さない。
+ */
+export interface RecentMessage {
+  readonly at: string;
+  readonly kind: MessageKind;
+  readonly text: string;
+}
+
+/**
+ * 🔴 **本文の末尾から新しい順に最大 `limit` 件を読み出す**(簡易履歴の起動時の種まき。`seedUnreadFromDisk` と同じ本文を読む)。
+ * ⚠ 処理の記録(`job`)はメッセージの画面には出さない ── 読み飛ばす。
+ */
+export function recentMessages(body: string, limit: number): RecentMessage[] {
+  const out: RecentMessage[] = [];
+  const sections = splitSections(body);
+  for (let i = sections.length - 1; i >= 0 && out.length < limit; i -= 1) {
+    const section = sections[i] as string;
+    const m = SECTION_HEAD_RE.exec(section);
+    if (!m) continue;
+    const kind = LABEL_TO_KIND.get(m[2] ?? '');
+    if (kind === undefined || kind === 'job') continue;
+    const rest = section.slice(m[0].length).trim();
+    out.push({ at: m[1] ?? '', kind, text: rest });
+  }
+  return out;
+}
+
+/**
  * 🔴 **控えの節をノートの本文の後ろへ足す**(#1087 M1)。⚠ 節は `formatMessageSection` が組んだ後の字で、
  *   ここでは**何も整形し直さない**(普通の節と同じ形のまま並ぶ)。控えは作られた順に渡す。
  */

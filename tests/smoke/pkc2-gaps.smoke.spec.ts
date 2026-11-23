@@ -16,6 +16,7 @@ import {
   createEntry,
   gotoApp,
   useSplitEditor,
+  openMessagePopover,
 } from './helpers';
 
 test.beforeEach(async ({ page }) => {
@@ -178,7 +179,40 @@ test('🔴 保存領域が使えない警告が危険色・太字になり、隣
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
 
-  const warn = page.locator('[data-pkc-region="status"] [data-pkc-field="status-warning"]');
+  // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 実害のある警告は、起動時から**浮き札に常設**(時間で消えない)・
+  //   「バックアップを書き出す」つき。× で閉じるのはこのセッションの間だけ(次の起動でまた出る)。入口は赤い「!」を譲らず、起動時に積んだ注意(未読 1 件)があっても同じ。
+  const sevToast = page.locator('[data-pkc-region="status"]');
+  await expect(sevToast, '実害のある警告が浮き札に出ていない').toBeVisible();
+  await expect(sevToast).toContainText('保存領域が使えません');
+  await expect(sevToast.locator('[data-pkc-field="status-backup-toast"]'), '浮き札にバックアップのボタンが無い').toBeVisible();
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]'), '起動時の注意が未読に数えられていない').toHaveAttribute('aria-label', /未読 \d+ 件/);
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]')).toHaveText('!');
+  await page.waitForTimeout(7_000);
+  await expect(sevToast, '時間で消えた(常設でない)').toBeVisible();
+  // 🔴 ほかの知らせが同時に出ても、警告の行は別(切れない・混ざらない)。ふつうの × は警告を隠さず、警告の専用の × だけが隠す
+  await makeNote(page, 'SevNote', 'sev-body');
+  await clickReal(page, '[data-pkc-action="copy-entry-link"]');
+  const sevText = page.locator('[data-pkc-region="status"] [data-pkc-field="status-text"]');
+  await expect(sevText, '警告と同時に別の知らせが出ない').not.toHaveText('', { timeout: 10_000 });
+  await expect(sevToast.locator('[data-pkc-field="status-severe"]'), '警告の専用の行が消えた').toBeVisible();
+  await expect(sevToast.locator('[data-pkc-field="status-severe-text"]')).toContainText('保存領域が使えません');
+  await clickReal(page, '[data-pkc-region="status"] [data-pkc-field="status-close"]');
+  await expect(sevText, 'ふつうの × で知らせが消えない').toHaveText('');
+  await expect(sevToast.locator('[data-pkc-field="status-severe"]'), 'ふつうの × で実害の警告が消えた').toBeVisible();
+  await clickReal(page, '[data-pkc-region="status"] [data-pkc-field="status-severe-close"]');
+  await expect(sevToast, '専用の × で閉じられない').toBeHidden();
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]'), '閉じても赤い「!」は残る').toHaveText('!');
+  await page.reload();
+  await expect(page.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
+  await expect(page.locator('[data-pkc-region="status"]'), '次の起動で再び出ていない').toBeVisible();
+  // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 警告は入口の赤い「!」と、簡易履歴の「いまの状態」に出る
+  await expect(
+    page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]'),
+    '実害の警告なのに入口のバッジが赤い「!」になっていない',
+  ).toHaveText('!');
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]')).toHaveAttribute('data-pkc-tone', 'danger');
+  const warnPop = await openMessagePopover(page);
+  const warn = warnPop.locator('[data-pkc-field="status-warning"]');
   await expect(warn, '保存領域が取れなかったのに警告が出ていない(前提: 退避経路を通れていない)').toContainText(
     '保存領域が使えません',
   );
@@ -196,9 +230,11 @@ test('🔴 保存領域が使えない警告が危険色・太字になり、隣
 
   // 空のコレクションは書き出せない(「書き出せるノートが 1 件もありません」)── 書いたものがある状態で押す
   await makeNote(page, 'MemoryNote', 'memory-body');
+  // ⚠ 外を押すと簡易履歴は閉じる ── 押す前に開き直す
+  await openMessagePopover(page);
   const [dl] = await Promise.all([
     page.waitForEvent('download', { timeout: 30_000 }),
-    clickReal(page, '[data-pkc-field="status-backup"]'),
+    clickReal(page, warnPop.locator('[data-pkc-field="status-backup"]')),
   ]);
   expect(dl.suggestedFilename(), '隣のボタンのバックアップの末尾が .pkc3-full.zip ではない').toMatch(
     /\.pkc3-full\.zip$/,

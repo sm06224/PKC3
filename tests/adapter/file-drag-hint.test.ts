@@ -18,7 +18,7 @@ import {
   setupFileDragHint,
   subscribeFileDragHint,
 } from '../../src/adapter/ui/actions/file-drag-hint';
-import { statusBarWithFileDrag, type StatusLineParts } from '../../src/adapter/ui/render/status-line';
+import { composeStatusModel, type StatusLineParts } from '../../src/adapter/ui/render/status-line';
 
 const isImageMime = (m: string): boolean => m.startsWith('image/');
 
@@ -185,7 +185,7 @@ describe('字は routeFiles と同じ振り分けで決まる(#1380 ⑤)', () =>
   });
 });
 
-describe('出し先: ステータスバーが見えていればそこ、畳まれていれば畳んだままラベル(#1380 ①)', () => {
+describe('出し先: 常設の帯は無い ── ドラッグ中の 1 行は常に左の一覧の下端のラベルへ(#1380 ①。2026-11-23 に帯を廃止)', () => {
   const base: StatusLineParts = {
     phase: 'ready',
     statusBase: '',
@@ -198,49 +198,27 @@ describe('出し先: ステータスバーが見えていればそこ、畳ま�
     errorLine: '',
     fileDragLine: DROP_LINE_ATTACH,
   };
-  const ctx = { hasTooNarrow: false, hasUnreadMessages: false };
 
-  it('ふだん(畳まれている)は畳んだまま、字はラベルへ', () => {
-    expect(statusBarWithFileDrag(base, ctx)).toEqual({ text: '', hide: true, floating: DROP_LINE_ATTACH });
+  it('ふだん(知らせが無い)でも、字はラベル用の fileDrag に入り、浮き札には出ない', () => {
+    const m = composeStatusModel(base);
+    expect(m.fileDrag).toBe(DROP_LINE_ATTACH);
+    expect(m.toast).toBe('');
   });
 
-  it('見えている(知らせがある)ときはそこに足す。ラベルは出さない', () => {
-    const r = statusBarWithFileDrag({ ...base, noticeLine: 'コピーしました' }, ctx);
-    expect(r.hide).toBe(false);
-    expect(r.floating).toBe('');
-    expect(r.text).toBe(`${DROP_LINE_ATTACH} — コピーしました`);
+  it('知らせが出ていても、ドラッグの字は知らせに混ざらない(浮き札の字は知らせだけ)', () => {
+    const m = composeStatusModel({ ...base, noticeLine: 'コピーしました' });
+    expect(m.fileDrag).toBe(DROP_LINE_ATTACH);
+    expect(m.toast).toBe('コピーしました');
   });
 
-  it('編集中(状態語がある)なら見えているのでバーに足す', () => {
-    const r = statusBarWithFileDrag({ ...base, phase: 'editing' }, ctx);
-    expect(r).toEqual({ text: `編集中 — ${DROP_LINE_ATTACH}`, hide: false, floating: '' });
+  it('ドラッグしていなければ fileDrag は空', () => {
+    expect(composeStatusModel({ ...base, fileDragLine: '' }).fileDrag).toBe('');
   });
 
-  it('ドラッグしていなければ今までどおり(畳まれたまま・ラベルなし)', () => {
-    expect(statusBarWithFileDrag({ ...base, fileDragLine: '' }, ctx)).toEqual({
-      text: '',
-      hide: true,
-      floating: '',
-    });
-  });
-
-  it('🔴 「保存中…」も畳まれたバーを出さない(出すと全体が 20px ずれて、押す直前のボタンが動く)', () => {
-    const saving = { ...base, fileDragLine: '', savingLine: '⏳ 保存中…' };
-    expect(statusBarWithFileDrag(saving, ctx)).toEqual({ text: '', hide: true, floating: '⏳ 保存中…' });
-  });
-
-  it('保存中とドラッグが重なれば、ラベルに 2 つとも出す(バーは畳んだまま)', () => {
-    const both = { ...base, savingLine: '⏳ 保存中…' };
-    expect(statusBarWithFileDrag(both, ctx)).toEqual({
-      text: '',
-      hide: true,
-      floating: `${DROP_LINE_ATTACH} — ⏳ 保存中…`,
-    });
-  });
-
-  it('バーが見えている(編集中)ときの保存中は、今までどおりバーに載せる', () => {
-    const r = statusBarWithFileDrag({ ...base, phase: 'editing', fileDragLine: '', savingLine: '⏳ 保存中…' }, ctx);
-    expect(r).toEqual({ text: '編集中 — ⏳ 保存中…', hide: false, floating: '' });
+  it('🔴 「保存中…」は浮き札にも出ない(状態は入口の点と簡易履歴へ。出すと左下に札が出入りする)', () => {
+    const m = composeStatusModel({ ...base, fileDragLine: '', savingLine: '⏳ 保存中…' });
+    expect(m.toast).toBe('');
+    expect(m.state.map((i) => i.text)).toEqual(['⏳ 保存中…']);
   });
 
   it('ラベル: 出す・消す・同じ要素を使い続ける。左の一覧の下端に合わせる', () => {
@@ -274,9 +252,8 @@ describe('🔴 配線と CSS の原文 pin(#1380)', () => {
     const src = noComments(readFileSync('src/main.ts', 'utf-8'));
     expect(src).toContain('subscribeFileDragHint(root, paint)');
     expect(src).toContain('fileDragLine: fileDragHintLine(root)');
-    expect(src).toContain('paintFileDragLabel(root, floating)');
-    expect(src).toContain('statusBarWithFileDrag(parts');
-    expect(src).toContain("{ ...parts, fileDragLine: '', savingLine: '' }");
+    expect(src).toContain('paintFileDragLabel(root, model.fileDrag)');
+    expect(src).toContain('composeStatusModel(parts)');
     const binder = noComments(readFileSync('src/adapter/ui/actions/binder.ts', 'utf-8'));
     expect(binder).toContain('setupFileDragHint(root, {');
     expect(binder).toContain('partitionDrop(files, inBody, isImageFile)');

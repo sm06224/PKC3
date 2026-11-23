@@ -45,6 +45,21 @@ import { isProgressNotice, type StatusKind, type StatusOptions } from './status-
  */
 export const STATUS_RESULT_VISIBLE_MS = 6000;
 
+/**
+ * 🔴 **注意・問題・エラーの浮き札を出しておく時間**(2026-11-23 レビュー)。⚠ 浮き札は作業中の画面に重なるので、
+ * **どの知らせも自分で消える**(消えても同じ字はメッセージに残り、バッジに未読として数えられる)。
+ * 結果(6 秒)より長い ── 読む量が多く、読み返しの場所が入口の簡易履歴になるため 10 秒。
+ * 消えないのは「押す口を持つ知らせ」(元に戻す等)と、保存データの確認へ送る断り書き・実害のある保存先の警告だけ。
+ * ⚠ マウスを載せている間・焦点が中にある間は消さない(`hold`)。
+ */
+export const STATUS_PROBLEM_VISIBLE_MS = 10_000;
+
+/**
+ * 🔴 **押す口を持つ知らせ(「元に戻す」等)の寿命**。⚠ 作業中の画面に重なるので居座らせない(30 秒)。消えても操作は片道にならない ──
+ * 入口の簡易履歴の「直前の操作」に同じボタンが残る(`message-entry.ts`)。
+ */
+export const STATUS_ACTION_VISIBLE_MS = 30_000;
+
 /** 進行中の字を、結果として扱うか・進行中として扱うか・進行中の終わりとして扱うか。 */
 export type StatusRoute = 'progress' | 'progress-end' | 'notice';
 
@@ -78,6 +93,12 @@ export interface StatusNoticesDeps {
   readonly setTimer?: (fn: () => void, ms: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
   readonly visibleMs?: number;
+  /** 注意・問題の知らせの寿命(省略 = `STATUS_PROBLEM_VISIBLE_MS`)。 */
+  readonly problemVisibleMs?: number;
+  /** 押す口を持つ知らせの寿命(省略 = `STATUS_ACTION_VISIBLE_MS`)。 */
+  readonly actionVisibleMs?: number;
+  /** 🔴 **読んでいる間か**(時間が来た瞬間に引く。`isToastHeld`)。真の間は消さない。 */
+  readonly isHeld?: () => boolean;
 }
 
 export interface StatusNotices {
@@ -85,6 +106,12 @@ export interface StatusNotices {
   show(text: string, opts?: StatusOptions): void;
   /** 状態が動いた後に呼ぶ ── 押す口が引っ込んだ知らせは、そこから数え始める。 */
   settle(): void;
+  /**
+   * 🔴 **浮き札の × で、いまの知らせを消す**(user 指示 2026-11-23「消すことも叶わない」)。
+   * ⚠ 注意・問題・操作のボタンを持つ知らせも消せる(消すのは画面の札だけ ── 同じ字はメッセージに残っている)。
+   * 進行中の欄は触らない(終わりの合図で空になる)。
+   */
+  dismiss(): void;
   /** いま画面下に出している知らせの字(空 = 無し)。 */
   noticeLine(): string;
   /** いま画面下に出している進行中の字(空 = 無し)。 */
@@ -94,7 +121,12 @@ export interface StatusNotices {
 export function createStatusNotices(deps: StatusNoticesDeps): StatusNotices {
   const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = deps.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
-  const ms = deps.visibleMs ?? STATUS_RESULT_VISIBLE_MS;
+  const resultMs = deps.visibleMs ?? STATUS_RESULT_VISIBLE_MS;
+  const problemMs = deps.problemVisibleMs ?? STATUS_PROBLEM_VISIBLE_MS;
+  const actionMs = deps.actionVisibleMs ?? STATUS_ACTION_VISIBLE_MS;
+  /** いま押す口が出ているか(寿命の長さを決める)。 */
+  let withAction = false;
+  const isHeld = deps.isHeld ?? ((): boolean => false);
 
   let notice = '';
   let progress = '';
@@ -110,7 +142,8 @@ export function createStatusNotices(deps: StatusNoticesDeps): StatusNotices {
   };
 
   /** 画面に出ている知らせが「操作のボタンを持つ」か。 */
-  const sticky = (actionShown: boolean): boolean => actionShown || isCorruptRefusalLine(notice);
+  // 🔴 消えないのは保存データの確認へ送る断り書きだけ(押す口を持つ知らせも 30 秒で消える)
+  const sticky = (): boolean => isCorruptRefusalLine(notice);
 
   const arm = (): void => {
     const text = notice;
@@ -118,17 +151,23 @@ export function createStatusNotices(deps: StatusNoticesDeps): StatusNotices {
     //   (字の一致で二重に守らない ── 同じ字がもう一度来た回に、古い時計が新しい寿命を縮める)
     timer = setTimer(() => {
       timer = null;
+      // 🔴 読んでいる間(マウスが載っている / 焦点が中)は消さない ── 離れたら、もう一度同じ寿命で数え直す
+      if (isHeld()) {
+        arm();
+        return;
+      }
       notice = '';
       kind = null;
       deps.expire(text);
       deps.paint();
       deps.paintActions();
-    }, ms);
+    }, withAction ? actionMs : kind === 'result' ? resultMs : problemMs);
   };
 
   /** 消す側に回すか(結果で、押す口が無い)を見て、時計を動かす / 止める。 */
   const apply = (actionShown: boolean): void => {
-    const expiring = kind === 'result' && notice !== '' && !sticky(actionShown);
+    withAction = actionShown;
+    const expiring = notice !== '' && !sticky();
     if (expiring && timer === null) arm();
     else if (!expiring) cancel();
   };
@@ -165,11 +204,62 @@ export function createStatusNotices(deps: StatusNoticesDeps): StatusNotices {
       deps.paint();
       apply(deps.paintActions());
     },
+    dismiss() {
+      cancel();
+      const text = notice;
+      notice = '';
+      kind = null;
+      if (text !== '') deps.expire(text);
+      deps.paint();
+      deps.paintActions();
+    },
     settle() {
       // 押す口の出入りは `paintActions` が描く ── ここは時計だけ
       apply(deps.paintActions());
     },
     noticeLine: () => notice,
     progressLine: () => progress,
+  };
+}
+
+/**
+ * 🔴 **エラーの浮き札の自動で消える時計**(`state.error` は次の成功まで残る ── 浮き札だけを 10 秒で降ろす。同じ字はメッセージに積まれている)。
+ * 判断は持ち主(`ToastDismissal`)へ渡す: `onExpire(errorLine)` が「消してよい物か」を決めて隠す(保存データの確認へ送る断り書きは隠さない)。
+ * ⚠ 同じ字は 1 度だけ数える / 字が変わったら数え直す / 消えたら止める。読んでいる間(`isHeld`)は消さない。
+ */
+export function createErrorAutoHide(deps: {
+  readonly onExpire: (errorLine: string) => void;
+  readonly isHeld: () => boolean;
+  readonly setTimer?: (fn: () => void, ms: number) => unknown;
+  readonly clearTimer?: (h: unknown) => void;
+  readonly ms?: number;
+}): { track(errorLine: string): void } {
+  const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = deps.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
+  const ms = deps.ms ?? STATUS_PROBLEM_VISIBLE_MS;
+  let key = '';
+  let timer: unknown = null;
+  const stop = (): void => {
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+  };
+  const arm = (line: string): void => {
+    timer = setTimer(() => {
+      timer = null;
+      if (key !== line) return;
+      if (deps.isHeld()) {
+        arm(line);
+        return;
+      }
+      deps.onExpire(line);
+    }, ms);
+  };
+  return {
+    track(errorLine) {
+      if (errorLine === key) return;
+      stop();
+      key = errorLine;
+      if (errorLine !== '') arm(errorLine);
+    },
   };
 }

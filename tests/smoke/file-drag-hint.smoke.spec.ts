@@ -5,8 +5,8 @@ import { clickReal, collectPageErrors, createEntry, gotoApp } from './helpers';
  * 🔴 外からファイルをドラッグして窓に入っている間だけ、落とせる 2 つのペインの縁に線が出て、
  *   「いまドロップするとどうなるか」の 1 行が出る。配置は一切動かない(#1380)。
  *
- * 出し先: ステータスバーが見えていればそこ / 畳まれている(ふだんの ready)ときは畳んだまま、
- *   左の一覧の下端のラベル。対照群: 内部のドラッグ(PKC の荷物・窓内の <img>)では出ない。
+ * 出し先: 左の一覧の下端のラベル(2026-11-23 に画面下の常設の帯を廃止したので、帯に足す先は無い ── 編集中でも知らせが出ていても常にラベル)。
+ *   対照群: 内部のドラッグ(PKC の荷物・窓内の <img>)では出ない。
  * 消える経路: dragleave(窓の外へ)/ drop / Esc。
  */
 const STATUS = '[data-pkc-region="status"]';
@@ -62,7 +62,7 @@ const fire = (page: Page, type: string, opts: { internal?: boolean; image?: bool
     { type, internal: opts.internal ?? false, image: opts.image ?? false, sel: opts.sel ?? '[data-pkc-region="detail"]' },
   );
 
-test('🔴 ふだん(ready・通知なし = ステータスバーが畳まれている)でも、配置は動かず、ラベルが出て、離れると消える (#1380)', async ({
+test('🔴 ふだん(ready・通知なし = 浮き札が畳まれている)でも、配置は動かず、ラベルが出て、離れると消える (#1380)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -70,7 +70,7 @@ test('🔴 ふだん(ready・通知なし = ステータスバーが畳まれて
   await gotoApp(page);
 
   const before = await probe(page);
-  expect(before.statusHidden, '台の前提: ふだんはステータスバーが畳まれている').toBe(true);
+  expect(before.statusHidden, '台の前提: ふだんは浮き札が畳まれている').toBe(true);
   expect(before.marked).toBe(false);
   expect(before.labelShown).toBe(false);
 
@@ -79,8 +79,8 @@ test('🔴 ふだん(ready・通知なし = ステータスバーが畳まれて
   expect(during.marked).toBe(true);
   expect(during.centerOutline).toMatch(/^solid 2px/);
   expect(during.sidebarOutline).toMatch(/^solid 2px/);
-  // 🔴 ステータスバーは畳んだまま ── 現れて左と中央を縮めない
-  expect(during.statusHidden, 'ステータスバーが現れた').toBe(true);
+  // 🔴 浮き札は畳んだまま(出ても配置は動かない)
+  expect(during.statusHidden, '浮き札が現れた').toBe(true);
   expect(during.center, '中央ペインが動いた').toEqual(before.center);
   expect(during.detail, '本文が動いた').toEqual(before.detail);
   expect(during.sidebar, '左の一覧が動いた(縮んだ)').toEqual(before.sidebar);
@@ -112,7 +112,7 @@ test('🔴 ふだん(ready・通知なし = ステータスバーが畳まれて
   expect(errors).toEqual([]);
 });
 
-test('🔴 編集中はステータスバーに字が出て(位置は動かない)、本文の欄の上では画像のリンクと言う。内部のドラッグでは出ない (#1380)', async ({
+test('🔴 編集中でも字はラベルに出て(位置は動かない・浮き札は出ない)、本文の欄の上では画像のリンクと言う。内部のドラッグでは出ない (#1380)', async ({
   page,
 }) => {
   const errors = collectPageErrors(page);
@@ -130,12 +130,14 @@ test('🔴 編集中はステータスバーに字が出て(位置は動かな�
   await fire(page, 'dragenter');
   const during = await probe(page);
   expect(during.marked).toBe(true);
-  expect(during.status).toContain('ドロップすると添付になります');
-  expect(during.labelShown, 'バーが見えているのにラベルも出た').toBe(false);
+  // 🔴 編集中の状態語が先に居ても、字はラベルへ出る(浮き札に混ぜない = 浮き札は出ない)
+  expect(during.labelShown, 'ラベルが出ない').toBe(true);
+  expect(during.labelText).toBe('ドロップすると添付になります');
+  expect(during.statusHidden, '編集中のドラッグで浮き札が出た').toBe(true);
   expect(during.center).toEqual(before.center);
   expect(during.detail).toEqual(before.detail);
   expect(during.sidebar).toEqual(before.sidebar);
-  await expect(page.locator(STATUS)).toContainText('ドロップすると添付になります');
+  await expect(page.locator(STATUS), '浮き札にドラッグの字が出ている').not.toContainText('ドロップすると');
 
   // 本文の欄の上: routeFiles と同じ振り分けの字(画像はその場にリンクが入る)
   // 1 面のライブエディタは、行を押して初めて入力欄(textarea)ができる
@@ -143,9 +145,9 @@ test('🔴 編集中はステータスバーに字が出て(位置は動かな�
   const body = '[data-pkc-field="row-source"], [data-pkc-field="editor-body"]';
   await expect(page.locator(body), '台の前提: 本文の入力欄がある').toHaveCount(1);
   await fire(page, 'dragenter', { image: true, sel: body });
-  expect((await probe(page)).status).toContain('ドロップするとここに画像のリンクが入ります');
+  expect((await probe(page)).labelText).toContain('ドロップするとここに画像のリンクが入ります');
   await fire(page, 'dragenter', { sel: body });
-  expect((await probe(page)).status, 'テキストは添付と言う').toContain('ドロップすると添付になります');
+  expect((await probe(page)).labelText, 'テキストは添付と言う').toContain('ドロップすると添付になります');
 
   await fire(page, 'dragleave', { image: true, sel: body });
   await fire(page, 'dragleave', { sel: body });

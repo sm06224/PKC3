@@ -184,14 +184,13 @@ body {
     'announce announce announce announce announce announce'
     'update update update update update update'
     'draft draft draft draft draft draft'
-    'notices notices notices notices notices notices'
-    'status status status status status status';
+    'notices notices notices notices notices notices';
   /* 🔴 **本文の行は `minmax(0, 1fr)`**(画面全体が下へスクロールする不具合)。素の `1fr` は
    *   `minmax(auto, 1fr)` なので、ペインの中身の最小の丈が残りの高さを上回ると行が押し広げられ、
    *   shell が画面より背が高くなって文書ルートがスクロールする(下に空白が出る)。スマホ用画面と同じ書き方。
    * ⚠ **`grid-template-areas` の直後に置く** ── `announce.test.ts` は「区画の行数と丈の数が合う /
    *   伸びる行が `detail`」をこの並びで読む。丈の数は区画の行数(9)と同じ。 */
-  grid-template-rows: minmax(0, 1fr) auto auto auto auto auto auto auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto auto auto auto auto auto;
   height: 100%;
   /* 🔑 **ペインは線ではなく地の段差で分ける**(#1982 段 2。旧い「`gap: 1px` に線色を透かせた格子」は
    * 画面を灰色の升目にしていた)。机(= 左右の列と、その間の掴む帯)は `--bg`、
@@ -268,8 +267,7 @@ body {
     'announce announce announce announce announce'
     'update update update update update'
     'draft draft draft draft draft'
-    'notices notices notices notices notices'
-    'status status status status status';
+    'notices notices notices notices notices';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] {
   /* ⚠ 左の列の下限は上の 3 列の版面と同じ 242px(C16)── 右を畳んでも左は縮めない */
@@ -282,8 +280,7 @@ body {
     'announce announce announce announce announce'
     'update update update update update'
     'draft draft draft draft draft'
-    'notices notices notices notices notices'
-    'status status status status status';
+    'notices notices notices notices notices';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
   grid-template-columns: var(--pkc-rail-w) var(--pkc-grip-w) minmax(0, 1fr) var(--pkc-grip-w);
@@ -295,8 +292,7 @@ body {
     'announce announce announce announce'
     'update update update update'
     'draft draft draft draft'
-    'notices notices notices notices'
-    'status status status status';
+    'notices notices notices notices';
 }
 [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'] [data-pkc-region='sidebar'],
 [data-pkc-region='shell'][data-pkc-hidden-panes~='inspector'] [data-pkc-region='inspector'] {
@@ -649,11 +645,62 @@ button[data-pkc-glyph]:disabled {
 [data-pkc-region='notices'] {
   grid-area: notices;
 }
+/* 🔴 **浮き札(トースト)の入れ物**(2026-11-23。旧「画面いちばん下の常設の帯」= grid の `status` の行を廃止した)。
+ * ⚠ **行を持たない**。grid の**本文のマス**(`grid-area: detail`)の**右下**に重ねる ── 別の行を作らないので、出ても消えても配置は 1px も動かない。
+ * ⚠ **作業を妨げない 3 つ**(2026-11-23 レビュー。実ブラウザの smoke で、一覧の行・ペインの操作・再生ボタンを札が覆って押せなくなった):
+ *   ① **札の字の部分は触れない**(`pointer-events: none`)── 下の操作へ押しが通る。触れるのは札の**ボタン**(元に戻す・開く・バックアップ・×)だけ
+ *   ② **どの知らせも自分で消える**(結果 6 秒・注意と問題 10 秒。`status-lifetime.ts`)── 残るのは押す口を持つ知らせと、保存データの確認 / 実害のある保存先の警告だけ。
+ *      消えても同じ字は入口の簡易履歴・メッセージに残る ③ **小さい**(字は 2 行まで・高さに上限。超えたら中で送る)
+ * ⚠ 置き場は本文のマスの右下 = 追記欄の真上。追記欄(打つ欄)は丈が変わるので、`toast-lift.ts` が測った `--pkc-toast-lift` ぶん上げる。
+ *   左の一覧・縦のバー・右ペインの上には置かない。画面の下端の全幅の帯(収録の「止める」・タイマー・アラーム・お知らせ)は別の行なので、元から覆わない。
+ * 下から 知らせ(`status`)→ その上に貼付トースト。読み上げ(`status-live`)は見えない(下の視覚的な隠し方)。 */
 [data-pkc-region='status-stack'] {
-  grid-area: status;
-  /* 🔴 トースト(`paste-toast`)の置き位置の基準。⚠ 高さは状態バーだけが決める(トーストは流れの外) */
+  grid-area: detail;
+  align-self: end;
+  justify-self: end;
   position: relative;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s2);
+  margin: 0 var(--s4) calc(var(--pkc-toast-lift, 0px) + var(--s3));
+  max-width: min(30rem, calc(100% - 2 * var(--s4)));
   min-width: 0;
+  pointer-events: none;
+}
+[data-pkc-region='status-stack'] > * {
+  pointer-events: none;
+}
+[data-pkc-region='status-stack'] button {
+  pointer-events: auto;
+}
+[data-pkc-field='status-severe-close']:hover {
+  --muted: var(--pkc-muted-on-mark);
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+/* 🔴 狭すぎる端末への断り書きが出ている間は、入れ物を幅いっぱいに(札の幅が字の出入りで変わると、OK が横へずれて押しが外れる。#671) */
+[data-pkc-region='status-stack']:has(> [data-pkc-region='status'] > [data-pkc-region='too-narrow']:not([hidden])) {
+  justify-self: stretch;
+  align-items: stretch;
+}
+/* ⚠ スマホ幅は余白だけ狭める */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='status-stack'] {
+  margin: 0 var(--s3) calc(var(--pkc-toast-lift, 0px) + var(--s3));
+  max-width: calc(100% - 2 * var(--s3));
+}
+[data-pkc-field='status-live'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  pointer-events: none;
 }
 
 /* 🔴 **収録中の帯**(#413)。⚠ 面の下・お知らせの上 ── サイドバーを畳んでも
@@ -9953,30 +10000,126 @@ mark[data-pkc-diff-char='del'] {
   white-space: nowrap;
   color: var(--fg);
 }
+/* 🔴 **知らせの浮き札(トースト)**(2026-11-23。旧「画面いちばん下の常設の帯」)── 消せる(右端の ×)。
+ * ⚠ 地は `--surface`(カード)+ ヘアライン + 影で浮かせる。色は使わない(状態の色は入口のバッジと簡易履歴が持つ)。
+ * ⚠ 字は読みやすい大きさ(旧い 11px の灰色の帯が「非常に見にくい」の中身だった)。 */
 [data-pkc-region='status'] {
   display: flex;
   align-items: center;
-  gap: var(--s3);
-  /* 🔴 **`height` ではなく `min-height`**(#671 の裁定 3)。⚠ 固定丈のままだと、
-   *   同じ器に置いた断り書きの「OK」が**帯の外へ落ちて押せない**(いちばん狭い
-   *   画面ほど落ちる ── その画面のために出している字なのに)。
-   * ⚠ ふだんは 1 行なので**寸法は 20px のまま**である(見え方は変わらない)。 */
-  min-height: 20px;
-  padding: 0 var(--s3);
-  background: var(--surface-2);
-  color: var(--muted);
-  font-size: max(11px, calc(var(--pkc-text-size, 13px) * 11 / 13));
-  /* ⚠ 断り書きが 2 行になる幅では折り返す(横へはみ出して切れない) */
+  gap: var(--s2) var(--s3);
+  box-sizing: border-box;
+  max-width: 100%;
+  min-height: 32px;
+  padding: var(--s2) var(--s2) var(--s2) var(--s3);
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  font-size: max(12px, calc(var(--pkc-text-size, 13px) * 12 / 13));
+  /* ⚠ 知らせが長い幅では折り返す(横へはみ出して切れない・押す口を画面の外へ押し出さない) */
   flex-wrap: wrap;
+  /* 🔴 浮き札全体も高さを抑える(字 5 行 + 押し口 1〜2 行 + 余白)。超えたら中で送る */
+  max-height: min(8em, 25vh);
+  overflow-y: auto;
+  animation: pkc-pop-in var(--dur) var(--ease);
 }
-/* 🔴 **状態の 1 語は濃く**(#1038 台帳③ C4 の着地前レビュー)。
- *
- * ⚠ 行の地の字は `--muted` の 11px で、「複数タブ: …」のような控えめな知らせと
- *   同じ重さでは「編集中」に気づけない(設計 doc §9「気づきにくければ色を付ける」)。
- * 🔑 色相ではなく**濃さ**で段を作る(本文と同じ `--fg` + 太字)── 主のボタンと同じ
- *   「色ではなく濃さ」(user 裁定 2026-09-06)。字の対比は本文と同じだけ確保される。
- * ⚠ 保存に失敗して止まったとき(`error`)だけ危険の赤 ── 書いた物が残っていない、
- *   という情報なので「色は情報にだけ」の内側。 */
+[data-pkc-field='status-text'] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  /* 🔴 長い知らせで一覧を覆い尽くさない: 字は 2 行ぶんまでで、超えたら中で送る(全文は入口の簡易履歴・メッセージにある) */
+  max-height: 3.4em;
+  overflow-y: auto;
+}
+[data-pkc-field='status-text']:empty {
+  display: none;
+}
+/* 字が無いとき(保存先の警告だけが出ているとき)は、知らせ用の × を出さない(警告には専用の ×) */
+[data-pkc-field='status-text']:empty ~ [data-pkc-field='status-close'] {
+  display: none;
+}
+/* 🔴 字の部分は触れる(長い知らせを中で送って読める)。⚠ 札は小さく、作業の操作から離れた右下にある */
+[data-pkc-region='status-stack'] > [data-pkc-region='status'] > [data-pkc-field='status-text'] {
+  pointer-events: auto;
+}
+/* 🔴 保存先の警告の専用の行(他の知らせと 1 つの字に混ぜない)── 危険色 + 太字・1 行 + バックアップ + 専用の × */
+[data-pkc-field='status-severe'] {
+  display: flex;
+  align-items: center;
+  flex: 1 1 100%;
+  gap: var(--s2) var(--s3);
+  flex-wrap: wrap;
+  min-width: 0;
+  color: var(--danger);
+  font-weight: 700;
+}
+[data-pkc-field='status-severe'][hidden] {
+  display: none;
+}
+[data-pkc-field='status-severe-text'] {
+  flex: 1 1 12em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='status-severe-close'] {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  line-height: 1;
+}
+/* 🔴 **浮き札の ×**。⚠ 右端へ寄せる。指で押す所は狭くしない(32px) */
+[data-pkc-field='status-close'] {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  line-height: 1;
+}
+[data-pkc-field='status-close']:hover {
+  --muted: var(--pkc-muted-on-mark);
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+/* 🔴 保存データの確認へ送る断り書きは × で消せない(押す口ごと無くなる。`isToastDismissible`)── × を出さない */
+[data-pkc-region='status']:has(> [data-pkc-field='status-rescue']:not([hidden])) > [data-pkc-field='status-close'] {
+  display: none;
+}
+/* 🔴 狭すぎる端末への断り書きは高さを抑えない(中で送ると、字の出入りで OK が動く。#671) */
+[data-pkc-region='status']:has(> [data-pkc-region='too-narrow']:not([hidden])) {
+  max-height: none;
+  overflow-y: visible;
+}
+/* ⚠ 画面幅不足の断り書きが出ている間は、その `OK` が消す口(二重にしない) */
+[data-pkc-region='status']:has(> [data-pkc-region='too-narrow']:not([hidden])) > [data-pkc-field='status-close'] {
+  display: none;
+}
+/* 🔴 **貼付トーストの ×**(同じ寸法) */
+[data-pkc-field='paste-toast-close'] {
+  flex: 0 0 auto;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  line-height: 1;
+}
+[data-pkc-field='paste-toast-close']:hover {
+  --muted: var(--pkc-muted-on-mark);
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+/* 🔴 **状態の 1 語は濃く**(簡易履歴の「いまの状態」の中。#1038 台帳③ C4)── 色相ではなく**濃さ**で段を作る。
+ *   保存に失敗して止まったとき(`error`)だけ危険の赤。 */
 [data-pkc-field='status-state'] {
   color: var(--fg);
   font-weight: 700;
@@ -9984,9 +10127,8 @@ mark[data-pkc-diff-char='del'] {
 [data-pkc-field='status-state'][data-pkc-phase='error'] {
   color: var(--danger);
 }
-/* 🔴 **保存領域が使えない警告**(#1038 D1。「閉じると消えます」)── 灰色 11px の 1 行に埋もれていた。
- *   ⚠ 書いたものが消える実害の知らせなので危険色 + 太字(色は情報にだけ。`status-state` の error と同じ使い方)。
- *   ⚠ 隣の `status-backup` が押す口(出し入れは `status-open.ts`)。 */
+/* 🔴 **保存領域が使えない警告**(#1038 D1。「閉じると消えます」)。⚠ 書いたものが消える実害の知らせなので危険色 + 太字
+ *   (色は情報にだけ)。隣の `status-backup` が押す口(出し入れは `status-open.ts`)。 */
 [data-pkc-field='status-warning'] {
   color: var(--danger);
   font-weight: 700;
@@ -10043,6 +10185,7 @@ mark[data-pkc-diff-char='del'] {
  *   変えたいなら `height` を書く ── ただしそれは**見え方の変更**なので user の裁定が要る。
  */
 [data-pkc-field='status-open'],
+[data-pkc-field='status-backup-toast'],
 [data-pkc-field='status-copy-ref'],
 [data-pkc-field='status-rescue'],
 [data-pkc-field='status-trash'] {
@@ -10503,8 +10646,7 @@ mark[data-pkc-diff-char='del'] {
       'announce announce announce announce'
       'update update update update'
       'draft draft draft draft'
-      'notices notices notices notices'
-      'status status status status';
+      'notices notices notices notices';
   }
   /**
    * 🔴 **畳んだ版面も、この幅では「この帯の版面」を使う**(#607。2026-08-30)。
@@ -10530,8 +10672,7 @@ mark[data-pkc-diff-char='del'] {
       'announce announce announce announce'
       'update update update update'
       'draft draft draft draft'
-      'notices notices notices notices'
-      'status status status status';
+      'notices notices notices notices';
   }
   [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'],
   [data-pkc-region='shell'][data-pkc-hidden-panes~='sidebar'][data-pkc-hidden-panes~='inspector'] {
@@ -10546,8 +10687,7 @@ mark[data-pkc-diff-char='del'] {
       'announce announce announce'
       'update update update'
       'draft draft draft'
-      'notices notices notices'
-      'status status status';
+      'notices notices notices';
   }
   /* ⚠ 右の列は下へ寝るので、右の掴む帯は**畳む**(境目が無くなるため) */
   [data-pkc-region='pane-grip'][data-pkc-pane='inspector'] {
@@ -11194,32 +11334,231 @@ h3[data-pkc-section] {
   background: var(--accent);
   color: var(--bg);
 }
-/* 🔴 **貼ったあとの小さな知らせ(トースト)**(#1379)。状態バーの真上に置く(`status-stack` の中 ── 入れ物は `shell.ts`)。
- * ⚠ `position: fixed` + 高さの当て推量にしない(バーが折り返す・文字を大きくすると重なった)。入れ物を基準に
- *   `bottom: 100%` で置くので、バーの高さが変わっても常にバーの真上に出る。
- * ⚠ 流れの外(`absolute`)なので、出ても消えても本文の領域は 1px も動かない(同じ物が常に同じ場所に在る)。
- * 地は無彩色(色は使わない)。数秒で消える(JS)。ボタンの見え方は共通の `button` に任せる。 */
+/* 🔴 **貼ったあとの小さな知らせ(トースト)**(#1379)。知らせの浮き札の真上に積む(`status-stack` の中 ── 入れ物は `shell.ts`)。
+ * ⚠ 入れ物(`position: fixed`・縦の flex)の子として並ぶので、高さを当て推量せずに、浮き札がどれだけ伸びても重ならない。
+ * ⚠ 入れ物ごと流れの外なので、出ても消えても本文の領域は 1px も動かない(同じ物が常に同じ場所に在る)。
+ * 地は無彩色(色は使わない)。数秒で消える(JS)。右端の × で閉じられる。ボタンの見え方は共通の `button` に任せる。 */
 [data-pkc-region='paste-toast'] {
-  position: absolute;
-  inset-block-end: 100%;
-  inset-inline-end: var(--s4);
-  margin-block-end: var(--s2);
-  z-index: 50;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: var(--s3);
-  max-width: min(32rem, calc(100vw - 2 * var(--s4)));
-  padding: var(--s2) var(--s3);
+  max-width: 100%;
+  padding: var(--s2) var(--s2) var(--s2) var(--s3);
   font-size: var(--fs-sm);
   color: var(--fg);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   animation: pkc-pop-in var(--dur) var(--ease);
 }
 [data-pkc-field='paste-toast-text'] {
   overflow-wrap: anywhere;
+}
+/* ══ メッセージの入口と簡易履歴(ポップオーバー)(2026-11-23。`render/message-entry.ts`)══════
+ *
+ * 画面いちばん下の常設の帯を廃止した代わりの入口。左端の縦のバーの一番下と、スマホ幅の上の帯に在る(どちらも同じ印
+ * `data-pkc-field='message-entry'`)。バッジ = 未読(注意 + 問題)の数。警告色 = `--warn`、保存先の実害の警告 = `--danger`、
+ * 復元できる録音 = `--info`(色は意味にだけ)。保存中は小さな点(動きを減らす設定では止める)。 */
+[data-pkc-field='message-entry'] {
+  position: relative;
+}
+[data-pkc-field='message-badge'] {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  min-width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  padding: 0 3px;
+  border-radius: 7px;
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+  background: var(--muted);
+  color: var(--bg);
+}
+[data-pkc-field='message-badge'][data-pkc-tone='warn'] {
+  background: var(--warn);
+}
+[data-pkc-field='message-badge'][data-pkc-tone='danger'] {
+  background: var(--danger);
+}
+[data-pkc-field='message-badge'][data-pkc-tone='info'] {
+  background: var(--info);
+}
+/* 保存中の点(入口の右下)。⚠ バッジと別の隅 */
+[data-pkc-field='message-entry'][data-pkc-saving-dot]::after {
+  content: '';
+  position: absolute;
+  inset-block-end: 3px;
+  inset-inline-end: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pkc-saving-pulse 1s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes pkc-saving-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+/* ⚠ 動きを減らす設定では、全要素の `animation` が止まる(末尾の共通の規則)── ここに別の `@media` を足さない */
+/* 複数タブ(このタブの保存はメインのタブ経由): info 色の小さな点(入口の左上。説明にも入る) */
+[data-pkc-field='message-entry'][data-pkc-multitab]::before {
+  content: '';
+  position: absolute;
+  inset-block-start: 3px;
+  inset-inline-start: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--info);
+  pointer-events: none;
+}
+[data-pkc-field='message-entry'][aria-expanded='true'] {
+  --muted: var(--pkc-muted-on-mark);
+  background: var(--surface-hover);
+}
+/* 🔴 **簡易メッセージ履歴**(`popover="manual"`。上の層に出る)。位置は JS が `left` / `top` へ書く(`computePopoverPlacement`)。
+ *   ⚠ popover の UA 既定(中央寄せの inset / margin / 隠れる overflow)を打ち消す(ツールチップと同じ)。 */
+[data-pkc-region='message-popover'] {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  z-index: 100;
+  box-sizing: border-box;
+  width: min(380px, calc(100vw - 16px));
+  max-height: min(72vh, 520px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--s2) var(--s3) var(--s3);
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-sm);
+  animation: pkc-pop-in var(--dur) var(--ease);
+}
+[data-pkc-region='message-popover'][hidden] {
+  display: none;
+}
+[data-pkc-region='message-popover']:focus {
+  outline: none;
+}
+[data-pkc-field='popover-head'] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+[data-pkc-field='popover-title'] {
+  font-weight: 700;
+  font-size: var(--fs-md);
+}
+[data-pkc-field='popover-close'] {
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  line-height: 1;
+}
+[data-pkc-field='popover-close']:hover {
+  --muted: var(--pkc-muted-on-mark);
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+[data-pkc-region='message-popover'] h3 {
+  margin: var(--s2) 0 var(--s1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+[data-pkc-region='message-popover'] ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+[data-pkc-field='popover-state-list'] > li {
+  padding: var(--s1) 0;
+  overflow-wrap: anywhere;
+}
+[data-pkc-field='popover-state-empty'],
+[data-pkc-field='popover-empty'] {
+  color: var(--muted);
+}
+[data-pkc-field='popover-state-actions'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+[data-pkc-field='popover-state-actions'] > button[hidden] {
+  display: none;
+}
+[data-pkc-field='popover-list'] > li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  border-radius: var(--radius);
+}
+[data-pkc-field='popover-list'] > li + li {
+  margin-top: 2px;
+}
+[data-pkc-field='popover-list'] > li[data-pkc-kind='caution'] {
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+[data-pkc-field='popover-list'] > li[data-pkc-kind='problem'] {
+  box-shadow: inset 2px 0 0 var(--danger);
+}
+[data-pkc-field='msg-kind'] {
+  font-weight: 600;
+  white-space: nowrap;
+}
+[data-pkc-kind='caution'] > [data-pkc-field='msg-kind'] {
+  color: var(--warn);
+}
+[data-pkc-kind='problem'] > [data-pkc-field='msg-kind'] {
+  color: var(--danger);
+}
+[data-pkc-kind='delivery'] > [data-pkc-field='msg-kind'] {
+  color: var(--info);
+}
+[data-pkc-field='msg-time'] {
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+[data-pkc-field='msg-text'] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  /* 長い知らせは 3 行で切る(全文は詳細メッセージ画面) */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+[data-pkc-field='popover-actions'] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+/* スマホ幅の上の帯の入口(「⋯」の隣) */
+[data-pkc-field='phone-messages'] {
+  position: relative;
+  min-width: 32px;
 }
 /* 🔴 **日付を入れる道具**(2026-08-23)。⚠ 本文の `<p>` の中に置くので、
  * 中身は phrasing content(`<button>` / `<label>` / `<input>`)だけである。 */
@@ -11450,11 +11789,10 @@ h3[data-pkc-section] {
     'announce'
     'update'
     'draft'
-    'notices'
-    'status';
+    'notices';
   /* ⚠ **`grid-template-areas` の直後に置く** ── `announce.test.ts` は
    *   「区画の行数と丈の数が合う / 伸びる行が `detail`」をこの並びで読む。 */
-  grid-template-rows: minmax(0, 1fr) auto auto auto auto auto auto auto auto;
+  grid-template-rows: minmax(0, 1fr) auto auto auto auto auto auto auto;
 }
 /**
  * 🔴 **3 面を重ね、いま出ていない面は `visibility: hidden` + `inert`**。
@@ -12420,6 +12758,7 @@ h3[data-pkc-section] {
   [data-pkc-region='inspector'],
   [data-pkc-region='append'],
   [data-pkc-region='status-stack'],
+  [data-pkc-region='message-popover'],
   [data-pkc-region='notices'],
   [data-pkc-region='update'],
   [data-pkc-region='draft-offer'],

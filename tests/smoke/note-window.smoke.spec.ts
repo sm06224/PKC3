@@ -6,6 +6,7 @@ import {
   dismissAnnounce,
   gotoApp,
   useSplitEditor,
+  openMessagePopover,
 } from './helpers';
 
 /**
@@ -127,10 +128,11 @@ test('🔴 別の窓で開くと、その窓がそのノートを開いて立ち
    * 🔑 対照群は `app-window-status.smoke.spec.ts` が持っている
    *   ── あちらが「ふつうの 2 枚目のタブでは出る」を先に見ている。
    */
+  // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 観測点は「メッセージ」の入口の説明(状態の言葉が入る場所)
   await expect(
-    win.locator('[data-pkc-region="status"]'),
+    win.locator('[data-pkc-field="message-entry"]').first(),
     '付箋に常設バッジが出ている(読ませたい文を押し出す)',
-  ).not.toContainText('複数タブ: このタブの保存はメインのタブ経由です');
+  ).not.toHaveAttribute('aria-label', /複数タブ: このタブの保存はメインのタブ経由です/);
 
   /**
    * ⑤ 🔴 **同じノートの 2 枚目は作らない**(user 裁定 2026-09-04)。
@@ -398,15 +400,26 @@ test('🔴 付箋の中から同じノートを押しても 2 枚目は出ない
    *   直しを外しても緑になる。
    */
   await clickReal(win, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 状態語は「メッセージ」の簡易履歴の「いまの状態」と、入口の説明に出る
+  const winPop = await openMessagePopover(win);
   await expect(
-    win.locator('[data-pkc-region="status"] [data-pkc-field="status-state"]'),
-    '付箋の窓で編集を始めても、下の行の先頭に「編集中」が出ない',
+    winPop.locator('[data-pkc-field="status-state"]'),
+    '付箋の窓で編集を始めても、簡易履歴の「いまの状態」に「編集中」が出ない',
   ).toHaveText('編集中');
-  await clickReal(win, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
   await expect(
-    win.locator('[data-pkc-region="status"] [data-pkc-field="status-state"]'),
+    win.locator('[data-pkc-field="message-entry"]').first(),
+    '付箋の窓で編集を始めても、入口の説明に「編集中」が入らない',
+  ).toHaveAttribute('aria-label', /編集中/);
+  await win.keyboard.press('Escape');
+  await expect(winPop).toBeHidden();
+  await clickReal(win, '[data-pkc-region="detail"] [data-pkc-action="cancel-edit"]');
+  // ⚠ 閉じたままだと隠れているだけで緑になる ── 開き直してから「残っていない」を見る
+  const winPop2 = await openMessagePopover(win);
+  await expect(
+    winPop2.locator('[data-pkc-field="status-state"]'),
     '編集をやめても「編集中」が残っている',
   ).toHaveCount(0);
+  await expect(win.locator('[data-pkc-field="message-entry"]').first()).not.toHaveAttribute('aria-label', /編集中/);
 
   await win.close();
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
@@ -743,9 +756,9 @@ test('🔴 付箋で目次を押しても、題名と住所が残る (#693)', as
   // ③ 🔴 **身元は残っている** ── 題名は「PKC3」に戻らず、follower の帯も出ない
   await expect.poll(() => win.title(), { timeout: 5_000 }).toMatch(/^めじるし — PKC3(\(開発版\))?$/);
   await expect(
-    win.locator('[data-pkc-region="status"]'),
+    win.locator('[data-pkc-field="message-entry"]').first(),
     '目次を押しただけで「複数タブ」の帯が復活した(付箋の旗が降りた)',
-  ).not.toContainText('複数タブ');
+  ).not.toHaveAttribute('aria-label', /複数タブ/);
 
   /**
    * ④ ⚠ **対照群** ── 本体の窓(付箋でない)では今までどおり住所が `#<id>` になる

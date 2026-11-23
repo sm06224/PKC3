@@ -1051,6 +1051,7 @@ import {
   type ConfirmOptions,
 } from '@adapter/ui/render/app-dialog';
 import { appPasteToast, showPasteToast } from '@adapter/ui/render/paste-toast';
+import { messagePopoverController } from '@adapter/ui/render/message-entry';
 import { appNoteLabels } from '@adapter/platform/note-label-store';
 import { isNoteLabelColor, NOTE_LABEL_NAMES } from '@features/note-label';
 import { appNotePins } from '@adapter/platform/note-pin-store';
@@ -5610,6 +5611,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'open-format-more',
   // 🔑 #1982 段 4 ── 色ラベルの一覧(1 枚目の一覧の項目から 2 枚目を開く)
   'note-label-set',
+  // 🔑 2026-11-23 ── 左のバー / スマホの帯の「メッセージ」(簡易履歴のポップオーバー)。同じクリックで他の一覧が閉じて何も出ない、を避ける
+  'toggle-message-popover',
 ]);
 
 /**
@@ -18293,6 +18296,42 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lid = target.getAttribute('data-pkc-message-lid');
     if (lid === null || lid === '') return;
     openMessagesFromButton(dispatcher, lid);
+  },
+  /**
+   * 🔴 **簡易メッセージ履歴(ポップオーバー)を開閉する**(user 指示 2026-11-23。左のバー / スマホの帯の「メッセージ」)。
+   * ⚠ 開く実体は `message-entry.ts`(ホバーでも同じ実体が開く)── ここは押した入口を渡すだけ。
+   *   詳細は既存の `open-messages`(ポップオーバー内の「詳細メッセージ画面を開く」)── 画面を二重に作らない。
+   */
+  'toggle-message-popover': (_dispatcher, target, _services, root) => {
+    // ⚠ `MENU_OPENERS` に載せたので、同じクリックでは右クリックのメニューが閉じない ── 開いたままのメニューは自分で閉じる(重ねて出さない)
+    closeContextMenu(root);
+    messagePopoverController(root)?.toggle(target);
+  },
+  /** 🔴 簡易履歴の ×。焦点は入口へ戻す(native の dialog が保証していた性質)。 */
+  'close-message-popover': (_dispatcher, _target, _services, root) => {
+    messagePopoverController(root)?.close(true);
+  },
+  /**
+   * 🔴 **開かずに既読にする**(簡易履歴の「既読にする」)。⚠ 「既読にする唯一の入口」は今まで `open-messages`
+   * (ノートを開く)だけだった ── 読んだだけで中央の作業を奪わず、未読の数だけを 0 へ戻す。
+   * 実体は端末の既読の時刻(`markRead`)+ state の数(`MESSAGES_UNREAD_SET`)。`MESSAGES_READ` は使わない(選択を動かすので)。
+   */
+  'mark-messages-read': (dispatcher) => {
+    appMessagePost.markRead();
+    dispatcher.dispatch({ type: 'MESSAGES_UNREAD_SET', count: 0 });
+  },
+  /**
+   * 🔴 **浮き札(トースト)を閉じる**(user 指示 2026-11-23「消すことも叶わない」)。
+   * ⚠ 実体は `main.ts`(知らせの寿命を持つ `statusNotices` とエラーの欄)── ここは合図を送るだけ(`pkc-toast-dismiss`)。
+   *   貼付トーストの × も同じ合図を使う(`paste-toast.ts`)。
+   */
+  /** 🔴 保存先の警告の専用の ×(そのセッションの間だけ隠す。普通の知らせの × とは別)。 */
+  'dismiss-severe': (_dispatcher, target) => {
+    target.closest('[data-pkc-region="status"]')?.dispatchEvent(new Event('pkc-severe-dismiss'));
+  },
+  'dismiss-toast': (_dispatcher, target) => {
+    const toast = target.closest('[data-pkc-region="status"], [data-pkc-region="paste-toast"]');
+    toast?.dispatchEvent(new Event('pkc-toast-dismiss'));
   },
   /**
    * 🔴 **メッセージの保管件数を選ぶ**(設計 doc §7、段②a)。

@@ -146,8 +146,8 @@ async function expectToastClear(page: Page, before: { y: number; height: number 
     ROW,
     '[data-pkc-action="append-entry"]',
     '[data-pkc-region="append"]',
-    '[data-pkc-region="center"]',
-    '[data-pkc-region="inspector"]',
+    // 🔴 2026-11-23: 浮き札の入れ物は本文のマスの右下(追記欄の真上)へ移った ── 本文のマスそのもの・右ペインの枠とは重なってよい
+    //   (札の字は押しが通る)。守るのは「打つ欄・追記欄・ペインの押せる物に重ならない」
     '[data-pkc-region="status"]',
   ];
   for (const sel of sels) {

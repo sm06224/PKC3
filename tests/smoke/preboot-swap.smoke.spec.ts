@@ -36,10 +36,8 @@ test('🔴 2 枚目(follower)は、別タブの更新適用で昇格して生き
     // タブ B: 後から開く → 待機ではなく follower boot(#177)
     const b = await context.newPage();
     await gotoApp(b);
-    await expect(b.locator('[data-pkc-region="status"]')).toContainText(
-      '保存はメインのタブ経由',
-      { timeout: 20_000 },
-    );
+    // 🔴 2026-11-23: 本体経由の印は「メッセージ」の入口の説明に出る(画面下の常設の行を廃止した)
+    await expect(b.locator('[data-pkc-field="message-entry"]').first()).toHaveAttribute('aria-label', /保存はメインのタブ経由/, { timeout: 20_000 });
 
     // 🔴 別 build を配って、**タブ A から**更新を適用する
     writeFileSync(SW_PATH, original.replace(`"${buildId}"`, '"prebootswap00"'));

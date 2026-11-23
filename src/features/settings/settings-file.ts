@@ -399,6 +399,10 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '既読はその端末で読んだ事実(設計 doc §7、段②a)。pkc3.notices.seen と同じ考え方。運ぶと、別の端末でまだ読んでいないメッセージが既読に化ける',
   },
   {
+    key: 'pkc3.messages.storage-caution-at',
+    why: '実害のある保存先の警告を最後に「注意」へ積んだ時刻で、その端末の事実(既読の時刻 `pkc3.messages.read-at` と対で、既読にするまで 1 度だけ積むために見る)。運ぶと、別の端末で警告が積まれなくなる',
+  },
+  {
     key: 'pkc3.sync',
     why: '端末ごとの設定である(#2000 段 2)。端末間の同期を使うかは、その端末で選ぶ。運ぶと、別の端末で同期の記録を作り始めてしまう(オフのままにしておきたい端末でもオンになる)',
   },

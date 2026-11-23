@@ -156,10 +156,8 @@ test('🔴 `file://` で作ったノートが再読込で残る (#400 段③)', 
   await pageB.setViewportSize({ width: 1440, height: 900 });
   await pageB.goto(pathToFileURL(HTML).href);
   await expect(pageB.locator('[data-pkc-boot="ready"]')).toBeAttached({ timeout: 20_000 });
-  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
-    '保存はメインのタブ経由',
-    { timeout: 15_000 },
-  );
+  // 🔴 2026-11-23: 本体経由の印は「メッセージ」の入口の説明に出る(画面下の常設の行を廃止した)
+  await expect(pageB.locator('[data-pkc-field="message-entry"]').first()).toHaveAttribute('aria-label', /保存はメインのタブ経由/, { timeout: 15_000 });
   // A(本体)が B の起動後に書く ── B が起動時に読んだ画像には無い分
   await createEntry(page, 'text');
   await page.locator('[data-pkc-field="editor-title"]').fill('Aが書いたノート');
@@ -311,7 +309,8 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
    * (読めない Office 一式のファイルを入れる ── 起動直後は未読 0 件で、これが無いと持ち越しの有無が見えない)。
    */
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
-  const senderUnread = page.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]');
+  // 🔴 2026-11-23: 画面下の「未読のメッセージ N 件」は、左のバーの「メッセージ」のバッジへ移った
+  const senderUnread = page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]');
   const chooser = page.waitForEvent('filechooser');
   await clickReal(page, '[data-pkc-view-pane="settings"] [data-pkc-field="office-pack-file"]');
   await (await chooser).setFiles({ name: 'broken-pack.zip', mimeType: 'application/zip', buffer: Buffer.from('not a pack') });
@@ -336,7 +335,7 @@ test('🔴 書き出した 1 枚が、そのまま PKC3 として開く (#400 �
   // 🔴 D. 未読の件数は読み込みの後で入る ── 少し置いてから、送り主のメッセージ(未読)が入っていないことを見る
   await carried.waitForTimeout(1_500);
   await expect(
-    carried.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]'),
+    carried.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]'),
     '書き出した HTML に、送り主の未読のメッセージが入っている',
   ).toBeHidden();
   /**

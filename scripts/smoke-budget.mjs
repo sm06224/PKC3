@@ -156,8 +156,10 @@ import { join } from 'node:path';
  *   幅の広い表・コード・長い 1 行を入れた記録のカードの幾何と、情報ペインの 4 枚で、まっさらな起動から textlog を作って見る。
  * - 2026-11-23(B2): **615**(そのときの実数 615。B1 レビューの 614 の上に 1 本)。`neon-glow.smoke.spec.ts` を新設(起動 1 つ)。⚠ 既存の道中には載せられない ── 見る相手は
  *   実マウスの近接で光る輪郭の画素(横スクロールの器・情報ペイン・バーを含む)と、動きを減らす設定・スマホ幅で印が付かないことで、まっさらな起動から textlog を作って見る。
+ * - 2026-11-23(メッセージの入口 + 簡易履歴 + 消せる浮き札): **622**(そのときの実数 622)。`message-popover.smoke.spec.ts` を新設(起動 4 つ)。⚠ 既存の道中には載せられない ──
+ *   見る相手は、grid に帯の行が無いこと・浮き札が出ても配置が動かないこと・本物のホバーの遅延と離脱・焦点の戻り・top layer の収まり・スマホ幅の入口で、まっさらな起動から作って見る。
  */
-export const BOOT_BUDGET = 618;
+export const BOOT_BUDGET = 622;
 // 2026-11-22(A3 レビュー): **608**(実数 608)。`tooltip.smoke.spec.ts` に 1 本足した(起動 1 つ)。⚠ 既存の道中には載せられない ── `showModal()` で top layer に載せた
 //   ダイアログの中で、吹き出しが最前面にあるか(`elementFromPoint`)を見る。モーダルの上の当たり判定は実ブラウザでしか出ない。
 // 2026-11-22(A3 上側のツールチップ): **607**(実数 607)。`tooltip.smoke.spec.ts` を新設(起動 2 つ)。⚠ 既存の道中には載せられない ──
@@ -194,7 +196,7 @@ export const BOOT_BUDGET = 618;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 310;
+export const BOOT_FLOOR = 311;
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {

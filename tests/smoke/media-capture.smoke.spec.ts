@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, watchRevokedMedia, writesLanded, openBrowse, pressCreateTool } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, watchRevokedMedia, writesLanded, openBrowse, pressCreateTool, openMessagePopover } from './helpers';
 import { chromiumLaunch } from './playwright.config';
 // ⚠ 手で書き写さない ── `[data-pkc-field="capture-trim"]` の textContent は
 //   `trimMarkText()` の戻り値そのもの(`captures.ts`)。字を直した日に
@@ -2248,8 +2248,13 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
   await clickReal(page, '[data-pkc-action="commit-edit"]');
 
   // 対照群: 起動しただけでは、復元の入口は出ていない
-  const entry = page.locator('[data-pkc-region="status"] [data-pkc-field="status-capture-recovery"]');
+  // 🔴 2026-11-23: 帯を廃止し、復元の入口は「メッセージ」の簡易履歴の「いまの状態」へ移った ── 開いてから「出ていない」を見る(閉じたままだと隠れているだけで緑になる)
+  const pop = await openMessagePopover(page);
+  const entry = pop.locator('[data-pkc-field="status-capture-recovery"]');
   await expect(entry, '録っていないのに復元の入口が出ている').toBeHidden();
+  await expect(page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]'), '録っていないのにバッジが出ている').toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(pop).toBeHidden();
 
   // ① 録る → 断片が溜まる
   await pressCreateTool(page, 'start-audio-capture');
@@ -2267,21 +2272,27 @@ test('🔴 録音の途中でタブが落ちても、開き直すと復元でき
   await gotoApp(next);
 
   // ③ 静かな 1 行 + システムのメッセージ
-  const entry2 = next.locator('[data-pkc-region="status"] [data-pkc-field="status-capture-recovery"]');
+  const badge2 = next.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]');
+  await expect(badge2, '開き直しても入口のバッジが出ない(復元できる録音がある)').toBeVisible({ timeout: 15_000 });
+  const pop2 = await openMessagePopover(next);
+  const entry2 = pop2.locator('[data-pkc-field="status-capture-recovery"]');
   await expect(entry2, '開き直しても復元の入口が出ない').toBeVisible({ timeout: 15_000 });
   await expect(entry2).toContainText('途中で終わった録音・録画');
   await expect(
-    next.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]'),
-    'システムのメッセージに残っていない(未読)',
+    pop2.locator('[data-pkc-field="popover-list"] [data-pkc-kind]').first(),
+    'システムのメッセージに残っていない(最近のメッセージに出ない)',
   ).toBeVisible();
 
   // ④ 復元する
-  await clickReal(next, '[data-pkc-field="status-capture-recovery"]');
+  await clickReal(next, entry2);
   const dialog = next.locator('[data-pkc-region="app-dialog"]');
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('[data-pkc-field="dialog-ok"]')).toHaveText('復元する');
   await clickReal(next, '[data-pkc-field="dialog-ok"]');
+  // ⚠ 押すと簡易履歴は閉じる ── 開き直してから「残っていない」を見る(閉じたままだと隠れているだけで緑になる)
+  await openMessagePopover(next);
   await expect(entry2, '復元したのに入口が残っている').toBeHidden({ timeout: 15_000 });
+  await next.keyboard.press('Escape');
   await openBrowse(next, 'captures');
   const rows = next.locator('[data-pkc-capture]');
   await expect(rows, '復元した録音が一覧に出ていない').toHaveCount(1, { timeout: 15_000 });

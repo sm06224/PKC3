@@ -34,9 +34,8 @@ test('2 枚目のタブが本体経由で開き、別ノートは編集でき、
   await useSplitEditor(pageB);
   await gotoApp(pageB);
   // 常設バッジ = 本体経由の印
-  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
-    '保存はメインのタブ経由',
-  );
+  // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 本体経由の印は「メッセージ」の入口の説明(と簡易履歴の「いまの状態」)に出る
+  await expect(pageB.locator('[data-pkc-field="message-entry"]').first()).toHaveAttribute('aria-label', /保存はメインのタブ経由/);
   // A で作ったノートが B の一覧に見える(boot 時の読取が proxy 越しに通った)
   const rowB = pageB.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rowB).toHaveCount(1);
@@ -129,9 +128,8 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
   const errorsB = collectPageErrors(pageB);
   await useSplitEditor(pageB);
   await gotoApp(pageB);
-  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText(
-    '保存はメインのタブ経由',
-  );
+  // 🔴 2026-11-23: 画面下の常設の行を廃止した ── 本体経由の印は「メッセージ」の入口の説明(と簡易履歴の「いまの状態」)に出る
+  await expect(pageB.locator('[data-pkc-field="message-entry"]').first()).toHaveAttribute('aria-label', /保存はメインのタブ経由/);
 
   // B は**編集中のまま**本体の死を迎える(編集ロックの昇格引き継ぎを実路で踏む)
   const rowB = pageB.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
@@ -154,9 +152,8 @@ test('本体タブを閉じると、2 枚目がその場で本体に昇格する
   const errorsC = collectPageErrors(pageC);
   await useSplitEditor(pageC);
   await gotoApp(pageC);
-  await expect(pageC.locator('[data-pkc-region="status"]')).toContainText(
-    '保存はメインのタブ経由',
-  );
+  // 🔴 2026-11-23: 本体経由の印は「メッセージ」の入口の説明に出る(画面下の常設の行を廃止した)
+  await expect(pageC.locator('[data-pkc-field="message-entry"]').first()).toHaveAttribute('aria-label', /保存はメインのタブ経由/);
   // 🔴 B が編集中のノートは C から取れない(heldLocks が新台帳へ引き継がれている)
   const rowC = pageC.locator('[data-pkc-region="filer-table"] [data-pkc-entry]');
   await expect(rowC).toHaveCount(1);
@@ -213,7 +210,7 @@ test('🔴 タブ A が編集中は、タブ B からの「使われていない
   const errorsB = collectPageErrors(pageB);
   await useSplitEditor(pageB);
   await gotoApp(pageB);
-  await expect(pageB.locator('[data-pkc-region="status"]')).toContainText('保存はメインのタブ経由');
+  await expect(pageB.locator('[data-pkc-field="message-entry"]').first()).toHaveAttribute('aria-label', /保存はメインのタブ経由/);
 
   // 前提: **B だけ**なら整理は通る(この次元を測れている ── 常に断るのでは意味が無い)
   await clickReal(pageB, '[data-pkc-action="set-view"][data-pkc-view="settings"]');

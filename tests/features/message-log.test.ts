@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  recentMessages,
   MESSAGE_CAP_DEFAULT,
   MESSAGE_CAP_OPTIONS,
   JOB_CAP,
@@ -345,5 +346,35 @@ describe('filterMessageBody(依頼 266)', () => {
     expect(out).toContain('「問題」の知らせはありません');
     // 対照:別の種類を選べば本文が出る
     expect(filterMessageBody(sec('result', '結果A', 1), 'result')).toContain('結果A');
+  });
+});
+
+describe('recentMessages ── 簡易履歴の種まき(本文の末尾から新しい順)', () => {
+  const sec = (at: string, label: string, text: string): string => `## ${at}\n**${label}** ${text}\n\n`;
+  const body =
+    sec('2026-11-23 10:00:00', '結果', 'a') +
+    sec('2026-11-23 10:01:00', '処理', 'job-x') +
+    sec('2026-11-23 10:02:00', '注意', 'b: c') +
+    sec('2026-11-23 10:03:00', '問題', 'd');
+
+  it('🔴 新しい順に、種類・時刻・字(出所つき)を返す', () => {
+    const r = recentMessages(body, 10);
+    expect(r.map((m) => [m.kind, m.at])).toEqual([
+      ['problem', '2026-11-23 10:03:00'],
+      ['caution', '2026-11-23 10:02:00'],
+      ['result', '2026-11-23 10:00:00'],
+    ]);
+    expect(r[1]!.text).toBe('b: c');
+  });
+
+  it('🔴 処理(job)の節は、メッセージの画面には出さないので読み飛ばす(対照: 他の種類は入る)', () => {
+    expect(recentMessages(body, 10).some((m) => m.text === 'job-x')).toBe(false);
+    expect(recentMessages(body, 10)).toHaveLength(3);
+  });
+
+  it('件数の上限で切る / 空の本文は空 / 壊れた節は読み飛ばす', () => {
+    expect(recentMessages(body, 2).map((m) => m.kind)).toEqual(['problem', 'caution']);
+    expect(recentMessages('', 5)).toEqual([]);
+    expect(recentMessages('## 見出しだけ\nただの文\n', 5)).toEqual([]);
   });
 });

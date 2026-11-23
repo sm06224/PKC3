@@ -602,8 +602,9 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
    * ⚠ 2026-11-23(#2051)に `2026-11-23-log-cards` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    * ⚠ 2026-11-23(#1982)に `2026-11-23-neon-glow` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    * ⚠ 2026-11-23(#1982)に `2026-11-23-root-scroll` を先頭へ足したので、ここも 1 段新しい題名へ直した。
+   * ⚠ 2026-11-23(#1982)に `2026-11-23-message-popover` を先頭へ足したので、ここも 1 段新しい題名へ直した。
    */
-  ).toContain('画面全体が下にずれて、追記欄の下に空白が出る不具合を直しました');
+  ).toContain('メッセージを、どの画面からも開けるようになり、画面下のステータスバーをなくしました');
   await dismissAnnounce(page);
 
   // 「システム」を開く
@@ -751,7 +752,8 @@ test('🔴 「システム」の目次: お知らせが読め、押すと移動�
     page.locator('[data-pkc-field="settings-file-summary"]'),
     '空の値の項目を入れないと、押す前に告げていない',
   ).toContainText('1 件は中身が空か読めない形なので入れません');
-  const unreadBadge = page.locator('[data-pkc-region="status"] [data-pkc-field="status-messages"]');
+  // 🔴 2026-11-23: 画面下の「未読のメッセージ N 件」は、左のバーの「メッセージ」のバッジへ移った
+  const unreadBadge = page.locator('[data-pkc-region="rail"] [data-pkc-field="message-badge"]');
   const unreadBefore = await unreadBadge.textContent();
   await clickReal(page, '[data-pkc-field="settings-file-apply"]');
   // 成功の知らせが出て、未読の数は増えない(成功は「結果」で、問題ではない)

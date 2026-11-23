@@ -56,7 +56,8 @@ test('🔴 文字の大きさを変えると本文の字が実際に変わり、
   const beforeInspector = await sideFont(INSPECTOR_DL);
   const beforeStatus = await sideFont(STATUS);
   expect(beforeInspector, '空振り防止: 情報の既定が 12px でない').toBeCloseTo(12, 1);
-  expect(beforeStatus, '空振り防止: ステータスバーの既定が 11px でない').toBeCloseTo(11, 1);
+  // 🔴 2026-11-23: 画面下の常設の帯(11px の灰色)を廃止し、知らせの浮き札は読みやすい 12px(`max(12px, calc(本文 × 12 / 13))`)にした
+  expect(beforeStatus, '空振り防止: 知らせの浮き札の既定が 12px でない').toBeCloseTo(12, 1);
   // ⚠ **空振り防止** ── 既定が本当に 13px であること(ここがずれると以下は無意味)
   expect(before.font, '既定の字の大きさが 13px でない(表と CSS がずれている)').toBeCloseTo(13, 1);
 

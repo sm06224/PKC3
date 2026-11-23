@@ -36,6 +36,7 @@ import {
 // 🔑 lid の綴りは 1 か所から引く(設計 doc §7、段②a。CLAUDE.md §7)
 import { SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import { createStatusLive } from './status-line';
+import { buildMessagePopover, decorateMessageEntry, messageEntryIcon } from './message-entry';
 import { setTipTitle } from './tooltip';
 
 export interface ShellRegions {
@@ -83,6 +84,11 @@ export interface ShellRegions {
    * ⚠ 押した先は `export-archive` の受け手 1 つ(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusBackup`。
    */
   statusBackup: HTMLElement;
+  /** 🔴 浮き札の中の「バックアップを書き出す」(実害のある保存先の警告を常設で出している間だけ。押し先は同じ `export-archive`)。 */
+  statusBackupToast: HTMLElement;
+  /** 🔴 常設の保存先の警告の**専用の行**(字 + バックアップ + 専用の ×。他の知らせの字と混ぜない)。 */
+  statusSevere: HTMLElement;
+  statusSevereText: HTMLElement;
   /**
    * 🔴 **見つからないノートの知らせの隣の「ゴミ箱を開く」**(#1648)。押した先は `show-trash`
    *   の受け手(`binder.ts`)。出し入れは `status-open.ts` の `paintStatusTrash`。
@@ -94,11 +100,19 @@ export interface ShellRegions {
    */
   statusCopyRef: HTMLElement;
   /**
-   * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。⚠ 常設で置き、
-   *   未読が 1 件以上あるときだけ `hidden` を外す(`main.ts` が state を見て書く)。
+   * 🔴 **浮き札の ×**(user 指示 2026-11-23「消すことも叶わない」)。押した先は `dismiss-toast` の受け手(`binder.ts`)。
+   * ⚠ 出し入れは CSS(画面幅の断り書きが出ている間は、その `OK` が消す口なので隠す)。
    */
-  statusMessages: HTMLElement;
-  /** 途中で終わった録音・録画への入口(#1985。残っている間だけ出る)。 */
+  statusClose: HTMLElement;
+  /** 🔴 **常設の見えない読み上げ領域**(`aria-live`。`hidden` にしない ── 浮き札が畳まれていても知らせは読まれる)。 */
+  statusLive: HTMLElement;
+  /**
+   * 🔴 **簡易メッセージ履歴のポップオーバー**(`popover="manual"`。出し入れは `message-entry.ts`)。
+   * 中は 状態の欄 / 最近のメッセージ / ボタン。保存先の警告の隣の「バックアップを書き出す」と、
+   * 途中で終わった録音・録画への入口はここ(状態の欄)に在る。
+   */
+  messagePopover: HTMLElement;
+  /** 途中で終わった録音・録画への入口(#1985。残っている間だけ出る。ポップオーバーの状態の欄)。 */
   statusCaptureRecovery: HTMLElement;
   /** 🔴 **狭すぎる端末への断り書き**(#671)。中身は `too-narrow.ts` が出し入れする。 */
   tooNarrow: HTMLElement;
@@ -1130,7 +1144,18 @@ export function buildShell(root: HTMLElement): ShellRegions {
   phoneTabs.hidden = true;
   phoneTabs.textContent = '開いているノート ▾';
   phoneTabs.title = '開いているノートの一覧から切り替える・閉じる';
-  phoneBar.append(phoneBack, phoneTitle, phoneTabs, phoneInfo, phoneMenu);
+  /**
+   * 🔴 **メッセージの入口(スマホ幅)**。左の縦のバーが無い幅でも、どの画面からもメッセージの簡易履歴へ届く
+   * (`message-entry.ts`。バッジ・説明は `paintMessageEntries` が書く)。「⋯」の隣。
+   */
+  const phoneMessages = document.createElement('button');
+  phoneMessages.type = 'button';
+  phoneMessages.setAttribute('data-pkc-action', 'toggle-message-popover');
+  phoneMessages.setAttribute('data-pkc-field', 'phone-messages');
+  phoneMessages.setAttribute('aria-label', 'メッセージ');
+  phoneMessages.append(messageEntryIcon());
+  decorateMessageEntry(phoneMessages);
+  phoneBar.append(phoneBack, phoneTitle, phoneTabs, phoneInfo, phoneMessages, phoneMenu);
   // 🔴 ノートのタブ列(#1982 段 5-3)。本文のすぐ上。2 枚以上のときだけ `note-tabs.ts` が中身を出す
   const noteTabs = document.createElement('div');
   noteTabs.setAttribute('data-pkc-region', 'note-tabs');
@@ -1158,14 +1183,16 @@ export function buildShell(root: HTMLElement): ShellRegions {
   const status = document.createElement('footer');
   status.setAttribute('data-pkc-region', 'status');
   /**
-   * 🔴 **状態バーと、その真上の小さな知らせ(貼付トースト。#1379)の入れ物**。grid の `status` の行はこれが持つ。
-   * ⚠ トーストを `position: fixed` で浮かせて「状態バーの高さ」を値で当てると、バーが折り返して 2 行になったとき・文字サイズを
-   *   大きくしたときに重なる。**入れ物を基準に `bottom: 100%` で置けば、バーがどれだけ伸びても知らせはその真上**に居る(高さを推測しない)。
-   * ⚠ トーストは流れの外(`absolute`)── 出ても消えても本文の領域は動かない。空なら高さ 0。
+   * 🔴 **浮き札(トースト)の入れ物**(2026-11-23。旧「画面いちばん下の常設の帯」を廃止した)。
+   * ⚠ grid の行を持たない(`position: fixed`。左下の縦のバーの右、画面の端)── 出ても消えても本文の領域は 1px も動かない。
+   * 中は 下から 状態の知らせ(`status`。消せる)→ その上に貼付トースト(`paste-toast.ts`)。
+   * 読み上げ(`status-live`)は**常設**で、浮き札が畳まれていても知らせを読み上げる。
    */
   const statusStack = document.createElement('div');
   statusStack.setAttribute('data-pkc-region', 'status-stack');
   statusStack.append(status);
+  const statusLive = createStatusLive(document);
+  statusStack.append(statusLive);
   /**
    * 🔴 **画面下の知らせを、読み上げにも届ける**(#1017 C5 段 a)。⚠ 直す前は何も付いておらず、
    *   「コピーしました」等は**目で見る人にしか届かなかった**(`aria-live` は検索・右クリック・
@@ -1188,8 +1215,6 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const statusText = document.createElement('span');
   statusText.setAttribute('data-pkc-field', 'status-text');
-  // 🔴 読み上げの子(知らせとエラーだけを写す)。⚠ 起動の時点で在る ── 字が入る前から登録しておく
-  statusText.append(createStatusLive(document));
   /**
    * 🔴 **知らせの隣の押し口「開く」**(#668 A)。
    *
@@ -1281,30 +1306,6 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusCopyRef.textContent = '参照をコピー';
   statusCopyRef.hidden = true;
   /**
-   * 🔴 **未読のメッセージへの入口**(設計 doc §7、段②a)。
-   *
-   * ⚠ 「開く」「元に戻す」と同じ作法 ── **常設で置いて、未読が 1 件以上あるときだけ
-   *   出す**(器を作り直すと、押している最中に指の下から消える)。
-   * ⚠ 押すと「メッセージ」のノートを中央に開く(`open-messages`)── 状態の行に
-   *   知らせを積み続けない(§7「ステータスバーは『いま起きていること』の 1 行に
-   *   戻す」)。
-   */
-  const statusMessages = document.createElement('button');
-  statusMessages.type = 'button';
-  statusMessages.setAttribute('data-pkc-field', 'status-messages');
-  statusMessages.setAttribute('data-pkc-action', 'open-messages');
-  /**
-   * 🔴 **`data-pkc-entry` を使わない**(`data-pkc-message-lid` にする)。
-   *
-   * ⚠ `data-pkc-entry` は「entry の行(または行を代表する要素)」専用の属性で、
-   *   `[data-pkc-entry]` を全体走査する読み手が複数在る(サイドバーの差分描画の
-   *   検査など)。この押し口は**常設**(hidden の付け外しだけで、要素そのものは
-   *   消えない)ので、汎用の `[data-pkc-entry]` に**恒久的に**紛れ込む
-   *   (CLAUDE.md §1「器を替えたら、その器に付いている属性を全部 grep する」)。
-   */
-  statusMessages.setAttribute('data-pkc-message-lid', SYSTEM_MESSAGE_LID);
-  statusMessages.hidden = true;
-  /**
    * 🔴 **途中で終わった録音・録画への入口**(#1985 項目 2)。⚠ 「未読のメッセージ」と同じ作法 ── 常設で置いて、
    *   復元できる物が残っている間だけ出す(`paintStatusCaptureRecovery`)。押すと「復元する / 捨てる」を聞く。
    */
@@ -1332,7 +1333,51 @@ export function buildShell(root: HTMLElement): ShellRegions {
   tooNarrowOk.type = 'button';
   tooNarrowOk.setAttribute('data-pkc-field', 'too-narrow-ok');
   tooNarrow.append(tooNarrowText, tooNarrowOk);
-  status.append(statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusBackup, statusTrash, statusMessages, statusCaptureRecovery, tooNarrow);
+  /**
+   * 🔴 **浮き札の ×**(user 指示 2026-11-23)。押すといまの知らせを消す(`dismiss-toast`)。
+   * ⚠ 字は `×` だが読み上げ名は「閉じる」(`textContent` は図案の字だけにする)。
+   */
+  const statusClose = document.createElement('button');
+  statusClose.type = 'button';
+  statusClose.setAttribute('data-pkc-field', 'status-close');
+  statusClose.setAttribute('data-pkc-action', 'dismiss-toast');
+  statusClose.setAttribute('aria-label', '知らせを閉じる');
+  statusClose.title = '知らせを閉じる';
+  statusClose.textContent = '×';
+  /**
+   * 🔴 **簡易メッセージ履歴のポップオーバー**。保存先の警告の隣の「バックアップを書き出す」と、途中で終わった録音・録画への入口は
+   * ここの「いまの状態」に移した(帯が無くなったので)。出し入れは今までどおり `status-open.ts`。
+   */
+  const messagePopover = buildMessagePopover(
+    document,
+    { backup: statusBackup, captureRecovery: statusCaptureRecovery },
+    SYSTEM_MESSAGE_LID,
+  );
+  const statusBackupToast = document.createElement('button');
+  statusBackupToast.type = 'button';
+  statusBackupToast.setAttribute('data-pkc-field', 'status-backup-toast');
+  statusBackupToast.setAttribute('data-pkc-action', 'export-archive');
+  // ⚠ 字は簡易履歴の側と同じ 1 つ(字を 2 か所に書かない)
+  statusBackupToast.textContent = statusBackup.textContent;
+  statusBackupToast.hidden = true;
+  /**
+   * 🔴 **実害のある保存先の警告の専用の行**(2026-11-23 レビュー)。他の知らせと 1 つの字に連ねると、新しい知らせが 2 行で切れて読めなくなる。
+   * 行は常設(`hidden` の出し入れ)。専用の ×(`dismiss-severe`)はこのセッションの間だけ隠す ── 普通の知らせの × では消えない。
+   */
+  const statusSevere = document.createElement('div');
+  statusSevere.setAttribute('data-pkc-field', 'status-severe');
+  statusSevere.hidden = true;
+  const statusSevereText = document.createElement('span');
+  statusSevereText.setAttribute('data-pkc-field', 'status-severe-text');
+  const severeClose = document.createElement('button');
+  severeClose.type = 'button';
+  severeClose.setAttribute('data-pkc-field', 'status-severe-close');
+  severeClose.setAttribute('data-pkc-action', 'dismiss-severe');
+  severeClose.setAttribute('aria-label', '保存先の警告を閉じる(この起動の間だけ)');
+  severeClose.title = '保存先の警告を閉じる(この起動の間だけ。次の起動でまた出ます)';
+  severeClose.textContent = '×';
+  statusSevere.append(statusSevereText, statusBackupToast, severeClose);
+  status.append(statusSevere, statusText, statusOpen, statusCopyRef, statusUndo, statusCreate, statusRescue, statusTrash, tooNarrow, statusClose);
 
   /**
    * 🔴 **収録中の帯**(#413)── 経過 + 概算の大きさ + 止める / 捨てる。
@@ -1467,6 +1512,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     draftOffer,
     notices,
     statusStack,
+    messagePopover,
   );
   /**
    * 🔴 **鍵だけで使う人が、列を飛ばして本題へ行ける近道**(#720)。
@@ -1521,9 +1567,14 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusCreate,
     statusRescue,
     statusBackup,
+    statusBackupToast,
+    statusSevere,
+    statusSevereText,
     statusTrash,
     statusCopyRef,
-    statusMessages,
+    statusClose,
+    statusLive,
+    messagePopover,
     statusCaptureRecovery,
     tooNarrow,
     tooNarrowText,

@@ -25,6 +25,8 @@ import {
   MESSAGE_CAP_OPTIONS,
   parseMessageCap,
   countUnread,
+  recentMessages,
+  type RecentMessage,
   postedAtAfterReadMark,
   withSpooledSections,
   sanitizeMessageText,
@@ -203,6 +205,9 @@ export interface MessagePostDeps {
 }
 
 /** job だけ束ねる ── これだけ件数か時間かで待たせる(§7、段②b)。 */
+/** 🔴 簡易メッセージ履歴(ポップオーバー)が覚えておく件数(新しい順)。 */
+export const RECENT_RING_SIZE = 20;
+
 const JOB_BATCH_SIZE = 50;
 const JOB_BATCH_MS = 5000;
 
@@ -233,6 +238,9 @@ export class MessagePost {
   private jobTimer: ReturnType<typeof setTimeout> | null = null;
   /** 直近に積んだ節の時刻(ms)。既読の時刻がこれより前に戻らないための目盛り。 */
   private lastPostedAtMs = 0;
+  /** 🔴 直近の知らせ(新しい順、無害化済み)。⚠ 画面に出す簡易履歴の唯一の材料 ── ノート本文を毎回読まない。 */
+  private ring: RecentMessage[] = [];
+  private recentListeners: Array<() => void> = [];
 
   constructor(private readonly spool: MessageSpool = new IdbMessageSpool()) {}
 
@@ -271,6 +279,41 @@ export class MessagePost {
     for (const f of this.listeners) f(this.unread);
   }
 
+  /** 直近の知らせ(新しい順。最大 `RECENT_RING_SIZE` 件)。呼び側は書き換えない。 */
+  recent(): readonly RecentMessage[] {
+    return this.ring;
+  }
+
+  /** 直近の知らせが変わったとき(新しく積んだ / 起動時に読み出した)。解除の口を返す。 */
+  onRecentChanged(fn: () => void): () => void {
+    this.recentListeners.push(fn);
+    return () => {
+      this.recentListeners = this.recentListeners.filter((f) => f !== fn);
+    };
+  }
+
+  private notifyRecent(): void {
+    for (const f of this.recentListeners) f();
+  }
+
+  /**
+   * 起動時(と別のタブが書いたとき)に、ノート本文の末尾から直近の知らせを読み出して記憶へ合わせる。
+   * ⚠ 同じ節(時刻 + 種類 + 字)は 2 度入れない(起動中に積んだ分がもう書き込まれているとき)。
+   */
+  seedRecent(body: string): void {
+    const seeded = recentMessages(body, RECENT_RING_SIZE);
+    const key = (m: RecentMessage): string => `${m.at}\u0001${m.kind}\u0001${m.text}`;
+    const have = new Set(this.ring.map(key));
+    // 🔴 時刻の新しい順に並べ直す(別のタブが書いた知らせも、自分が積んだ知らせの前後に正しく入る)。同時刻は元の並び(積んだ分が先)
+    const merged = [...this.ring, ...seeded.filter((m) => !have.has(key(m)))]
+      .map((m, i) => ({ m, i }))
+      .sort((a, b) => (a.m.at === b.m.at ? a.i - b.i : a.m.at < b.m.at ? 1 : -1))
+      .map(({ m }) => m)
+      .slice(0, RECENT_RING_SIZE);
+    this.ring = merged;
+    this.notifyRecent();
+  }
+
   /**
    * 起動直後、disk の本文から数え直した未読を種として渡す。
    * 🔴 **`postsAtRequest` を渡すと**、種を頼んだ後に増えた分(`unreadPosts` の差)を足す ── 直す前は
@@ -293,6 +336,8 @@ export class MessagePost {
     const posts = this.unreadPosts;
     const reads = this.readCount;
     const body = await readBody();
+    // 🔴 同じ本文から簡易履歴も種まきする(再読込の直後でも直近の知らせが見える)。⚠ 既読にされても履歴は読み出す
+    this.seedRecent(body ?? '');
     if (reads !== this.readCount) return;
     this.seedUnread(countUnread(body ?? '', messagesReadAt()), posts);
   }
@@ -371,6 +416,13 @@ export class MessagePost {
       source: input.source,
       text: sanitizeMessageText(input.text, input.fixedHead),
     });
+    if (input.kind !== 'job') {
+      const item = recentMessages(section, 1)[0];
+      if (item !== undefined) {
+        this.ring = [item, ...this.ring].slice(0, RECENT_RING_SIZE);
+        this.notifyRecent();
+      }
+    }
     if (input.kind === 'caution' || input.kind === 'problem') {
       this.unread += 1;
       this.unreadPosts += 1;
@@ -558,6 +610,42 @@ export class MessagePost {
     }
     return true;
   }
+}
+
+/** 実害のある保存先の警告を、最後に積んだ時刻(ISO)。既読(`READ_AT_KEY`)がこれより新しければ、また積んでよい。 */
+export const STORAGE_CAUTION_KEY = 'pkc3.messages.storage-caution-at';
+
+/**
+ * 🔴 **積むか**: まだ積んでいない / 積んだ後に既読にした、のどちらかだけ。⚠ 起動ごとに積むと、プライベートブラウズ(毎回この警告)で
+ * 未読の注意が起動のたびに積み上がる。記憶は端末(localStorage)── ページを読み込み直しても効く。
+ */
+export function shouldPostStorageCaution(postedAt: string | null, readAt: string | null): boolean {
+  if (postedAt === null) return true;
+  return readAt !== null && readAt > postedAt;
+}
+
+/** 実害のある保存先の警告を「注意」で 1 度だけ積む(既読にするまで再び積まない)。積んだら true。 */
+export function postStorageCautionOnce(
+  post: Pick<MessagePost, 'post'>,
+  text: string,
+  store: Pick<Storage, 'getItem' | 'setItem'> | null = typeof localStorage === 'undefined' ? null : localStorage,
+  readAt: string | null = messagesReadAt(),
+  nowIso: string = new Date().toISOString(),
+): boolean {
+  let postedAt: string | null;
+  try {
+    postedAt = store?.getItem(STORAGE_CAUTION_KEY) ?? null;
+  } catch {
+    postedAt = null;
+  }
+  if (!shouldPostStorageCaution(postedAt, readAt)) return false;
+  post.post({ kind: 'caution', source: 'storage', text });
+  try {
+    store?.setItem(STORAGE_CAUTION_KEY, nowIso);
+  } catch {
+    /* 記憶できない端末は、起動のたびに積む(黙って捨てるよりまし) */
+  }
+  return true;
 }
 
 export const appMessagePost = new MessagePost();

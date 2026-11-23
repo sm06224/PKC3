@@ -23,8 +23,8 @@ import {
   shouldPostNotice,
 } from '../../src/adapter/ui/render/status-notice';
 import { buildShell } from '../../src/adapter/ui/render/shell';
-import { paintStatusText, type StatusLineParts } from '../../src/adapter/ui/render/status-line';
-import { paintStatusMessages } from '../../src/adapter/ui/render/status-open';
+import { paintStatusLive, paintToastText } from '../../src/adapter/ui/render/status-line';
+import { installMessagePopover } from '../../src/adapter/ui/render/message-entry';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
@@ -334,6 +334,7 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
     expect(code).toMatch(/onBroken: \(text\) => showStatus\(text, \{ kind: 'problem' \}\)/);
     // 4 → 5(依頼 219・329):別のウィンドウが書きかけのまま閉じたことを、システムのメッセージに「注意」で足す口を 1 つ足した
     // 5 → 6(#1985 項目 2):前回途中で終わった録音・録画が残っていることを、システムのメッセージに「注意」で足す口を 1 つ足した
+    // ⚠ 2026-11-23: 実害のある保存先の警告は `postStorageCautionOnce`(message-post.ts)が積む(既読にするまで 1 度)── ここの数には載らない。
     expect(code.match(/kind: 'caution'/g)?.length, 'caution の渡し先が 6 つ(PDF が読めなかった / Office が固まった / 読み込めなかった / 控えを書けなかった / 別のウィンドウの書きかけ / 途中で終わった録音・録画)').toBe(6);
     expect(code.match(/kind: 'problem'/g)?.length, 'problem の渡し先が 3 つ(壊れ / 一式 / Office)').toBeGreaterThanOrEqual(3);
   });
@@ -420,7 +421,7 @@ describe('ファイル名・題名は引用符で囲む(原文 pin ── `main.
   });
 });
 
-describe('「未読 N 件」の押し口', () => {
+describe('メッセージの入口(旧「未読 N 件」の押し口。2026-11-23 に帯を廃止して、左のバーの入口 + 簡易履歴へ)', () => {
   function setup() {
     const root = document.createElement('div');
     document.body.append(root);
@@ -433,109 +434,106 @@ describe('「未読 N 件」の押し口', () => {
       return raw(a);
     }) as typeof d.dispatch;
     bindActions(root, d);
-    return { regions, sent, d };
+    const ctrl = installMessagePopover(root, { recent: () => [] });
+    const entry = root.querySelector<HTMLElement>('[data-pkc-region="collection-bar"] [data-pkc-field="message-entry"]')!;
+    return { root, regions, sent, d, ctrl, entry };
   }
+  const model = (unread: number) => ({ unread, state: [], captureRecovery: 0, detail: '' });
+  const badge = (e: HTMLElement) => e.querySelector<HTMLElement>('[data-pkc-field="message-badge"]')!;
 
-  it('🔴 未読 0 では出ない・字も空', () => {
-    const { regions } = setup();
-    paintStatusMessages(regions.statusMessages, 0);
-    expect(regions.statusMessages.hidden).toBe(true);
-    expect(regions.statusMessages.textContent, '畳んだ口に字が残っている').toBe('');
+  it('🔴 未読 0 では出ない・字も空(入口そのものは常に在る)', () => {
+    const { ctrl, entry } = setup();
+    expect(entry, '入口が無い(空振り)').not.toBeNull();
+    ctrl.setModel(model(0));
+    expect(badge(entry).hidden).toBe(true);
+    expect(badge(entry).textContent, '畳んだバッジに字が残っている').toBe('');
   });
 
-  it('🔴 未読 2 では「未読のメッセージ 2 件」が出て、0 に戻れば畳む(対照:出るのは未読があるときだけ)', () => {
-    const { regions } = setup();
-    paintStatusMessages(regions.statusMessages, 2);
-    expect(regions.statusMessages.hidden).toBe(false);
-    expect(regions.statusMessages.textContent).toBe('未読のメッセージ 2 件');
-    paintStatusMessages(regions.statusMessages, 0);
-    expect(regions.statusMessages.hidden).toBe(true);
+  it('🔴 未読 2 ではバッジ「2」と説明「未読 2 件」が出て、0 に戻れば畳む(対照:出るのは未読があるときだけ)', () => {
+    const { ctrl, entry } = setup();
+    ctrl.setModel(model(2));
+    expect(badge(entry).hidden).toBe(false);
+    expect(badge(entry).textContent).toBe('2');
+    expect(entry.getAttribute('aria-label')).toContain('未読 2 件');
+    ctrl.setModel(model(0));
+    expect(badge(entry).hidden).toBe(true);
+    expect(entry.getAttribute('aria-label')).not.toContain('未読');
   });
 
-  it('🔴 押すと open-messages の受け手へ届き、メッセージのノートを開く(既読にする)', () => {
-    const { regions, sent } = setup();
-    paintStatusMessages(regions.statusMessages, 2);
-    expect(regions.statusMessages.getAttribute('data-pkc-action')).toBe('open-messages');
-    regions.statusMessages.click();
+  it('🔴 入口を押すと簡易履歴が開き、その「詳細メッセージ画面を開く」が open-messages の受け手へ届いてメッセージのノートを開く(既読にする)', () => {
+    const { root, sent, ctrl, entry } = setup();
+    ctrl.setModel(model(2));
+    entry.click();
+    expect(ctrl.isOpen()).toBe(true);
+    const detail = root.querySelector<HTMLElement>('[data-pkc-region="message-popover"] [data-pkc-action="open-messages"]')!;
+    expect(detail.getAttribute('data-pkc-message-lid')).toBe(SYSTEM_MESSAGE_LID);
+    detail.click();
     expect(sent).toContainEqual({ type: 'MESSAGES_READ', lid: SYSTEM_MESSAGE_LID });
+    expect(ctrl.isOpen(), '詳細を開いたあとも簡易履歴が残った').toBe(false);
   });
 
   // 🔴 編集中は開けない ── 黙らずに理由を出し、開いていないのに既読にしない(#1087)
-  it('🔴 編集中に押すと理由が出て、既読にしない', () => {
-    const { regions, sent, d } = setup();
+  it('🔴 編集中に「詳細メッセージ画面を開く」を押すと理由が出て、既読にしない', () => {
+    const { root, sent, d, ctrl, entry } = setup();
     d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [meta('n1')], relations: [] });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'n1' });
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: 'x' });
     d.dispatch({ type: 'START_EDIT' });
     expect(d.getState().phase, '前提が崩れた(編集に入っていない)').toBe('editing');
-    paintStatusMessages(regions.statusMessages, 2);
-    regions.statusMessages.click();
+    ctrl.setModel(model(2));
+    entry.click();
+    root.querySelector<HTMLElement>('[data-pkc-region="message-popover"] [data-pkc-action="open-messages"]')!.click();
     expect(sent.some((a) => a.type === 'MESSAGES_READ'), '編集中なのに開こうとした').toBe(false);
     expect(d.getState().error ?? '').toContain('いまはメッセージを開けません');
   });
 });
 
-describe('画面下の帯は読み上げに届く(知らせとエラーだけ)', () => {
+describe('知らせは読み上げに届く(知らせとエラーだけ)── 常設の見えない領域', () => {
   function shell() {
     const root = document.createElement('div');
     document.body.append(root);
     return buildShell(root);
   }
-  const parts = (extra: Partial<StatusLineParts> = {}): StatusLineParts => ({
-    phase: 'ready',
-    statusBase: '',
-    sync: '',
-    portableAssetNote: '',
-    persistState: '',
-    savingLine: '',
-    progressLine: '',
-    noticeLine: '',
-    errorLine: '',
-    ...extra,
-  });
 
-  it('🔴 footer 全体には role / aria-live を付けない(暗黙の contentinfo を残す)', () => {
+  it('🔴 浮き札(footer)全体には role / aria-live を付けない(暗黙の contentinfo を残す)', () => {
     const regions = shell();
     expect(regions.status.tagName).toBe('FOOTER');
     expect(regions.status.hasAttribute('role'), 'footer に role を付けた(contentinfo が消える)').toBe(false);
     expect(regions.status.hasAttribute('aria-live'), 'footer 全体が読み上げ対象になっている').toBe(false);
   });
 
-  it('🔴 読み上げの子(status-live)は 1 つだけ在り、polite で、起動の時点で存在する', () => {
+  it('🔴 読み上げの領域(status-live)は 1 つだけ在り、polite で、起動の時点で存在し、浮き札の外 ── 浮き札が畳まれていても読まれる(hidden でない)', () => {
     const regions = shell();
-    const lives = regions.status.querySelectorAll('[aria-live]');
-    expect(lives, '読み上げの要素が 1 つではない').toHaveLength(1);
-    const live = lives[0]!;
-    expect(live.getAttribute('data-pkc-field')).toBe('status-live');
+    const root = regions.status.closest('[data-pkc-region="shell"]')!.parentElement!;
+    const lives = Array.from(root.querySelectorAll('[data-pkc-region="status-stack"] [aria-live]'));
+    // 貼付トーストなど他の読み上げは起動時には無い ── 知らせの入れ物の中の読み上げの領域はこの 1 つだけ
+    expect(lives.map((l) => l.getAttribute('data-pkc-field'))).toEqual(['status-live']);
+    const live = regions.statusLive;
     expect(live.getAttribute('aria-live')).toBe('polite');
-    expect(regions.statusText.contains(live)).toBe(true);
+    expect(regions.status.contains(live), '浮き札の中にある(畳むと読まれない)').toBe(false);
+    expect(regions.status.hidden, '前提: 浮き札は畳まれている').toBe(true);
+    expect(live.hidden).toBe(false);
+    expect(live.closest('[hidden]'), '読み上げの領域が hidden の中にある').toBeNull();
   });
 
-  it('🔴 保存中・状態語・保存先の注意の出入りでは、読み上げの子の字は変わらない / 知らせが来ると変わる', () => {
+  it('🔴 同じ字なら読み上げの領域は書き換わらない / 知らせが来ると変わる', () => {
     const regions = shell();
-    const live = regions.status.querySelector('[data-pkc-field="status-live"]') as HTMLElement;
+    const live = regions.statusLive;
     const records: MutationRecord[] = [];
     const mo = new MutationObserver((r) => records.push(...r));
     mo.observe(live, { childList: true, characterData: true, subtree: true });
-    // 保存中 / 編集中 / 保存先の注意 が出入りする
-    paintStatusText(regions.statusText, parts({ savingLine: '⏳ 保存中…' }));
-    paintStatusText(regions.statusText, parts({ phase: 'editing', statusBase: '保存先の注意' }));
-    paintStatusText(regions.statusText, parts({ phase: 'editing', savingLine: '⏳ 保存中…' }));
-    paintStatusText(regions.statusText, parts());
+    paintStatusLive(live, '');
     records.push(...mo.takeRecords());
-    expect(records, '状態語・保存中の出入りで読み上げの子が書き換わった').toHaveLength(0);
-    expect(live.textContent).toBe('');
-    // 知らせが来ると、その字が入る
-    paintStatusText(regions.statusText, parts({ savingLine: '⏳ 保存中…', noticeLine: 'コピーしました' }));
-    expect(live.textContent, '知らせが読み上げの子に入っていない').toBe('コピーしました');
-    // 同じ知らせのまま保存中だけ出入りしても、読み上げの子は書き換わらない(同じ要素を使い続ける)
+    expect(records, '空のままなのに書き換わった').toHaveLength(0);
+    paintStatusLive(live, 'コピーしました');
+    expect(live.textContent, '知らせが読み上げの領域に入っていない').toBe('コピーしました');
     mo.takeRecords();
-    paintStatusText(regions.statusText, parts({ noticeLine: 'コピーしました' }));
-    paintStatusText(regions.statusText, parts({ savingLine: '⏳ 保存中…', noticeLine: 'コピーしました' }));
-    expect(mo.takeRecords(), '知らせが同じなのに読み上げの子が書き換わった').toHaveLength(0);
-    expect(regions.statusText.querySelector('[data-pkc-field="status-live"]'), '読み上げの子が作り直された').toBe(live);
-    // エラーも読み上げの子へ
-    paintStatusText(regions.statusText, parts({ errorLine: '⚠ エラー: 失敗' }));
+    paintStatusLive(live, 'コピーしました');
+    expect(mo.takeRecords(), '知らせが同じなのに書き換わった').toHaveLength(0);
+    paintStatusLive(live, '⚠ エラー: 失敗');
+    expect(live.textContent).toBe('⚠ エラー: 失敗');
+    // 浮き札の字を書いても、読み上げの領域は巻き込まない
+    paintToastText(regions.statusText, '別の字');
     expect(live.textContent).toBe('⚠ エラー: 失敗');
     mo.disconnect();
   });
