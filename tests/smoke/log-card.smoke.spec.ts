@@ -44,6 +44,16 @@ const FIXTURE = [
   '昼の記録(単純)',
   '## 2026-10-10 08:00:00',
   '翌朝の記録',
+  '---',
+  '1. 番号付き 1\n2. 番号付き 2',
+  ':::details{summary="折りたたみの見出し" open}\n折りたたみの中身\n:::',
+  '> [!NOTE]\n> 注意書きの中身',
+  '```mermaid\ngraph TD\n  A-->B\n```',
+  '終わりの段落',
+  '# 2026-10-11 07:00:00',
+  '章の見出しの記録',
+  '### 2026-10-11 07:10:00',
+  'h1 の記録の入れ子',
 ].join('\n\n');
 
 async function openLog(page: Page): Promise<void> {
@@ -65,9 +75,9 @@ test('🔴 ログのカード: 輪郭・時刻の帯の廃止・表とコード�
   const edges = await page.locator(`${BODY} > [data-pkc-log-card]`).evaluateAll((els) =>
     els.map((el) => ({ tag: el.tagName.toLowerCase(), card: el.getAttribute('data-pkc-log-card') })),
   );
-  expect(edges.filter((e) => e.card === 'first').length, '記録は 3 件(入れ子 ### は親と同じカード)= 先頭が 3 つ').toBe(3);
-  expect(edges.filter((e) => e.card === 'last').length, '末尾も 3 つ').toBe(3);
-  expect(edges.filter((e) => e.card === 'first').every((e) => e.tag === 'h2'), '先頭は時刻の見出し').toBe(true);
+  expect(edges.filter((e) => e.card === 'first').length, '記録は 4 件(入れ子 ### は親と同じカード)= 先頭が 4 つ').toBe(4);
+  expect(edges.filter((e) => e.card === 'last').length, '末尾も 4 つ').toBe(4);
+  expect(edges.filter((e) => e.card === 'first').every((e) => e.tag === 'h1' || e.tag === 'h2'), '先頭は時刻の見出し(# か ##)').toBe(true);
 
   // ② 輪郭: 先頭 = 上の枠 + 上の角丸、末尾 = 下の枠 + 下の角丸、全部 = 左右の枠 + 紙の地。時刻に左の帯(3px)・影が無い
   const paper = await page.evaluate(() => {
@@ -218,7 +228,7 @@ test('🔴 ログのカード: 輪郭・時刻の帯の廃止・表とコード�
   expect(lines.size).toBe('1px 100%');
   expect(lines.pos, '左の輪郭線の位置').toBe('0px 0px');
   // 器の中の表・コードの上の余白が、本文の余白(`pre` / `table` の margin)を残さず、他の塊と同じ細い間隔(0.3em)
-  const gaps = await page.locator(`${BODY} > .pkc-md-block`).evaluateAll((els) =>
+  const gaps = await page.locator(`${BODY} > .pkc-md-block:not([data-pkc-render-lang="mermaid"])`).evaluateAll((els) =>
     els.map((w) => {
       const c = w.querySelector('pre, table') as HTMLElement;
       return c.getBoundingClientRect().top - w.getBoundingClientRect().top;
@@ -327,5 +337,231 @@ test('🔴 情報ペイン: 4 枚のカード(基本 / 目次と添付 / タグ�
       await pane.screenshot({ path: `${dir}/inspector-bottom-${theme}.png` });
     }
   }
+  expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 見出し(# / ## / ###)の左の帯はカードの外へ出ず、畳みの印(▾ / ▸)が出る。hr・番号・折りたたみ・注意書き・図もカードの内側 (B1)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await openLog(page);
+
+  // ① 見出し(h1 の記録の頭 / h2 の時刻 / h3 の追いログ)全部: 帯の枠は 1px のヘアライン、畳みの押し所はカードの内側、触れても帯(5px の強調色)が出ない
+  const heads = page.locator(`${BODY} > :is(h1, h2, h3)[data-pkc-log-card]`);
+  const n = await heads.count();
+  expect(n, 'h1 + h2 3 つ + h3 2 つ = 6 つの見出しが要る(台の空振り)').toBe(6);
+  expect(await heads.evaluateAll((els) => els.map((e) => e.tagName.toLowerCase()).sort().join(','))).toBe('h1,h2,h2,h2,h3,h3');
+  const cardLeft = await page.locator(`${BODY} > h2[data-pkc-log-card="first"]`).first().evaluate((e) => e.getBoundingClientRect().left);
+  for (let i = 0; i < n; i += 1) {
+    const h = heads.nth(i);
+    const tag = await h.evaluate((e) => e.tagName.toLowerCase());
+    const btn = h.locator('[data-pkc-field="heading-fold"]');
+    await h.scrollIntoViewIfNeeded();
+    await btn.hover();
+    const r = await h.evaluate((el) => {
+      const b = el.querySelector('[data-pkc-field="heading-fold"]') as HTMLElement;
+      const hb = el.getBoundingClientRect();
+      const bb = b.getBoundingClientRect();
+      const before = getComputedStyle(b, '::before');
+      const after = getComputedStyle(b, '::after');
+      return {
+        border: getComputedStyle(el).borderLeftWidth,
+        padLeft: getComputedStyle(el).paddingLeft,
+        btnLeft: bb.left - hb.left,
+        headLeft: hb.left,
+        beforeW: before.width,
+        afterContent: after.content,
+        afterOpacity: after.opacity,
+      };
+    });
+    expect(r.border, `${tag}: 左の帯(枠)が残っている`).toBe('1px');
+    if (tag !== 'h3') expect(r.padLeft, `${tag}: 字の頭がカードの内側の余白(16px)に揃っていない`).toBe('16px');
+    expect(r.btnLeft, `${tag}: 畳みの押し所が見出しの外(帯がカードの外へ出る)`).toBeGreaterThanOrEqual(-0.5);
+    expect(r.headLeft, `${tag}: カードの左端がずれた`).toBeGreaterThanOrEqual(cardLeft - 0.5);
+    expect(r.beforeW, `${tag}: 触れたとき帯(5px の強調色)が出た`).toBe('0px');
+    expect(r.afterContent, `${tag}: 触れたとき ▾ が出ていない`).toContain('▾');
+    expect(r.afterOpacity, `${tag}: 触れたとき ▾ が見えない`).toBe('1');
+  }
+
+  // ② 畳むと ▸ が常に見える。開いて離れると ▾ は消える(触れたときだけ)
+  const h2 = page.locator(`${BODY} > h2`).first();
+  const btn = h2.locator('[data-pkc-field="heading-fold"]');
+  const after = (): Promise<{ content: string; opacity: string }> =>
+    btn.evaluate((b) => {
+      const a = getComputedStyle(b, '::after');
+      return { content: a.content, opacity: a.opacity };
+    });
+  await page.mouse.move(2, 2);
+  expect((await after()).opacity, '開いていて触れていないのに ▾ が出ている').toBe('0');
+  await clickReal(page, btn);
+  await expect(btn).toHaveAttribute('aria-expanded', 'false');
+  await page.mouse.move(2, 2);
+  const folded = await after();
+  expect(folded.content, '畳んでいるのに ▸ が出ていない').toContain('▸');
+  expect(folded.opacity, '畳んだ印(▸)が見えない(触れていなくても出す)').toBe('1');
+  const dir = process.env.PKC3_SHOT_DIR;
+  if (dir !== undefined && dir !== '') {
+    mkdirSync(dir, { recursive: true });
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-pkc-theme', t), theme);
+      await page.locator(BODY).evaluate((el) => (el.closest('[data-pkc-region="detail"]') as HTMLElement).scrollTo(0, 0));
+      await page.screenshot({ path: `${dir}/log-${theme}-folded.png` });
+      await page.locator(`${BODY} > h1`).first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
+      await page.mouse.move(2, 2);
+      await page.screenshot({ path: `${dir}/log-${theme}-h1.png` });
+    }
+  }
+  await clickReal(page, btn);
+
+  // ③ 記録 3(`## 2026-10-10 08:00:00`)の hr / 番号 / 折りたたみ / 注意書き / 図 が、カードの内側の余白に収まる
+  const rec = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as HTMLElement;
+    const all = [...host.querySelectorAll(':scope > [data-pkc-log-card]')] as HTMLElement[];
+    const at = all.findIndex((e) => e.tagName === 'H2' && (e.textContent ?? '').includes('2026-10-10 08:00:00'));
+    const rec: HTMLElement[] = [];
+    for (let i = at; i < all.length; i += 1) {
+      if (i > at && /^(first|solo)$/.test(all[i]!.getAttribute('data-pkc-log-card')!)) break;
+      rec.push(all[i]!);
+    }
+    const card = all[at]!.getBoundingClientRect();
+    return rec.map((e) => {
+      const cs = getComputedStyle(e);
+      const b = e.getBoundingClientRect();
+      return {
+        tag: e.tagName.toLowerCase(),
+        cls: String(e.className).split(' ')[0] ?? '',
+        lang: e.getAttribute('data-pkc-render-lang') ?? '',
+        contentRight: b.right - Number.parseFloat(cs.borderRightWidth) - Number.parseFloat(cs.paddingRight),
+        cardRight: card.right,
+        left: cs.borderLeftWidth,
+        right: cs.borderRightWidth,
+        top: cs.borderTopWidth,
+        shadow: cs.boxShadow,
+      };
+    });
+  }, BODY);
+  const tags = rec.map((r) => r.tag);
+  for (const need of ['hr', 'ol', 'details', 'blockquote']) expect(tags, `${need} が記録に無い(台の空振り)`).toContain(need);
+  expect(rec.some((r) => r.lang === 'mermaid'), '図(mermaid)の器が無い(台の空振り)').toBe(true);
+  for (const r of rec) {
+    expect(r.contentRight, `${r.tag}.${r.cls} の中身がカードの内側の余白(16px)を越えた`).toBeLessThanOrEqual(r.cardRight - 16 + 0.5);
+    if (r.tag === 'details' || r.cls === 'pkc-md-block') continue; // 器は透明な枠で余白を取る(輪郭は背景の線 ── 別の検査)
+    expect([r.left, r.right], `${r.tag}.${r.cls} の左右の枠がカードの 1px でない`).toEqual(['1px', '1px']);
+  }
+  const hr = rec.find((r) => r.tag === 'hr')!;
+  expect(hr.top, 'hr の線がカードの縁から縁まで引かれている(カードの輪郭が二重)').toBe('0px');
+  const details = rec.find((r) => r.tag === 'details')!;
+  expect(details.shadow, '折りたたみの自分の枠(1px)が消えた').toMatch(/0px 0px 0px 1px inset/);
+  expect(details.shadow, '折りたたみの自分の地(大きな広がりの内側の影)が消えた').toMatch(/0px 0px 0px \d{3,}(\.\d+)?px inset/);
+  expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 新しい順: 記録ごとに 見た目の先頭 → 途中 → 末尾 の順で、上の角は見た目の先頭・下の角は見た目の末尾、カードの間が空く (B1)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await openLog(page);
+  await clickReal(page, '[data-pkc-action="toggle-log-order"]');
+  await expect(page.locator(BODY)).toHaveAttribute('data-pkc-log-order', 'desc');
+
+  const recs = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as HTMLElement;
+    const all = [...host.querySelectorAll(':scope > [data-pkc-log-card]')] as HTMLElement[];
+    const out: { top: number; bottom: number; blocks: { card: string; top: number; rt: string; rb: string }[] }[] = [];
+    for (const e of all) {
+      const card = e.getAttribute('data-pkc-log-card')!;
+      const b = e.getBoundingClientRect();
+      const cs = getComputedStyle(e);
+      if (card === 'first' || card === 'solo') out.push({ top: b.top, bottom: b.bottom, blocks: [] });
+      const r = out[out.length - 1]!;
+      r.blocks.push({ card, top: b.top, rt: cs.borderTopLeftRadius, rb: cs.borderBottomLeftRadius });
+      r.bottom = Math.max(r.bottom, b.bottom);
+    }
+    return out;
+  }, BODY);
+  expect(recs.length, '記録が 4 つ要る(台の空振り)').toBe(4);
+  for (const r of recs) {
+    expect(r.blocks.length, '塊が少なすぎる(台の空振り)').toBeGreaterThanOrEqual(2);
+    expect(r.blocks[0]!.card, '記録の先頭の塊の印').toBe('first');
+    expect(r.blocks[r.blocks.length - 1]!.card, '記録の末尾の塊の印').toBe('last');
+    for (let i = 1; i < r.blocks.length; i += 1) {
+      expect(r.blocks[i]!.top, '見た目の上下の順が 先頭 → 末尾 でない').toBeGreaterThan(r.blocks[i - 1]!.top);
+    }
+    expect(r.blocks[0]!.rt, '見た目の先頭に上の角丸が無い').not.toBe('0px');
+    expect(r.blocks[0]!.rb).toBe('0px');
+    expect(r.blocks[r.blocks.length - 1]!.rb, '見た目の末尾に下の角丸が無い').not.toBe('0px');
+    expect(r.blocks[r.blocks.length - 1]!.rt).toBe('0px');
+    for (const b of r.blocks.slice(1, -1)) expect([b.rt, b.rb], '途中の塊に角丸が付いた').toEqual(['0px', '0px']);
+  }
+  // 見た目の上から下へ並べ、隣り合うカードの間が空く(重ならない・詰まらない)
+  const byTop = [...recs].sort((a, b) => a.top - b.top);
+  for (let i = 1; i < byTop.length; i += 1) {
+    expect(byTop[i]!.top - byTop[i - 1]!.bottom, 'カードの間が空いていない').toBeGreaterThan(2);
+  }
+  expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 情報ペイン: 見出しも添付も無いノートは「目次と添付」のカードを出さず、残りの 3 枚は出る (B1)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-body"]', '見出しも添付も無い 1 行だけのノート');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const cards = page.locator('[data-pkc-region="inspector"] > [data-pkc-card]');
+  await expect(cards).toHaveCount(4);
+  const display = await cards.evaluateAll((els) => els.map((e) => [e.getAttribute('data-pkc-card'), getComputedStyle(e).display] as const));
+  expect(display.find(([n]) => n === 'toc')![1], '空の「目次と添付」カードが出ている').toBe('none');
+  for (const name of ['basic', 'links', 'actions']) expect(display.find(([n]) => n === name)![1], `${name} のカードが消えた`).not.toBe('none');
+  // 見出しを書くと出る(対照群: 隠す規則が常に効いているのではない)
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await page.fill('[data-pkc-field="editor-body"]', '# 見出し\n\n本文');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator('[data-pkc-region="inspector"] > [data-pkc-card="toc"]')).toBeVisible();
+  expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 スマホの幅(375px)でも、表・コードはカードの内側に収まり、ページは横に広がらない (B1)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 375, height: 800 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await openLog(page);
+  const r = await page.evaluate((sel) => {
+    const host = document.querySelector(sel) as HTMLElement;
+    const card = host.querySelector(':scope > h2[data-pkc-log-card="first"]')!.getBoundingClientRect();
+    const wrap = (s: string): { l: number; r: number; sw: number; cw: number } => {
+      const el = host.querySelector(`:scope > ${s}`) as HTMLElement;
+      const b = el.getBoundingClientRect();
+      return { l: b.left + el.clientLeft, r: b.left + el.clientLeft + el.clientWidth, sw: el.scrollWidth, cw: el.clientWidth };
+    };
+    const hostBox = host.getBoundingClientRect();
+    return {
+      card: { l: card.left, r: card.right },
+      host: { l: hostBox.left, r: hostBox.right },
+      table: wrap('.pkc-md-block[data-pkc-md-block-kind="table"]'),
+      code: wrap('.pkc-md-block:has(pre:not([data-pkc-md-table]))'),
+      preSw: (host.querySelector(':scope > .pkc-md-block pre:not([data-pkc-md-table])') as HTMLElement).scrollWidth,
+      preCw: (host.querySelector(':scope > .pkc-md-block pre:not([data-pkc-md-table])') as HTMLElement).clientWidth,
+      docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      hostOverflow: host.scrollWidth - host.clientWidth,
+    };
+  }, BODY);
+  expect(r.docOverflow, 'ページが横に広がった').toBe(0);
+  expect(r.hostOverflow, '本文の器が横に広がった').toBe(0);
+  expect(r.card.r - r.card.l, 'カードが狭すぎる').toBeGreaterThan(250);
+  expect(r.card.l, 'カードが本文の器の左外').toBeGreaterThanOrEqual(r.host.l - 0.5);
+  expect(r.card.r, 'カードが本文の器の右外').toBeLessThanOrEqual(r.host.r + 0.5);
+  for (const [name, v] of [['表', r.table], ['コード', r.code]] as const) {
+    expect(v.l, `${name}がカードの左の余白に食い込んだ`).toBeGreaterThanOrEqual(r.card.l + 8);
+    expect(v.r, `${name}がカードの右の余白に食い込んだ`).toBeLessThanOrEqual(r.card.r - 8 + 0.5);
+  }
+  expect(r.table.sw, '表が器より広くない(台の空振り)').toBeGreaterThan(r.table.cw);
+  expect(r.preSw, 'コードが器より広くない(台の空振り)').toBeGreaterThan(r.preCw);
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });

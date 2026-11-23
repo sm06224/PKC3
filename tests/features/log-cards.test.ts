@@ -33,9 +33,6 @@ describe('logCardEdges(ログ 1 件 = 1 カードの区切り)', () => {
   it('先頭の見出しが隠れたら、見えている最初の塊が first', () => {
     expect(logCardEdges([2, 0, 0], [true, false, false])).toEqual(['none', 'first', 'last']);
   });
-  it('降順に並べても、記録内の DOM の並びが先頭 / 末尾(order は印を変えない)', () => {
-    // DOM は常に書いた順。降順は CSS の order だけ ── 入力は同じなので出力も同じ
-    const levels = [0, 2, 0, 2, 0, 3, 0];
-    expect(logCardEdges(levels)).toEqual(['none', 'first', 'last', 'first', 'mid', 'mid', 'last']);
-  });
+  // ⚠ 降順(新しい順)は CSS の `order` だけで DOM の並びを変えない ── 「記録内の見た目の先頭 / 末尾 = DOM の先頭 / 末尾」は
+  //   実ブラウザの smoke(`log-card.smoke.spec.ts` の新しい順)が見た目の座標で見る(この pure 関数の入力は降順でも変わらないので、ここでは主張しない)
 });
