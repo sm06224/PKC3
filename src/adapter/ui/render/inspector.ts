@@ -1890,7 +1890,19 @@ export class InspectorRenderer {
       return;
     }
 
-    const dl = document.createElement('dl');
+    /**
+     * 🔴 **情報ペインの 3 つのカード**(B 試作。基本 / 目次 / タグ・つながり ── 4 つ目の「操作」は `actions`)。
+     *   行は 1 つの `dl` に積まず、カードごとの `dl` に分ける(`rows` の索引・描き方は変わらない)。
+     *   ⚠ 行が全部畳まれたカードは CSS が畳む(`app.css` の `[data-pkc-card]:not(:has(…))`)。
+     */
+    let dl = document.createElement('dl');
+    dl.setAttribute('data-pkc-card', 'basic');
+    const dls: HTMLElement[] = [dl];
+    const card = (name: string): void => {
+      dl = document.createElement('dl');
+      dl.setAttribute('data-pkc-card', name);
+      dls.push(dl);
+    };
     const row = (label: string, field: string): void => {
       const dt = document.createElement('dt');
       dt.textContent = label;
@@ -1993,12 +2005,14 @@ export class InspectorRenderer {
      *   常設すると「押せない物」を毎回読ませることになる(#300 の小さい版)。
      * ⚠ 値は押せる札なので `setRow` ではなく専用の器を持つ。
      */
+    card('toc');
     row('目次', 'inspector-toc');
     row('本文で使う添付', 'inspector-assets');
     /**
      * 🔴 **タグ**(#182 / 台帳 #180 の A-2)。⚠ 値は文字ではなく**押せる札**なので、
      * `setRow`(textContent 差し替え)ではなく専用の器を持つ。
      */
+    card('links');
     row('タグ', 'inspector-tags');
     /**
      * 🔴 **本文の中に書いたタグ**(#550。user 要望 2026-08-29
@@ -2096,7 +2110,7 @@ export class InspectorRenderer {
      */
     row('送り先のアプリ', 'inspector-ext-send');
     if (shape === 'entry+link') row('元ファイル', 'inspector-linked-file');
-    this.region.append(dl);
+    this.region.append(...dls);
 
     /**
      * 🔴 **関係を作る帯**(#185)。⚠ 器は 1 度しか組まない ── 値だけ差し替える
@@ -2138,6 +2152,7 @@ export class InspectorRenderer {
     // ⚠ **操作は対象の隣**(P8)。共通ツールバーに集約しない
     const actions = document.createElement('div');
     actions.setAttribute('data-pkc-field', 'inspector-actions');
+    actions.setAttribute('data-pkc-card', 'actions');
     /**
      * 🔴 **塊は「線」ではなく「間」で切る**(#1029 段 B)。
      *

@@ -14966,3 +14966,218 @@ h6:hover > .pkc-heading-anchor,
     animation: none;
   }
 }
+
+/**
+ * 🔴 **カード(B1)**── 1 単位の情報を、紙の地(`--surface`)・角丸(`--radius-lg`)・ヘアライン(`--hairline`)の輪郭で囲む。
+ *
+ * ## ログ 1 件 = 1 カード(包む要素を足さない)
+ * 本文は平らな DOM のまま。記録(`##` 〜 次の `##` の手前。入れ子 `###`〜 を含む)の塊に、先頭 / 途中 / 末尾 / 単独の印
+ * (`data-pkc-log-card` = `first` / `mid` / `last` / `solo`。`render/log-days.ts` の `applyLogCards`)が付くので、
+ * 左右の枠は全部の塊に、上の枠と上の角丸は先頭に、下の枠と下の角丸と下の余白は末尾に描いて 1 枚に見せる。
+ * ⚠ 余白は塊ごとの `margin` ではなく `padding` に置き換える(カードの地が塊の間で途切れない)。
+ * ⚠ 時刻(`##`)の左の帯(3px の太線)はカードの左端と重なるので描かない。畳みの押し所(ボタン)は残し、
+ *   触れる / 焦点で ▾、畳んでいる間は ▸ を出す(右クリックのメニューからも畳める)。
+ * ⚠ 自分の背景・枠・横スクロールを持つ塊(表・コード・引用・図)は、カードの内側の余白(`--card-pad`)の中に収める:
+ *   塊の器の幅を読み幅 + 両側の余白に揃え(表の器の `fit-content` は外す)、横スクロールは器の中で流す(ページを広げない)。
+ *   器の右上に絶対配置するボタン(コピー・言語名など)は、余白のぶん内側へ寄せる。
+ */
+@media screen {
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card] {
+    --card-pad: var(--s5);
+    --pt: 0.3em;
+    --pb: 0.3em;
+    position: relative;
+    box-sizing: border-box;
+    max-width: calc(var(--read-w) + 2 * var(--card-pad));
+    margin-block: 0;
+    margin-inline: var(--prose-lead) auto;
+    padding-block: var(--pt) var(--pb);
+    padding-inline: var(--card-pad);
+    background-color: var(--surface);
+    border-inline: 1px solid var(--hairline);
+    /* 巨大な 1 語・長い 1 行が器を押し広げない(横にあふれるのは表・コードの器の中だけ) */
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  /* ⚠ `width` は書かない ── 新しい順(縦の flex)の `stretch` の規則(上)が握る。読み幅が無い(`--read-w: none`)ときは `calc` が成り立たず `max-width` は無制限 = 器いっぱい */
+  /* ⚠ 表・コード・図の器(`.pkc-md-block`)は、読み幅の左端に寄せる規則(`--prose-indent`)・表の器の `fit-content`・
+   *   csv の器の `max-width` が先にある ── 同じ軸(読み幅 + 両側の余白を中央)へ、より強い選択子で揃える */
+  /* ⚠ `.pkc-md-rendered` から始めない(書き出す HTML へ焼かれる本文の規則になり、画面だけの `--card-pad` を探して build が止まる)── 属性の重ねで強くする */
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > .pkc-md-block[data-pkc-log-card][data-pkc-log-card] {
+    /* ⚠ 表の器の `fit-content` を外し、新しい順(縦の flex)と同じ `stretch`(読み幅いっぱいに広げてから中央に置く) */
+    width: 100%;
+    width: -moz-available;
+    width: -webkit-fill-available;
+    width: stretch;
+    max-width: calc(var(--read-w) + 2 * var(--card-pad));
+    margin-inline: var(--prose-lead) auto;
+  }
+  /* 時刻の見出し(`##`)── 左の帯は描かない(カードの左端がその役)。字の頭は他の塊と同じ位置 */
+  [data-pkc-log-days] > :is(h1, h2)[data-pkc-log-card][data-pkc-log-card] {
+    --pkc-heading-bar: transparent;
+    padding-inline-start: var(--card-pad);
+  }
+  /* `#` の見出しの下の区切り線は、カードの縁から縁まで引かない(時刻の `##` と同じく引かない。⚠ 末尾・単独の下の枠より弱い選択子) */
+  [data-pkc-log-days] > h1[data-pkc-log-card] {
+    border-block-end: 0;
+    padding-block-end: 0;
+  }
+  /* 畳みの押し所は、帯の幅ではなく左の内側の余白いっぱい(見出しの高さいっぱい) */
+  [data-pkc-log-days] > :is(h1, h2, h3, h4, h5, h6)[data-pkc-log-card] > [data-pkc-field='heading-fold'] {
+    inset-inline-start: 0;
+    width: var(--card-pad);
+  }
+  [data-pkc-log-days] > :is(h1, h2, h3, h4, h5, h6)[data-pkc-log-card] > [data-pkc-field='heading-fold']::before {
+    width: 0;
+    background: transparent;
+  }
+  [data-pkc-log-days] > :is(h1, h2, h3, h4, h5, h6)[data-pkc-log-card] > [data-pkc-field='heading-fold']::after {
+    content: '▾';
+    position: absolute;
+    inset-inline-start: 3px;
+    /* 見出しの字の高さに合わせる(カードの上の余白 `--pt` のぶん下げる) */
+    top: var(--pt, 0px);
+    color: var(--muted, inherit);
+    font-size: 0.8em;
+    line-height: 1.6;
+    opacity: 0;
+  }
+  [data-pkc-log-days] > :is(h1, h2, h3, h4, h5, h6)[data-pkc-log-card]:hover > [data-pkc-field='heading-fold']::after,
+  [data-pkc-log-days] > :is(h1, h2, h3, h4, h5, h6)[data-pkc-log-card] > [data-pkc-field='heading-fold']:focus-visible::after,
+  [data-pkc-log-days] > :is(h1, h2, h3, h4, h5, h6)[data-pkc-log-card] > [data-pkc-field='heading-fold'][aria-expanded='false']::after {
+    opacity: 1;
+  }
+  [data-pkc-log-days] > :is(h1, h2, h3, h4, h5, h6)[data-pkc-log-card] > [data-pkc-field='heading-fold'][aria-expanded='false']::after {
+    content: '▸';
+  }
+  /* 深さの字下げ(`--pkc-log-indent`。深さの規則が決める。無ければ 0)はカードの内側の余白に足す。縦線(背景)もカードの余白のぶん右へ。
+   * ⚠ 入れ子の見出しは帯(3px の枠)を持たなくなったので、枠のぶんを引いていた字下げをそのまま足す */
+  [data-pkc-log-days] > :is(p, h3, h4, h5, h6, ul, ol)[data-pkc-log-card][data-pkc-log-card] {
+    padding-inline-start: calc(var(--card-pad) + var(--pkc-log-indent, 0px));
+    background-position: calc(var(--pkc-log-line, 0px) + var(--card-pad)) 0;
+  }
+  [data-pkc-log-days] > :is(ul, ol)[data-pkc-log-card][data-pkc-log-card] {
+    padding-inline-start: calc(var(--card-pad) + var(--pkc-log-indent, 0px) + 1.4em);
+  }
+  [data-pkc-log-days] > :is(h3, h4, h5, h6)[data-pkc-log-card][data-pkc-log-card] {
+    --pt: 0.6em;
+    --pb: 0.2em;
+  }
+  /* 引用 ── 自分の左の棒(3px)はカードの左端と別物なので、背景の帯で内側に引く(枠にしない) */
+  [data-pkc-log-days] > blockquote[data-pkc-log-card][data-pkc-log-card] {
+    border-inline-start: 1px solid var(--hairline);
+    padding-inline-start: calc(var(--card-pad) + var(--s4));
+    background-image: linear-gradient(var(--border), var(--border));
+    background-repeat: no-repeat;
+    background-size: 3px calc(100% - var(--pt) - var(--pb));
+    background-position: var(--card-pad) var(--pt);
+    background-origin: border-box;
+  }
+  /* 🔴 **表・コード・csv・図の器は、内側の余白を「透明な枠」で取る**(横スクロールの器でもあるため)。
+   *   スクロールの切り口は器の padding box = **枠の内側**なので、余白を `padding` で取ると、横にあふれた表がカードの
+   *   輪郭まで張り付いて切れる。余白を枠にすれば、あふれた表もコードと同じ内側の余白で切れる(左右とも)。
+   *   地(`--surface`)は枠の下まで広がるので途切れない。
+   *   ⚠ 輪郭は**疑似要素にしない**(`overflow: auto` の器は、自分の外へはみ出す疑似要素を切ってしまい、輪郭が途切れる)──
+   *   器自身の背景(細い線の重ね)で左右・上下を引き、角丸の弧だけ放射状の背景で足す。
+   *   絶対配置のボタン(コピー・言語名など)は padding box から測るので、そのまま内側に出る。 */
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card] {
+    --hl: linear-gradient(var(--hairline), var(--hairline));
+    --rl: var(--radius-lg);
+    padding-inline: 0;
+    border-inline: calc(var(--card-pad) + 1px) solid transparent;
+    border-block: 0;
+    background-repeat: no-repeat;
+    /* 線は枠(透明な余白)の外縁に引く */
+    background-origin: border-box;
+    background-image: var(--hl), var(--hl);
+    background-size: 1px 100%, 1px 100%;
+    background-position: left top, right top;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card='first'] {
+    background-image: var(--hl), var(--hl), var(--hl),
+      radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: 1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: left top, right top, left top, left top, right top;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card='last'] {
+    background-image: var(--hl), var(--hl), var(--hl),
+      radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: 1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: left top, right top, left bottom, left bottom, right bottom;
+  }
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card='solo'] {
+    background-image: var(--hl), var(--hl), var(--hl), var(--hl),
+      radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)),
+      radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
+    background-size: 1px 100%, 1px 100%, 100% 1px, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl);
+    background-position: left top, right top, left top, left bottom, left top, right top, left bottom, right bottom;
+  }
+  /* 器の中の表・コードは、塊どうしの間(上下の余白 `--pt` / `--pb`)を他の塊と同じにする(本文の余白が器の中へ残らない) */
+  :is(.pkc-md-block, .pkc-details)[data-pkc-log-card] :is(pre, table) {
+    margin-block: 0;
+  }
+  /* 🔴 折りたたみ(`:::details`)は自分の枠と地(`--surface-2`)を持つ ── カードの枠と別物として、内側の余白の中に置く。
+   *   自分の地・枠は「透明な枠の内側(padding box)」にだけ、内側の影で描く(地 = 大きな広がりの影 / 枠 = 1px の影)。
+   *   上下の間(`--pt` / `--pb`)も同じ透明な枠で取る */
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > details.pkc-details[data-pkc-log-card][data-pkc-log-card] {
+    padding: var(--s2) var(--s3);
+    border-block: var(--pt) solid transparent;
+    border-block-end-width: var(--pb);
+    border-radius: 0;
+    box-shadow:
+      inset 0 0 0 1px var(--border),
+      inset 0 0 0 100vmax var(--surface-2);
+  }
+  /* 区切り線(`hr`)と脚注の上の線は、カードの縁から縁まで引かず、内側の余白の中に引く(カードの輪郭を二重にしない) */
+  [data-pkc-log-days] > :is(hr, .footnotes)[data-pkc-log-card][data-pkc-log-card] {
+    margin-block: 0;
+    border-top: 0;
+    background-image: linear-gradient(var(--border), var(--border));
+    background-repeat: no-repeat;
+    background-origin: border-box;
+    background-size: calc(100% - 2 * (var(--card-pad) + 1px)) 1px;
+    background-position: center top;
+  }
+  [data-pkc-log-days] > hr[data-pkc-log-card][data-pkc-log-card] {
+    background-position: center;
+  }
+  /* 絶対配置のボタンは、上の余白のぶんだけ下げる */
+  [data-pkc-log-days] > .pkc-md-block[data-pkc-log-card] :is(.pkc-md-copy-btn, .pkc-md-copy-menu-btn, .pkc-md-edit-btn, .pkc-render-toggle, .pkc-code-collapse-top-btn, .pkc-code-lang) {
+    margin-block-start: var(--pt);
+  }
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='first'],
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='solo'] {
+    --pt: var(--s4);
+    margin-block-start: var(--s5);
+    border-top: 1px solid var(--hairline);
+    border-start-start-radius: var(--radius-lg);
+    border-start-end-radius: var(--radius-lg);
+  }
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='last'],
+  [data-pkc-log-days] > [data-pkc-log-card][data-pkc-log-card='solo'] {
+    --pb: var(--s4);
+    border-bottom: 1px solid var(--hairline);
+    border-end-start-radius: var(--radius-lg);
+    border-end-end-radius: var(--radius-lg);
+  }
+}
+
+/* ── 情報ペインの 4 カード(基本 / 目次と添付 / タグ・つながり / 操作)── */
+@media screen {
+  [data-pkc-region='inspector'] > [data-pkc-card] {
+    flex: none;
+    margin: 0 var(--s3) var(--s3);
+    padding: var(--s4);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+  }
+  /* 行が 1 つも出ていない(畳まれた)カードは出さない */
+  [data-pkc-region='inspector'] > dl[data-pkc-card]:not(:has(> dt:not([hidden]))) {
+    display: none;
+  }
+}

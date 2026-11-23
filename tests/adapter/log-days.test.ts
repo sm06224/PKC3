@@ -62,6 +62,25 @@ describe('ログの日の行(器) #1441', () => {
     expect(rows(h)).toHaveLength(0);
   });
 
+  it('🔴 1 件 = 1 カードの印: 見出しが無くなった / ログでなくなった描き直しで、古い印を 1 つも残さない(B1)', () => {
+    const cards = (h: HTMLElement): number => h.querySelectorAll('[data-pkc-log-card]').length;
+    // 差分描画は器と塊を使い回す ── 見出しの行を消した後の描き直し(畳める見出しが無い = 早期 return の経路)
+    const h = host('<h2>2026-10-09 09:00:00</h2><p>a1</p><p>a2</p>');
+    applyHeadingFold(h);
+    expect([...h.querySelectorAll('h2, p')].map((c) => c.getAttribute('data-pkc-log-card'))).toEqual(['first', 'mid', 'last']);
+    h.querySelector('h2')!.remove();
+    applyHeadingFold(h);
+    expect(cards(h), '見出しが消えたのに印が残った').toBe(0);
+    // ログでないノート(別のノートへの切り替え)── 器の印が無くなった描き直し
+    const h2 = host('<h2>2026-10-09 09:00:00</h2><p>a1</p>');
+    applyHeadingFold(h2);
+    expect(cards(h2)).toBe(2);
+    h2.removeAttribute(LOG_DAYS_HOST_ATTR);
+    h2.querySelector('h2')!.remove();
+    applyHeadingFold(h2);
+    expect(cards(h2), 'ログでなくなったのに印が残った').toBe(0);
+  });
+
   it('時刻見出しが無い `##` だけのノートには出さない', () => {
     const h = host('<h2>章</h2><p>x</p><h2>節</h2><p>y</p>');
     applyHeadingFold(h);
@@ -81,6 +100,8 @@ describe('ログの日の行(器) #1441', () => {
         el.removeAttribute('data-pkc-log-time');
         el.removeAttribute('data-pkc-log-depth');
       });
+      // 🔴 1 件 = 1 カードの印(B 試作)も見た目だけの印
+      c.querySelectorAll('[data-pkc-log-card]').forEach((el) => el.removeAttribute('data-pkc-log-card'));
       return c.innerHTML;
     };
     expect(strip(h)).toBe(strip(plain));

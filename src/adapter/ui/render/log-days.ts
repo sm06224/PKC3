@@ -27,6 +27,7 @@
  */
 import { OVERLAY_ATTR } from './apply-blocks';
 import { descRank, descRanks, logDepths, logSegments, ORDER_STRIDE, orderValue, recordStampKey } from '@features/textlog/log-order';
+import { logCardEdges } from '@features/textlog/log-cards';
 import { appLogOrder } from './log-order-setting';
 import {
   formatLogDay,
@@ -513,6 +514,29 @@ export function applyLogDepth(host: HTMLElement, blocks: readonly Element[], lev
     // 親の記録の時刻の見出し(段 2 で、字の頭が日時)── 入れ子の見出しの見え方は深さの印が持つ(時刻でない `###` も同じ見え方)
     const time = log && (levels[i] ?? 0) === 2 && logDayOfHeading(b.textContent ?? '') !== null;
     if (time !== b.hasAttribute(LOG_TIME_ATTR)) b.toggleAttribute(LOG_TIME_ATTR, time);
+  });
+}
+
+/** 🔴 ログの 1 件 = 1 カードの印(B 試作)── 値 `first` / `mid` / `last` / `solo`。記録の外の塊には付かない。 */
+export const LOG_CARD_ATTR = 'data-pkc-log-card';
+
+/**
+ * 🔴 **1 件 = 1 カードの印を塊に付ける**(B 試作)── 規則は `features/textlog/log-cards.ts`(pure)。
+ * ⚠ 隠れている塊(畳み)を除いて数えるので、**`hidden` が決まった後**に呼ぶ(`applyHeadingFold` の最後)。
+ * 見え方は `app.css`(包む要素は足さない)。ログでない面では印を 1 つも残さない。
+ */
+export function applyLogCards(host: HTMLElement, blocks: readonly Element[], levels: readonly number[]): void {
+  const log = host.hasAttribute(LOG_DAYS_HOST_ATTR);
+  const edges = log
+    ? logCardEdges(levels, blocks.map((b) => b instanceof HTMLElement && b.hidden !== false))
+    : [];
+  blocks.forEach((b, i) => {
+    const e = edges[i] ?? 'none';
+    const want = e === 'none' ? null : e;
+    if (b.getAttribute(LOG_CARD_ATTR) !== want) {
+      if (want === null) b.removeAttribute(LOG_CARD_ATTR);
+      else b.setAttribute(LOG_CARD_ATTR, want);
+    }
   });
 }
 
