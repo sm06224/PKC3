@@ -1012,8 +1012,10 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
 
   it('🔴 フォーカスが勝つ: 入力欄の近接は `:not(:focus-visible)` / 包み(追記欄・SQL)の線は `:not(:focus-within)`', () => {
     expect(css).toMatch(/:is\(input, textarea, select\)\[data-pkc-glow-near\]\[data-pkc-glow-near\]:not\(:focus-visible\)\s*\{/);
-    const list = css.slice(css.indexOf("[data-pkc-field='append-form']:not(:focus-within)"), css.indexOf("[data-pkc-glow-near][data-pkc-glow-near]::before"));
+    const at = css.indexOf("[data-pkc-glow-near][data-pkc-glow-near]::before");
+    const list = css.slice(css.lastIndexOf(':is(', at), at);
     expect(list).toContain("[data-pkc-field='sql-input-wrap']:not(:focus-within)");
+    expect(css).toContain("[data-pkc-field='append-form'][data-pkc-glow-near][data-pkc-glow-near]:not(:focus-within)");
   });
 
   it('🔴 新しい対象(コードの枠・図のカード・折りたたみ・追記欄・SQL の包み)は共通の `::before` の線に入る(ログの器・ログの折りたたみは除く)', () => {
@@ -1023,18 +1025,24 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
       '.pkc-details:not([data-pkc-log-card])',
       ".pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card])",
       ".pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card])",
-      "[data-pkc-field='append-form']",
       "[data-pkc-field='sql-input-wrap']",
     ])
       expect(list, `${t} が共通の線に無い`).toContain(t);
+    // 追記欄の枠は疑似要素でなく背景 3 層(`position: relative` を足すと取っ手の押し所を覆う)
+    expect(list).not.toContain('append-form');
+    const form = decls("[data-pkc-field='append-form'][data-pkc-glow-near][data-pkc-glow-near]:not(:focus-within)");
+    expect(form).toMatch(/background-clip:\s*padding-box,\s*border-box,\s*border-box/);
+    expect(decls("[data-pkc-field='append-form']"), '追記欄の枠が位置づけ(取っ手の押し所を覆う)になった').not.toMatch(/position:\s*relative/);
   });
 
   it('🔴 横スクロールの表は透明な 2px の枠 + 器自身の背景(内側の地 → 光の放射)。疑似要素にしない・版面は動かさない', () => {
     const table = ".pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card])";
     const frame = decls(table);
     expect(frame).toMatch(/border:\s*2px solid transparent/);
-    expect(frame, '枠のぶん版面が動く').toMatch(/margin-block:\s*-2px/);
-    expect(frame).toMatch(/inset-inline-start:\s*-2px/);
+    expect(frame, '枠のぶん版面が動く(上下)').toMatch(/margin-block:\s*-2px/);
+    expect(frame, '右へはみ出している(読む面が横スクロールする)').not.toMatch(/margin-inline-end:\s*-/);
+    expect(frame).toMatch(/margin-inline-start:\s*-2px/);
+    expect(decls("[data-pkc-prose]:not([data-pkc-writing='vertical']) > " + table.replace(/^/, '')), '読み幅の余白があるとき、その余白から 2px 引く').toMatch(/margin-inline-start:\s*calc\(var\(--prose-indent, 0px\) - 2px\)/);
     const glowRule = decls(`${table}[data-pkc-glow-near]`);
     expect(glowRule).toMatch(/background-clip:\s*padding-box,\s*border-box/);
     expect(glowRule, '内側の地(線形)→ 光(放射)の順').toMatch(/linear-gradient\(var\(--surface\), var\(--surface\)\),\s*radial-gradient/);
@@ -1054,7 +1062,7 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
     expect(d).toMatch(/border:\s*1px solid var\(--hairline\)/);
     expect(d).toMatch(/border-radius:\s*var\(--radius-lg\)/);
     expect(d).toMatch(/background:\s*var\(--surface\)/);
-    expect(d).toMatch(/width:\s*fit-content/);
+    expect(d, '幅を図に合わせて縮めている(図の焼き幅が親の幅を読むので循環する)').not.toMatch(/fit-content|max-content/);
     expect(decls(`${card} [data-pkc-mermaid-src]`), '保存ボタンがカードでなく図の器に付いたまま').toMatch(/position:\s*static/);
     expect(decls(`${card} [data-pkc-field='diagram-save']`)).toMatch(/left:\s*var\(--s3\)/);
   });
