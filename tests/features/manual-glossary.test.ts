@@ -110,22 +110,17 @@ function bodyForScan(manual: string): string {
 
 /**
  * 使わない語を含む実在の語・コード。⚠ 名指しで通す ── 本文から消えたら表からも消す。
- * (場面・面積・文面 = 実在の複合語 / アイコン名の鍵 / `file://` と SQL の列名 `lid` = コードの字 /
- *  `/entry/` `entry=` `container=` = アドレスの字、`entry_order` `entry_lid` = SQL の列名)
+ * (場面・面積 = 実在の複合語 / アイコン名の鍵 / `file://` と SQL の列名 `lid` = コードの字 /
+ *  `/entry/` `entry=` `container=` = アドレスの字)
  */
 const LEGIT_COMPOUNDS: readonly string[] = [
   '場面',
   '面積',
-  '文面',
-  '`:key:` 鍵',
   'ゲーム・鍵',
   '`file://`',
-  '`cid` `lid`',
   'SELECT lid,',
   '/entry/',
   'entry=',
-  'entry_order',
-  'entry_lid',
   'container=',
 ];
 
@@ -165,7 +160,7 @@ describe('マニュアル本文 ── 使わない語が 0 件', () => {
     expect(coinedHits('この file を選ぶ').map((h) => h.split('\t')[0])).toEqual(['file']);
     expect(coinedHits('押せません ── 理由').map((h) => h.split('\t')[0])).toEqual(['──']);
     // 対照群:実在の複合語・画面は誤検知しない
-    expect(coinedHits('出ない場面 / 面積で見る内訳 / 文面 / 画面')).toEqual([]);
+    expect(coinedHits('出ない場面 / 面積で見る内訳 / 画面')).toEqual([]);
     // 図の罫線の行は本文の検査から外れる(⚠ 外すのは図の行だけ ── 文の中の `──` は当たる)
     const diagram = '┌ 予定 ─────────┐\n│ ─────────────── │\n└──────────────┘';
     expect(coinedHits(bodyForScan(diagram))).toEqual([]);

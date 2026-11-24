@@ -962,7 +962,7 @@ export function insertRuby(sel: TextSelection): TextSelection {
  * 🔴 **注意書きのブロック(`:::note` など)の種類**(#425 の「囲い(`:::`)の挿入口」)。
  *
  * ⚠ 描き手が色を付ける 8 種(`markdown-render.ts` の `SECTION_KNOWN_ROLES`)と同じ。
- *   マニュアル「注意書きのブロック」と順序も字も揃える。
+ *   マニュアル「注意書きと折りたたみ」と順序も字も揃える。
  * 🔑 入口は 3 つ ── 書式バーの「注意書き」(種類を選ぶ)/ 操作を探す(種類ごとの名前)/
  *   設定のショートカット画面で付ける鍵。**一覧はここ 1 つ**(`FORMAT_OPS`・`KEY_COMMANDS` もここから作る)。
  */

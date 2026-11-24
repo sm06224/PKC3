@@ -3254,7 +3254,7 @@ md.inline.ruler.after('link', 'pkc_title_link', function titleLinkRule(state, si
  * ⚠ **行頭だけ**拾う ── 段落の先頭と、改行(`breaks: true` の 1 行)の直後。文中の `14:00` は時刻の字で、
  *   経過ではない(`transcriptLines` が作る形は `経過 字` の行だけ)。
  *   ⚠ 行頭に書いた時計の時刻(`14:00 会議`)も m:ss として押せる字になる ── 設計の帰結で、逃げ道は
- *   行頭の全角スペース(マニュアル「文字起こしの時刻」)。
+ *   行頭の全角スペース(マニュアル「文字起こしと字幕」)。
  * ⚠ 綴りの読みは `parseElapsed` が**1 か所で**持つ(`elapsedText` の逆)。読めない綴りは字のまま残す。
  * ⚠ 字は**そのまま**(`0:15`)。後ろの空白と字には触らない。リンクの中では当てない。
  * 🔑 `<span role="button" tabindex="0">` ── 鍵(Enter / Space)は binder の「`tabindex="0"` の押せる物」の道に乗る。

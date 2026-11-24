@@ -1,11 +1,8 @@
 /**
  * マニュアルの書き方の門(`docs/development/manual-style-2026-09.md`、2026-11 改定)。
  *
- * 🔑 **移行期のあいだは「増やさない」の門(ratchet)**である ── 本文の書き直し(PR 3)が終わるまでは
- *   いまの違反数(`BASELINE`)を上限にし、増やしたら落とす。書き直しが終わったら
- *   `BASELINE` を `FINAL` と同じ値にする(= 0 件 / 3,500 行 / 150 節)。
- * ⚠ `BASELINE` は**下げる方向にしか動かせない**(`FINAL` 以上であることを下で見ている)。
- *   直したら数字も下げる ── 上限のままだと、直した分だけ「また増やしてよい余地」が残る。
+ * 🔑 マニュアルの書き直し(PR 3)で**移行期は終わった** ── 規約の違反(見出し・日付・経緯・古い位置)は
+ *   0 件で等値に pin し、規模(行数・H3)は上限(`FINAL`)以下で見る。
  * ⚠ 検査の関数(`tests/helpers/manual-style.ts`)は**自前の原稿**にも当てて、効いていることを見る
  *   (実物のマニュアルに当てるだけでは、検査が壊れていても緑になる)。
  */
@@ -45,37 +42,39 @@ const FINAL = {
 } as const;
 
 /**
- * いまの違反数(2026-11-23 に実測。囲みの外のみ。画面の字の逐語引用「…」/ `…` / **太字の画面の字** は数えない)。
- * ⚠ **等値**で見る ── 直したら数字も下げる(上限のままだと、直した分だけ「また増やしてよい余地」が残る)。
- * ⚠ PR 3(本文の書き直し)で FINAL へ揃える。
+ * 書き直し(PR 3)が終わった時点の実測(2026-11-24。囲みの外のみ。画面の字の逐語引用「…」/ `…` / **太字の画面の字** は数えない)。
+ * 🔑 **違反の件数は FINAL(= 0)と同じ値で、等値で見る**(1 件でも出たら落ちる)。
+ * 🔑 **規模(行数・H3)は上限(FINAL)で見る** ── 書き足すたびにテストの数字を直させないため。BASELINE は実測の記録で、上限より下であることだけ pin する。
  */
 const BASELINE = {
-  longHeadings: 40, // PR 3 で 0 にする
-  commaHeadings: 170, // PR 3 で 0 にする
-  bannedEndings: 128, // PR 3 で 0 にする
-  dateStamps: 168, // PR 3 で 0 にする
-  staleUi: 78, // PR 3 で 0 にする
-  historyWords: 14, // PR 3 で 0 にする
-  lines: 10773, // PR 3 で 3,500 にする
-  h3: 680, // PR 3 で 150 にする
+  longHeadings: 0,
+  commaHeadings: 0,
+  bannedEndings: 0,
+  dateStamps: 0,
+  staleUi: 0,
+  historyWords: 0,
+  lines: 2930, // 実測(目標 2,000〜2,800 の少し上。上限 3,500 は FINAL)
+  h3: 131, // 実測(目標約 100。上限 150 は FINAL)
 } as const;
 
-/** 等値の門。⚠ 食い違ったら向きで直し方が変わる ── 増えたなら本文を直す / 減ったなら BASELINE を下げる。 */
+/** 違反の件数の門。⚠ 0 件(= FINAL)から増えたら本文を直す。 */
 function expectRatchet(name: keyof typeof BASELINE, actual: number): void {
   const base = BASELINE[name];
-  expect(
-    actual,
-    actual > base
-      ? `${name}: ${actual} 件で、BASELINE(${base})より増えた ── 本文を直す(増やさない)`
-      : `${name}: ${actual} 件で、BASELINE(${base})より減った ── BASELINE を ${actual} へ下げる(門は下げる方向にだけ動かす)`,
-  ).toBe(base);
+  expect(actual, `${name}: ${actual} 件で、基準(${base})より増えた ── 本文を直す(増やさない)`).toBe(base);
 }
 
-describe('マニュアルの書き方 ── 移行期の門(ratchet)', () => {
-  it('BASELINE は FINAL 以上(門は下げる方向にしか動かせない)', () => {
-    for (const k of Object.keys(FINAL) as Array<keyof typeof FINAL>) {
-      expect(BASELINE[k], `${k}: BASELINE が FINAL を下回っている`).toBeGreaterThanOrEqual(FINAL[k]);
+/** 規模の門。⚠ 上限(FINAL)を超えたら、先に既存の節を削る・畳む。 */
+function expectUnderCap(name: 'lines' | 'h3', actual: number): void {
+  expect(actual, `${name}: ${actual} が上限(${FINAL[name]})を超えた ── 先に既存の節を削る・畳む`).toBeLessThanOrEqual(FINAL[name]);
+}
+
+describe('マニュアルの書き方 ── 門(違反 0 件・規模は上限)', () => {
+  it('移行は終わっている ── 違反の件数の基準は FINAL(0 件)と同じで、規模の実測は上限以下', () => {
+    for (const k of ['longHeadings', 'commaHeadings', 'bannedEndings', 'dateStamps', 'staleUi', 'historyWords'] as const) {
+      expect(BASELINE[k], `${k}: 違反の基準が FINAL(0 件)から離れている`).toBe(FINAL[k]);
     }
+    expect(BASELINE.lines).toBeLessThanOrEqual(FINAL.lines);
+    expect(BASELINE.h3).toBeLessThanOrEqual(FINAL.h3);
   });
 
   it('空振り防止 ── 実物のマニュアルを読めている', () => {
@@ -101,11 +100,11 @@ describe('マニュアルの書き方 ── 移行期の門(ratchet)', () => {
   it('本文 ── 経緯の言い回しを増やさない(等値)', () => {
     expectRatchet('historyWords', historyWordLines(MANUAL).length);
   });
-  it('全体 ── 行数を増やさない(等値)', () => {
-    expectRatchet('lines', totalLines(MANUAL));
+  it('全体 ── 行数が上限(3,500 行)以下', () => {
+    expectUnderCap('lines', totalLines(MANUAL));
   });
-  it('全体 ── H3 の数を増やさない(等値)', () => {
-    expectRatchet('h3', h3Count(MANUAL));
+  it('全体 ── H3 の数が上限(150 個)以下', () => {
+    expectUnderCap('h3', h3Count(MANUAL));
   });
 });
 

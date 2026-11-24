@@ -365,7 +365,7 @@ describe('ヘルプの面', () => {
   it('⚠ markdown の口が無くても白紙にしない', () => {
     new HelpRenderer(region).render();
     const host = region.querySelector('[data-pkc-region="help-manual"]')!;
-    expect(host.textContent, '白紙になっている').toContain('画面を組み替える');
+    expect(host.textContent, '白紙になっている').toContain('ペインの表示と幅');
   });
 
   it('markdown の口が在れば、それで描く', async () => {
@@ -477,7 +477,7 @@ describe('ヘルプの面', () => {
     await Promise.resolve();
     await Promise.resolve();
     const host = region.querySelector('[data-pkc-region="help-manual"]')!;
-    expect(host.textContent, '白紙になっている').toContain('画面を組み替える');
+    expect(host.textContent, '白紙になっている').toContain('ペインの表示と幅');
   });
 });
 
@@ -1187,8 +1187,8 @@ describe('ヘルプの面の目次(#719)', () => {
      *
      * ⚠ マニュアルの見出しは、かつて **85 本のうち 30 本**が `1-はじめる` のように
      *   数字で始まっていた。🔴 **#779(2026-09-07)で章番号を全廃したので 3 本になった**
-     *   ── いま数字で始まるのは「1 面で編集する」「2 ペインで整理する」
-     *   「2 ペインの面で」だけである。⚠ **0 本になったらこの段は何も見ていない**ので、
+     *   ── いま数字で始まるのは「2 ペインで整理」
+     *   だけである(書き直しで 1 本になった)。⚠ **0 本になったらこの段は何も見ていない**ので、
      *   下限はそのまま置く(数だけ実測に合わせた)。
      * ⚠ 1 稿目の実装は `` `#${CSS.escape(id)}` `` で選択子を組んでおり、
      *   **happy-dom は escape 済みの選択子を解決しない**ので、この 35% は
@@ -1201,7 +1201,7 @@ describe('ヘルプの面の目次(#719)', () => {
     expect(
       digits.length,
       '前提が崩れている: 数字で始まる見出しが 1 つも無い(この段は何も見ていない)',
-    ).toBeGreaterThanOrEqual(3);
+    ).toBeGreaterThanOrEqual(1);
     // ⚠ **いちばん後ろ**を採る ── 先頭は「上から 2 番目の見出し」で、
     //    前置きが縮んだ日に別の理由で落ちる(着地前レビュー 2 巡目・[軽] 6)
     const last = digits[digits.length - 1]!;
