@@ -26,8 +26,10 @@ import {
 import { S3Box, webSigCrypto } from '../../src/adapter/platform/s3-box';
 import { SyncKeystore } from '../../src/adapter/platform/sync-keystore';
 import { applySyncDiff, buildSyncDiff } from '../../src/adapter/ui/actions/sync-diff';
+import { writeArchive } from '../../src/features/export/pkc3-archive';
+import { readZipDirectory, readZipEntry } from '../../src/features/import/zip-reader';
 import { readDiffZip } from '../../src/features/sync/diff-file';
-import { createKeyMaterial, openDataKey, type E2ECrypto } from '../../src/features/sync/e2e-crypto';
+import { createKeyMaterial, decryptDiff, derivePassphraseKek, formatRecoveryKey, openDataKey, type E2ECrypto } from '../../src/features/sync/e2e-crypto';
 import { serializeKeyring } from '../../src/features/sync/keyring';
 import { buildSettingsFile } from '../../src/features/settings/settings-file';
 import { encFileName, folderFileName } from '../../src/features/sync/sync-folder';
@@ -237,7 +239,7 @@ describe('S3 互換(既定で暗号化)', () => {
     expect(A.fails.filter((f) => f !== SYNC_E2E_LOCKED_NOTE)).toEqual([]);
   });
 
-  it('🔴 暗号化の既定は S3 = オン / 口(deps.e2e)が無ければ従来どおり平文(段 4a の挙動のまま)', async () => {
+  it('🔴 暗号化の既定は S3 = オン / 口(deps.e2e)が無ければ従来どおり平文(段 4a の挙動のまま。段 4b-B で口を配線するとき、ここは「口が無ければ止まる(fail-closed)」に変わる)', async () => {
     const s3 = fakeS3(SECRET);
     const A = await rig('A', s3, { e2e: false });
     await A.d.put('n1', 'メモ', NOTE_TEXT);
@@ -264,6 +266,9 @@ describe('🔴 途中の切り替え(平文 → 暗号化)', () => {
     const A = await rig('A', s3, { d: A0.d, ks: A0.ks, store: A0.store });
     await provisionFirst(A, s3);
     await A.d.put('n3', 'A の新しいメモ', 'a2');
+    // B(まだ平文)が、A の暗号化の前に平文で新しいメモを置く
+    await B0.d.put('n4', 'B の平文の新しいメモ', 'b2');
+    await B0.sf.syncNow(true);
     await A.sf.boot();
     await A.sf.syncNow(true);
     const keys = [...s3.objects.keys()].sort();
@@ -274,7 +279,12 @@ describe('🔴 途中の切り替え(平文 → 暗号化)', () => {
     const guide = 'その端末でも暗号化をオンにしてください';
     expect(A.says.join('\n'), '平文の相手 B への案内').toContain(guide);
     expect(A.sf.view().message).toContain(guide);
-    expect(await titles(A.d), '平文の相手のファイルも読んだ').toEqual(['A の新しいメモ', 'A の既存メモ', 'B の既存メモ'].sort());
+    expect(await titles(A.d), '🔴 暗号化している間は、平文の相手の新しいファイルを取り込まない(前に取り込んだ物はそのまま)').toEqual(['A の新しいメモ', 'A の既存メモ', 'B の既存メモ'].sort());
+    const guided = A.says.filter((t) => t.includes(guide)).length;
+    await A.sf.syncNow(false);
+    await A.sf.syncNow(false);
+    expect(A.says.filter((t) => t.includes(guide)).length, '同じ版の平文には、案内を言い直さない').toBe(guided);
+    expect(A.sf.view().message, '案内は画面の状態には出し続ける').toContain(guide);
 
     // B(まだ平文)── A の暗号化したファイルは読めない。案内を出し、取り込まない
     await B0.sf.syncNow(true);
@@ -290,6 +300,7 @@ describe('🔴 途中の切り替え(平文 → 暗号化)', () => {
     expect([...s3.objects.keys()].sort()).toEqual([`pkc3/${encFileName(aDev)}`, `pkc3/${encFileName(bDev)}`, 'pkc3/keyring.json'].sort());
     expect(await titles(B.d)).toContain('A の新しいメモ');
     await A.sf.syncNow(true);
+    expect(await titles(A.d), 'B が暗号化したら、B の新しいメモも届く').toContain('B の平文の新しいメモ');
     expect(A.sf.view().message, '全員が暗号化したら案内は消える').toBeNull();
   });
 });
@@ -337,39 +348,85 @@ describe('🔴 巻き戻し・差し替え・格下げの拒否', () => {
     expect(await titles(B.d)).toEqual(['v2 のメモ', '追加']);
   });
 
-  it('同じ連番で中身(版)が違う物は取り込まない / 同じ版なら読み直しても受ける', async () => {
+  it('🔴 同じ連番で中身が違う物は取り込まない / 中身が同じで ETag だけ変わった物は受ける', async () => {
     const { s3, A, B, aKey } = await pair();
     await A.sf.syncNow(true);
     await B.sf.syncNow(true);
     const body = s3.objects.get(aKey)!.body;
-    // 同じ暗号文を別の版(ETag)で置き直す = 同じ連番・版だけ違う
-    s3.objects.set(aKey, { body, etag: '"replaced"', mtime: new Date().toISOString() });
+    // 同じ暗号文を別の版(ETag)で置き直す = クラウドの再書き込み。中身は同じなので受ける
+    s3.objects.set(aKey, { body, etag: '"touched"', mtime: new Date().toISOString() });
     B.fails.length = 0;
-    await B.sf.syncNow(false);
-    expect(B.fails.join('\n')).toContain('連番が同じで中身が違う');
-    // 手で読み直しても、版が違うままなら拒否が続く / 版が元に戻れば(同じ連番・同じ版)受ける
+    await B.sf.syncNow(true);
+    expect(B.fails, '中身が同じなら、版だけ違っても断らない').toEqual([]);
+    // 同じ連番で、別の暗号文(別の nonce・別の中身)を置く = 差し替え
+    const { readEncHeader, encryptDiff } = await import('../../src/features/sync/e2e-crypto');
+    const seq = (await readEncHeader(new Blob([body as Uint8Array<ArrayBuffer>]))).header.seq;
+    const dk = (await A.ks.openDataKey(A.d.cid))!;
+    const forged = await encryptDiff(
+      { subtle: webcrypto.subtle as SubtleCrypto, random: (n) => webcrypto.getRandomValues(new Uint8Array(n)) },
+      new Blob(['PK-different']),
+      { dataKey: dk.key, keyId: dk.keyId, device: await deviceId(A.d), seq, name: encFileName(await deviceId(A.d)) },
+    );
+    s3.objects.set(aKey, { body: new Uint8Array(await forged.arrayBuffer()), etag: '"forged"', mtime: new Date().toISOString() });
     B.fails.length = 0;
     await B.sf.syncNow(true);
     expect(B.fails.join('\n')).toContain('連番が同じで中身が違う');
-    const orig = B.store.map.get(B.d.cid)!.record.peerSeq[await deviceId(A.d)]!;
-    s3.objects.set(aKey, { body, etag: orig.version!, mtime: new Date().toISOString() });
-    B.fails.length = 0;
-    await B.sf.syncNow(true);
-    expect(B.fails, '同じ連番・同じ版は受ける').toEqual([]);
+    expect(B.fails.join('\n'), '拒否の文言に救済の道が書いてある').toContain('受け入れ直してください');
   });
 
-  it('暗号化していた相手が平文のファイルに戻っていたら(格下げ)取り込まない', async () => {
+  it('🔴 受け入れ直す(acceptPeerAgain): 相手が古いバックアップから戻した → 拒否 → 受け入れ直すと取り込める', async () => {
+    const { s3, A, B, aKey, aDev } = await pair();
+    await A.sf.syncNow(true);
+    const old = new Uint8Array(s3.objects.get(aKey)!.body);
+    await A.d.put('n7', '新しい', 'x');
+    await A.sf.syncNow(true);
+    await B.sf.syncNow(true);
+    expect(await titles(B.d)).toContain('新しい');
+    s3.objects.set(aKey, { body: old, etag: '"restored"', mtime: new Date().toISOString() });
+    B.fails.length = 0;
+    await B.sf.syncNow(true);
+    expect(B.fails.join('\n')).toContain('古い');
+    expect(await B.sf.acceptPeerAgain('ffffffffffffffff'), '知らない相手は何も変えない').toBe(false);
+    expect(await B.sf.acceptPeerAgain(aDev)).toBe(true);
+    expect(B.store.map.get(B.d.cid)!.record.peerSeq[aDev], '読み直して、受け入れた連番に更新された').toBeDefined();
+    expect(B.sf.view().phase).toBe('idle');
+    expect(B.says.join('\n')).toContain('受け入れ直します');
+  });
+
+  it('🔴 暗号化していた相手が平文のファイルだけになっていても(格下げ)平文は取り込まない', async () => {
     const { s3, A, B, aDev, aKey } = await pair();
     await A.sf.syncNow(true);
     await B.sf.syncNow(true);
     expect(await titles(B.d)).toEqual(['v1 のメモ']);
-    // 攻撃者が A の暗号化したファイルを消し、平文のファイルを置く
+    // 攻撃者が A の暗号化したファイルを消し、本物の平文の差分(本文入り)を置く
     s3.objects.delete(aKey);
-    await new S3Box({ config: s3Config(), secret: SECRET, crypto: webSigCrypto(), fetch: s3.fetch }).write(folderFileName(aDev), new Blob(['PK-fake-plain']), null);
+    const P = await rig('P', fakeS3(SECRET), { e2e: false });
+    await P.d.put('evil', '平文で差し込まれたメモ', 'evil');
+    const plainBox = rawBox(s3);
+    const built = await buildSyncDiff(P.d.deps(), { kind: 'download', all: true });
+    if (built.skipped) throw new Error('作れていない');
+    await plainBox.write(folderFileName(aDev), built.blob, null);
     B.fails.length = 0;
+    B.says.length = 0;
     await B.sf.syncNow(true);
-    expect(B.fails.join('\n')).toContain('以前は暗号化したファイルを置いていましたが');
-    expect(await titles(B.d)).toEqual(['v1 のメモ']);
+    expect(await titles(B.d), '平文は取り込まれない').toEqual(['v1 のメモ']);
+    expect(B.says.join('\n')).toContain('その端末でも暗号化をオンにしてください');
+  });
+
+  it('🔴 置き場の keyring.json の keyId が、この端末で開いているキーと違えば、何も書かずに止まる', async () => {
+    const { s3, A, B } = await pair();
+    await A.sf.syncNow(true);
+    const other = await createKeyMaterial({ subtle: webcrypto.subtle as SubtleCrypto, random: (n) => webcrypto.getRandomValues(new Uint8Array(n)) }, 'other-pass');
+    s3.objects.set('pkc3/keyring.json', { body: new TextEncoder().encode(serializeKeyring(other.keyring)), etag: '"swapped"', mtime: new Date().toISOString() });
+    await A.d.put('n8', '止まる前に書いた物', 'x');
+    const puts = s3.seen.filter((r) => r.method === 'PUT').length;
+    A.fails.length = 0;
+    await A.sf.syncNow(true);
+    await B.sf.syncNow(true);
+    expect(s3.seen.filter((r) => r.method === 'PUT').length, '書いていない').toBe(puts);
+    expect(A.sf.view().phase).toBe('stopped');
+    expect(A.sf.view().message).toContain('keyring.json');
+    expect(await titles(B.d)).not.toContain('止まる前に書いた物');
   });
 
   it('別の暗号化キーで書かれたファイル・改ざんされたファイルは取り込まず、字に秘密を混ぜない', async () => {
@@ -387,6 +444,82 @@ describe('🔴 巻き戻し・差し替え・格下げの拒否', () => {
     expect(B.fails.join('\n')).toContain('改ざん');
     expect(await titles(B.d), '改ざんされた物は取り込まない').toEqual(['v1 のメモ']);
     for (const f of B.fails) for (const s of [PASS, KEY_ID, SECRET_KEY]) expect(f).not.toContain(s);
+  });
+});
+
+describe('🔴 切り替えの片付け(平文を消すのは、暗号化したファイルを書けた後だけ)', () => {
+  /** A が平文で同期済み(B が居るので書く)→ A が暗号化をオンにして開き直す所まで。 */
+  async function ready(over: Parameters<typeof fakeS3>[1] = {}, pre: (s3: FakeS3) => void = () => undefined) {
+    const s3 = fakeS3(SECRET, over);
+    const A0 = await rig('A', s3, { e2e: false });
+    const B0 = await rig('B', s3, { e2e: false });
+    await A0.d.put('n1', 'メモ', NOTE_TEXT);
+    await A0.sf.connectRemote(FORM);
+    await B0.sf.connectRemote(FORM);
+    await A0.sf.syncNow(true);
+    const aDev = await deviceId(A0.d);
+    const A = await rig('A', s3, { d: A0.d, ks: A0.ks, store: A0.store });
+    await provisionFirst(A, s3);
+    pre(s3); // 開き直す(= 暗号化への切り替えの最初の回が走る)前に、失敗の仕掛けを入れる
+    await A.sf.boot();
+    await A.sf.syncNow(true); // 起動の回の終わりを待ち、もう 1 回(手で)回す
+    return { s3, A, aDev, plainKey: `pkc3/${folderFileName(aDev)}`, encKey: `pkc3/${encFileName(aDev)}` };
+  }
+
+  const ctl = { mode: 'off' as 'off' | '412' | 'network' };
+  const hook = (s3: () => FakeS3) => (key: string): void => {
+    if (!key.endsWith('.enc')) return;
+    if (ctl.mode === '412') s3().objects.set(key, { body: new TextEncoder().encode('相手が書いた'), etag: '"other"', mtime: new Date().toISOString() });
+    if (ctl.mode === 'network') throw new TypeError('Failed to fetch');
+  };
+  const make = async (mode: 'off' | '412' | 'network', pre?: (s3: FakeS3) => void) => {
+    ctl.mode = mode;
+    let ref: FakeS3 | null = null;
+    const r = await ready({ beforePut: hook(() => ref!) }, (s3) => {
+      ref = s3;
+      pre?.(s3);
+    });
+    return r;
+  };
+
+  it('🔴 暗号化したファイルの書き込みが 412 で止まった → 自分の平文は残る', async () => {
+    const r = await make('412');
+    expect(r.s3.objects.has(r.plainKey), '平文は残っている').toBe(true);
+    expect(new TextDecoder().decode(r.s3.objects.get(r.encKey)!.body), '相手の物をそのまま').toBe('相手が書いた');
+  });
+
+  it('🔴 書き込みが通信エラーで失敗した → 自分の平文は残る / 直ったら暗号化して書き、平文を消す', async () => {
+    const r = await make('network');
+    expect(r.A.fails.length, '空振り防止: 失敗を言った').toBeGreaterThan(0);
+    expect(r.s3.objects.has(r.plainKey)).toBe(true);
+    expect(r.s3.objects.has(r.encKey)).toBe(false);
+    ctl.mode = 'off';
+    await r.A.sf.syncNow(true);
+    expect(r.s3.objects.has(r.encKey)).toBe(true);
+    expect(r.s3.objects.has(r.plainKey)).toBe(false);
+  });
+
+  it('🔴 平文を消せなくても同期は続く / 次の回でもう一度消す', async () => {
+    let denyDelete = true;
+    let deletes = 0;
+    const r = await make('off', (s3) => {
+      const real = s3.fetch;
+      (s3 as { fetch: typeof real }).fetch = async (url, init) => {
+        if (init.method === 'DELETE' && denyDelete) {
+          deletes += 1;
+          throw new TypeError('Failed to fetch');
+        }
+        return real(url, init);
+      };
+    });
+    expect(deletes, '空振り防止: 消す操作が実際に失敗した').toBeGreaterThan(0);
+    expect(r.s3.objects.has(r.encKey), '暗号化したファイルは書けている').toBe(true);
+    expect(r.s3.objects.has(r.plainKey), '消せなかった平文が残っている').toBe(true);
+    expect(r.A.sf.view().phase, '同期は止まらない').toBe('idle');
+    expect(r.A.fails.filter((f) => f.includes('古いファイルを消す')), '消せなかったことで同期を失敗にしない').toEqual([]);
+    denyDelete = false;
+    await r.A.sf.syncNow(false);
+    expect(r.s3.objects.has(r.plainKey), '次の回で消えた').toBe(false);
   });
 });
 
@@ -430,6 +563,17 @@ describe('同期フォルダ(既定オフ・同じ層)', () => {
   });
 });
 
+/** console の引数を字にする。⚠ Error は JSON.stringify だと `{}` になる ── String・message・stack を全部出す。 */
+function showArg(x: unknown): string {
+  if (typeof x === 'string') return x;
+  if (x instanceof Error) return [String(x), x.message, x.stack ?? ''].join('\n');
+  try {
+    return `${JSON.stringify(x) ?? ''} ${String(x)}`;
+  } catch {
+    return String(x);
+  }
+}
+
 describe('🔴 秘密が 1 バイトも出ない(パスフレーズ・回復キー・データ鍵の bytes)', () => {
   /** 探す字(各種の符号化)。 */
   function needles(passphrase: string, recoveryKey: string, raws: Uint8Array[]): { label: string; bytes: Buffer }[] {
@@ -468,7 +612,7 @@ describe('🔴 秘密が 1 バイトも出ない(パスフレーズ・回復キ�
     g.localStorage = fakeStorage();
     g.sessionStorage = fakeStorage();
     const logged: string[] = [];
-    for (const m of ['log', 'info', 'warn', 'error', 'debug', 'trace'] as const) vi.spyOn(console, m).mockImplementation((...a: unknown[]) => void logged.push(a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x) ?? String(x))).join(' ')));
+    for (const m of ['log', 'info', 'warn', 'error', 'debug', 'trace'] as const) vi.spyOn(console, m).mockImplementation((...a: unknown[]) => void logged.push(a.map(showArg).join(' ')));
     try {
       const { c, issued } = spyCrypto();
       const s3 = fakeS3(SECRET);
@@ -486,6 +630,30 @@ describe('🔴 秘密が 1 バイトも出ない(パスフレーズ・回復キ�
       await B.sf.syncNow(true);
       await A.sf.syncNow(true);
       expect(await titles(A.d), '空振り防止: 暗号化の同期が実際に通った').toEqual(['B', 'メモ']);
+
+      // 失敗の道(パスフレーズ違い・回復キーの字の誤り・弱い KDF・改ざん)のエラー文にも出ない
+      const errs: string[] = [];
+      const grab = async (p: Promise<unknown>): Promise<void> => {
+        try {
+          await p;
+          errs.push('(通ってしまった)');
+        } catch (e) {
+          errs.push(showArg(e));
+          console.error(e); // 呼び手が console へ出す場合も見る
+        }
+      };
+      await grab(openDataKey(c, have.keyring, { passphrase: `${PASS}-wrong` }));
+      await grab(openDataKey(c, have.keyring, { recoveryKey: `${km.recoveryKey}ZZZ` }));
+      await grab(openDataKey(c, have.keyring, { recoveryKey: formatRecoveryKey(new Uint8Array(20)) }));
+      await grab(derivePassphraseKek(c, PASS, new Uint8Array(16), 599999));
+      await grab(derivePassphraseKek(c, '', new Uint8Array(16), 600000));
+      const stored1 = [...s3.objects.entries()].find(([key]) => key.endsWith('.enc'))!;
+      const tampered = new Uint8Array(stored1[1].body);
+      tampered[tampered.length - 1]! ^= 1;
+      const dkErr = (await A.ks.openDataKey(A.d.cid))!;
+      await grab(decryptDiff(c, new Blob([tampered]), { dataKey: dkErr.key, keyId: dkErr.keyId, expectName: stored1[0].slice('pkc3/'.length), expectDevice: await deviceId(A.d) }));
+      expect(errs.filter((e) => e === '(通ってしまった)'), '空振り防止: どの失敗の道も実際に失敗した').toEqual([]);
+      expect(errs.join('\n')).toContain('パスフレーズまたは回復キーが違います');
 
       const raws = issued.get(32) ?? [];
       expect(raws.length, '空振り防止: 生のデータ鍵の bytes を控えている').toBe(1);
@@ -507,6 +675,28 @@ describe('🔴 秘密が 1 バイトも出ない(パスフレーズ・回復キ�
       if (zip.skipped) throw new Error('差分 zip が作られていない');
       hay.push(['差分 zip(生)', new Uint8Array(await zip.blob.arrayBuffer())]);
       hay.push(['差分 zip(読み戻し)', JSON.stringify(await readDiffZip(zip.blob))]);
+      hay.push(['失敗の道のエラー文(String・message・stack)', errs.join('\n')]);
+      // バックアップ(*.pkc3-full.zip の書き出しを実際に走らせる。圧縮の中は見えないので、読み戻した中身と生の bytes の両方)
+      const backup = await writeArchive(
+        {
+          cid: A.d.cid,
+          title: 'バックアップ',
+          listEntryMetas: async () => (await A.d.request({ op: 'listEntryMetas', cid: A.d.cid })).map((m) => ({ lid: m.lid, title: m.title, archetype: m.archetype, created_at: null, updated_at: null, entry_order: 1, status: null, date: null, archived: 0 })),
+          listBodies: async () => ({ rows: (await A.d.request({ op: 'getBodies', cid: A.d.cid, lids: ['n1'] })).map((r) => ({ lid: r.lid, body: r.body })), done: true }),
+          listRelations: async () => [],
+          listAssetMetas: async () => [],
+          getAssetBlob: async () => null,
+          listRevisionLids: async () => [],
+          getRevisionChain: async () => [],
+        },
+        '2026-11-24T00:00:00.000Z',
+      );
+      expect(backup.counts.entries, '空振り防止: バックアップに実際にノートが入った').toBeGreaterThan(0);
+      const dir = await readZipDirectory(backup.blob);
+      const inside: string[] = [];
+      for (const ent of dir) inside.push(await (await readZipEntry(backup.blob, ent)).text());
+      expect(inside.join('\n'), '空振り防止: 読み戻した中身にノートの本文が見える').toContain(NOTE_TEXT);
+      hay.push(['バックアップ(読み戻し)', inside.join('\n')], ['バックアップ(生)', new Uint8Array(await backup.blob.arrayBuffer())]);
       hay.push(['鍵の置き場の中身(接続情報・メッセージを除く dump)', JSON.stringify((await A.ks.config(A.d.cid)) ?? {})]);
 
       for (const [label, h] of hay) expect(leaks(h, ns), `${label} に秘密が出ている`).toEqual([]);

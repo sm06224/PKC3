@@ -36,6 +36,7 @@ import {
   deviceOfFileName,
   emptyFolderRecord,
   encFileName,
+  forgetPeerSeq,
   folderFileName,
   isEncFileName,
   notePeerSeq,
@@ -202,11 +203,12 @@ export const syncE2EPeerPlainNote = (ds: readonly string[]): string =>
 export const syncE2EPeerEncNote = (ds: readonly string[]): string =>
   `暗号化されたファイルを置いている端末があります(${shortDevices(ds)})。この端末でも暗号化をオンにしてください(オンにするまで、その端末のファイルは読めません)`;
 export const syncE2ERollbackNote = (dev: string, kind: 'rollback' | 'replaced'): string =>
-  kind === 'rollback'
-    ? `端末 ${dev.slice(0, 8)} のファイルは、取り込み済みのものより古いため取り込みませんでした(古いバックアップへの巻き戻し、または古いファイルの差し戻しの可能性があります)`
-    : `端末 ${dev.slice(0, 8)} のファイルは、取り込み済みのものと連番が同じで中身が違うため取り込みませんでした(差し替えの可能性があります)`;
-export const syncE2EDowngradeNote = (dev: string): string =>
-  `端末 ${dev.slice(0, 8)} は、以前は暗号化したファイルを置いていましたが、いまは平文のファイルです。取り込みませんでした(その端末の暗号化がオフになった、または差し替えられた可能性があります)`;
+  (kind === 'rollback'
+    ? `端末 ${dev.slice(0, 8)} のファイルは、取り込み済みのものより古いため取り込みませんでした`
+    : `端末 ${dev.slice(0, 8)} のファイルは、取り込み済みのものと連番が同じで中身が違うため取り込みませんでした`) +
+  '(古いファイルの差し戻しや差し替えの可能性があります。相手の端末が古いバックアップから戻した場合は、設定の端末間の同期で、その端末を受け入れ直してください)';
+export const SYNC_E2E_KEYRING_NOTE =
+  '置き場の暗号化キーの束(keyring.json)が、この端末で開いている暗号化キーと一致しないか、読めません。同期を止めています(暗号化キーを開き直してください)';
 
 export const SYNC_FOLDER_UNSUPPORTED_NOTE =
   'このブラウザでは同期フォルダを選べません(フォルダを読み書きする仕組みは、パソコンの Chrome・Edge にだけあります)。スマホや Safari・Firefox では「差分を書き出す」と差分ファイルの取り込みを使ってください';
@@ -774,6 +776,25 @@ export class SyncFolder {
     this.changed();
   }
 
+  /**
+   * 🔴 **この端末を受け入れ直す**(相手が古いバックアップから戻したときの救済 ── 画面は段 4b-B)。その相手の連番の記録を忘れ、
+   * 次の回から読み直す。他の相手の記録は動かさない。
+   * @returns 記録を変えたか
+   */
+  async acceptPeerAgain(device: string): Promise<boolean> {
+    const changed = forgetPeerSeq(this.record, device);
+    if (!changed) return false;
+    try {
+      await this.persist();
+    } catch (e) {
+      this.deps.fail(`受け入れ直す記録を保存できませんでした(この画面を閉じるまでは有効です): ${errorText(e)}`);
+    }
+    this.deps.say(`端末 ${device.slice(0, 8)} を受け入れ直します(次の同期から、その端末のファイルを再読み込みします)`);
+    this.changed();
+    await this.syncNow(true);
+    return true;
+  }
+
   /** この回で暗号化の層を使うか。⚠ 暗号化の口(`deps.e2e`)が無ければ使えない(平文のまま)。 */
   private encryptOn(): boolean {
     if (this.deps.e2e === undefined || this.deps.e2e === null) return false;
@@ -863,7 +884,18 @@ export class SyncFolder {
           this.lastFail = this.message;
           return;
         }
-        box = new EncryptedBox({ inner: rawBox, crypto: e2e.crypto, key });
+        const eb = new EncryptedBox({ inner: rawBox, crypto: e2e.crypto, key });
+        // 🔴 毎回、置き場の暗号化キーの束の keyId と、この端末で開いているキーを照らす(違えば何も書かずに止まる)
+        const ring = await eb.loadKeyring().catch(() => undefined);
+        if (ring === undefined || ring === null || ring.keyring.keyId !== key.keyId) {
+          this.phase = 'stopped';
+          this.message = SYNC_E2E_KEYRING_NOTE;
+          this.changed();
+          if (manual || this.message !== this.lastFail) this.deps.fail(this.message);
+          this.lastFail = this.message;
+          return;
+        }
+        box = eb;
       }
       // ── 🔴 端末 id が変わった(「同期の記録を消す」をした — どのワークスペース・オフの間でも)── 前の id で置いた自分のファイルを片付け、記録を最初からにする
       //   (残すと、他の端末から「もう来ない別の端末」に見え続ける)。⚠ 複製の確認で作り直したときは、前の名前は複製元の物なので `own` を先に空にしてある
@@ -885,6 +917,12 @@ export class SyncFolder {
       // 🔴 平文と暗号化の両方が在る端末は、ここで 1 つに決める(暗号化していれば暗号化を優先)
       const chosen = chooseRoundFiles(listed, self, encOn);
       const files = chosen.files;
+      // 🔴 暗号化している間、平文の相手のファイルは取り込まない。控え(`seen`)だけ更新し、案内は「その版を初めて見たとき」だけ出す
+      const skippedNames = new Set(chosen.skippedPlain.map((f) => f.name));
+      const newPlain = chosen.skippedPlain.filter((f) => {
+        const had = this.record.seen[f.name];
+        return had === undefined || !sameFileVersion(had, f);
+      });
       const plan = planFolderRound(self, files, this.record, manual);
       // ── 自分の名前のファイルを、自分以外が書いた(端末のデータの複製)── 取り込みの核が見分けて、手で同期したときに確認する
       const ownFile = plan.ownFile;
@@ -899,13 +937,11 @@ export class SyncFolder {
         try {
           const rd = box.readWithMeta !== undefined ? await box.readWithMeta(f.name) : { blob: await box.read(f.name), meta: null };
           if (peer !== self) {
-            // 🔴 巻き戻し・差し替え・平文への格下げの拒否(段 4b-d)── 取り込まない。同じ中身を無人の回で読み直し続けない(変わったら読む)
+            // 🔴 巻き戻し・差し替えの拒否(段 4b-d)── 取り込まない。同じ中身を無人の回で読み直し続けない(変わったら読む)
             const refuse =
               rd.meta !== null
-                ? ((v) => (v === 'ok' ? null : syncE2ERollbackNote(peer, v)))(checkPeerSeq(this.record, peer, rd.meta.seq, f))
-                : encOn && this.record.peerSeq[peer] !== undefined
-                  ? syncE2EDowngradeNote(peer)
-                  : null;
+                ? ((v) => (v === 'ok' ? null : syncE2ERollbackNote(peer, v)))(checkPeerSeq(this.record, peer, rd.meta.seq, f, rd.meta.contentId))
+                : null;
             if (refuse !== null) {
               problems.push(refuse);
               this.record.seen[f.name] = {
@@ -943,7 +979,7 @@ export class SyncFolder {
             this.own = { size: f.size, mtime: f.mtime, ...(f.version === undefined ? {} : { version: f.version }), name: f.name };
             continue;
           }
-          if (rd.meta !== null) notePeerSeq(this.record, peer, rd.meta.seq, f);
+          if (rd.meta !== null) notePeerSeq(this.record, peer, rd.meta.seq, f, rd.meta.contentId);
           imported += outcome.changed;
           conflicts += outcome.conflicts;
           this.record.seen[f.name] = {
@@ -957,7 +993,10 @@ export class SyncFolder {
           problems.push(`${f.name}: ${errorText(e)}`);
         }
       }
-      for (const n of plan.vanished) delete this.record.seen[n];
+      for (const n of plan.vanished) if (!skippedNames.has(n)) delete this.record.seen[n];
+      for (const f of chosen.skippedPlain) {
+        this.record.seen[f.name] = { size: f.size, mtime: f.mtime, ...(f.version === undefined ? {} : { version: f.version }), want: this.record.seen[f.name]?.want ?? [] };
+      }
       if (gen !== this.generation) return;
       // 🔴 自分の名前のファイルを、まだ片付けていない誰かが書いている(同じ端末 id の別の端末 / このブラウザの別のワークスペース)──
       //   同じ名前のファイルを書き合わないよう、書かずに待つ
@@ -1002,7 +1041,10 @@ export class SyncFolder {
         wrote = true;
       }
       // 🔴 切り替えの片付け: 書けた(または既に在る)後で、もう片方の形の自分のファイルを消す(暗号化へ切り替えたら平文を残さない)。消せなくても同期は続ける
-      if (chosen.ownCounterpart !== null && (wrote || plan.ownFile !== null) && self2 === self) await box.remove(chosen.ownCounterpart).catch(() => undefined);
+      //   ⚠ 「いまの形のファイルが自分の物と確かめられている」ときだけ(いま書けた / 前に自分が書いた控えと同じ)。他人が置いた同名のファイルが在るだけでは消さない
+      const ownVerified =
+        wrote || (plan.ownFile !== null && this.own !== null && this.own.name === plan.ownFile.name && sameFileVersion(this.own, plan.ownFile));
+      if (chosen.ownCounterpart !== null && ownVerified && self2 === self) await box.remove(chosen.ownCounterpart).catch(() => undefined);
       if (gen !== this.generation) return;
       await this.persist();
       this.failures = 0;
@@ -1017,8 +1059,14 @@ export class SyncFolder {
       const guide = guides.length === 0 ? null : guides.join(' / ');
       const pendingText = this.pending.size > 0 ? `確認が要る端末が ${this.pending.size} 台あります。「今すぐ同期」を押すと確認します` : null;
       this.message = [pendingText, guide].filter((x): x is string => x !== null).join(' / ') || null;
-      if (guide !== null && (manual || guide !== this.lastGuide)) this.deps.say(guide);
-      this.lastGuide = guide;
+      // 平文の相手の案内は、その版を初めて見たときだけ言う(定期の回で言い続けない)/ 暗号化された相手の案内は、変わったときだけ
+      const encNote = chosen.peersEncOnly.length > 0 ? syncE2EPeerEncNote(chosen.peersEncOnly) : null;
+      const sayParts = [
+        ...(chosen.peersNeedEnc.length > 0 && (manual || newPlain.length > 0) ? [syncE2EPeerPlainNote(chosen.peersNeedEnc)] : []),
+        ...(encNote !== null && (manual || encNote !== this.lastGuide) ? [encNote] : []),
+      ];
+      if (sayParts.length > 0) this.deps.say(sayParts.join(' / '));
+      this.lastGuide = encNote;
       this.phase = 'idle';
       if (problems.length > 0) {
         const t = `${where}の一部のファイルを取り込めませんでした(${problems.length} 件): ${problems.slice(0, 3).join(' / ')}`;

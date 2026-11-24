@@ -36,6 +36,8 @@ export interface WriteMeta {
 export interface ReadMeta {
   readonly device: string;
   readonly seq: number;
+  /** 認証済みの中身の識別子(同じ連番の「同じファイルか」を見る)。 */
+  readonly contentId: string;
 }
 
 /** 同期の保管先。 */

@@ -16,6 +16,7 @@ import {
   deviceOfFileName,
   emptyFolderRecord,
   encFileName,
+  forgetPeerSeq,
   folderFileName,
   isEncFileName,
   normalizeFolderRecord,
@@ -111,6 +112,32 @@ describe('記録の互換', () => {
   });
 });
 
+describe('🔴 同じ連番の「同じファイルか」は認証済みの中身の識別子で見る / 受け入れ直し', () => {
+  it('識別子が同じなら、更新日時・版・大きさが変わっても受ける / 識別子が違えば断る / 識別子が無い記録は従来の見方', () => {
+    const rec = emptyFolderRecord();
+    notePeerSeq(rec, B, 5, { size: 10, mtime: 1, version: '"a"' }, 'ID-1');
+    expect(checkPeerSeq(rec, B, 5, { size: 99, mtime: 777, version: '"zzz"' }, 'ID-1')).toBe('ok');
+    expect(checkPeerSeq(rec, B, 5, { size: 10, mtime: 1, version: '"a"' }, 'ID-2')).toBe('replaced');
+    expect(checkPeerSeq(rec, B, 4, { size: 10, mtime: 1 }, 'ID-1')).toBe('rollback');
+    const old = emptyFolderRecord();
+    notePeerSeq(old, B, 5, { size: 10, mtime: 1 });
+    expect(checkPeerSeq(old, B, 5, { size: 10, mtime: 2 }, 'ID-1')).toBe('replaced');
+    expect(normalizeFolderRecord(JSON.parse(JSON.stringify(rec))).peerSeq[B]!.contentId).toBe('ID-1');
+  });
+  it('forgetPeerSeq: その相手の連番と控えだけ消す(他の相手は動かさない)', () => {
+    const rec = emptyFolderRecord();
+    notePeerSeq(rec, B, 5, { size: 1, mtime: 1 }, 'x');
+    notePeerSeq(rec, C, 2, { size: 1, mtime: 1 }, 'y');
+    rec.seen[encFileName(B)] = { size: 1, mtime: 1, want: [] };
+    rec.seen[encFileName(C)] = { size: 1, mtime: 1, want: [] };
+    expect(forgetPeerSeq(rec, B)).toBe(true);
+    expect(Object.keys(rec.peerSeq)).toEqual([C]);
+    expect(Object.keys(rec.seen)).toEqual([encFileName(C)]);
+    expect(checkPeerSeq(rec, B, 1, { size: 1, mtime: 1 }, 'z'), '忘れたら古い連番も受ける').toBe('ok');
+    expect(forgetPeerSeq(rec, B)).toBe(false);
+  });
+});
+
 describe('名前', () => {
   it('暗号化の名前は平文の名前に .enc を足した物 / どちらも同じ端末 / 見分けは isEncFileName', () => {
     expect(encFileName(A)).toBe(`pkc3-${A}.pkc3-diff.zip.enc`);
@@ -125,9 +152,10 @@ describe('名前', () => {
   });
 
   const f = (name: string): FolderFile => ({ name, size: 1, mtime: 1 });
-  it('暗号化している: 暗号化を優先 / 平文だけの相手は読んだうえで案内 / 自分の平文は片付け対象', () => {
+  it('暗号化している: 暗号化だけを取り込む / 平文だけの相手は取り込まず案内 / 自分の平文は片付け対象', () => {
     const r = chooseRoundFiles([f(folderFileName(A)), f(encFileName(A)), f(folderFileName(B)), f(encFileName(C)), f(folderFileName(C))], A, true);
-    expect(r.files.map((x) => x.name)).toEqual([encFileName(A), folderFileName(B), encFileName(C)]);
+    expect(r.files.map((x) => x.name), '🔴 平文の B は取り込む対象に入らない').toEqual([encFileName(A), encFileName(C)]);
+    expect(r.skippedPlain.map((x) => x.name)).toEqual([folderFileName(B)]);
     expect(r.ownCounterpart).toBe(folderFileName(A));
     expect(r.peersNeedEnc).toEqual([B]);
     expect(r.peersEncOnly).toEqual([]);

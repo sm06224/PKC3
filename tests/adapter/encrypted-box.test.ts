@@ -48,7 +48,8 @@ describe('差分ファイルの読み書き', () => {
     expect(puts(s3, `${'pkc3'}/${name}`)[0]!.headers['content-type']).toBe('application/octet-stream');
     const r = await box.readWithMeta(name);
     expect(await r.blob.text()).toBe(NOTE);
-    expect(r.meta).toEqual({ device: DEV, seq: 7 });
+    expect(r.meta).toMatchObject({ device: DEV, seq: 7 });
+    expect(r.meta?.contentId).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(await (await box.read(name)).text()).toBe(NOTE);
   });
 
@@ -140,7 +141,7 @@ describe('🔴 keyring.json(S3)', () => {
     const cur = (await box.loadKeyring())!;
     expect(cur.version).toBeTruthy();
     const next = await rewrapKeyring(c, cur.keyring, { passphrase: 'old' }, 'new');
-    const r = await box.rewrapKeyring(next);
+    const r = await box.rewrapKeyring(next, cur.version);
     const put = puts(s3, KEYRING_KEY).at(-1)!;
     expect(put.headers['if-match']).toBe(cur.version);
     expect(put.headers['if-none-match']).toBeUndefined();
@@ -157,6 +158,7 @@ describe('🔴 keyring.json(S3)', () => {
     const km = await createKeyMaterial(c, 'old');
     const box = new EncryptedBox({ inner: s3box(s3), crypto: c, key: null });
     await box.ensureKeyring(km.keyring);
+    const base = (await box.loadKeyring())!.version;
     const mine = await rewrapKeyring(c, km.keyring, { passphrase: 'old' }, 'mine');
     const theirs = await rewrapKeyring(c, km.keyring, { passphrase: 'old' }, 'theirs');
     let raced = false;
@@ -165,9 +167,24 @@ describe('🔴 keyring.json(S3)', () => {
       raced = true;
       s3.objects.set(KEYRING_KEY, { body: new TextEncoder().encode(serializeKeyring(theirs)), etag: '"theirs"', mtime: new Date(1).toISOString() });
     };
-    await expect(box.rewrapKeyring(mine)).rejects.toBeInstanceOf(KeyringConflictError);
+    await expect(box.rewrapKeyring(mine, base)).rejects.toBeInstanceOf(KeyringConflictError);
     expect(raced, '空振り防止: 競合が実際に起きた').toBe(true);
     expect(Buffer.from(s3.objects.get(KEYRING_KEY)!.body).toString('utf8'), '相手の書いた物がそのまま').toBe(serializeKeyring(theirs));
+  });
+
+  it('🔴 もとにした束を読んだあと・包み直している間に別の端末が変えた → 呼んだ時点で版が違うので PUT もせず止まる(読み直した新しい版で書かない)', async () => {
+    const s3 = fakeS3(SECRET);
+    const km = await createKeyMaterial(c, 'old');
+    const box = new EncryptedBox({ inner: s3box(s3), crypto: c, key: null });
+    await box.ensureKeyring(km.keyring);
+    const cur = (await box.loadKeyring())!;
+    const mine = await rewrapKeyring(c, cur.keyring, { passphrase: 'old' }, 'mine'); // cur から導出
+    const theirs = await rewrapKeyring(c, cur.keyring, { passphrase: 'old' }, 'theirs');
+    s3.objects.set(KEYRING_KEY, { body: new TextEncoder().encode(serializeKeyring(theirs)), etag: '"theirs"', mtime: new Date(1).toISOString() }); // 導出のあと、書く前に変わった
+    const n = puts(s3, KEYRING_KEY).length;
+    await expect(box.rewrapKeyring(mine, cur.version)).rejects.toBeInstanceOf(KeyringConflictError);
+    expect(puts(s3, KEYRING_KEY), 'PUT していない').toHaveLength(n);
+    expect(Buffer.from(s3.objects.get(KEYRING_KEY)!.body).toString('utf8')).toBe(serializeKeyring(theirs));
   });
 
   it('別の keyId の束・無い束は置き換えない(PUT もしない)', async () => {
@@ -175,11 +192,18 @@ describe('🔴 keyring.json(S3)', () => {
     const a = await createKeyMaterial(c, 'a');
     const b = await createKeyMaterial(c, 'b');
     const box = new EncryptedBox({ inner: s3box(s3), crypto: c, key: null });
-    await expect(box.rewrapKeyring(a.keyring)).rejects.toBeInstanceOf(E2EError); // 無い
+    await expect(box.rewrapKeyring(a.keyring, undefined)).rejects.toBeInstanceOf(E2EError); // 無い
     await box.ensureKeyring(a.keyring);
     const n = puts(s3, KEYRING_KEY).length;
-    await expect(box.rewrapKeyring(b.keyring)).rejects.toBeInstanceOf(KeyringConflictError);
+    await expect(box.rewrapKeyring(b.keyring, undefined)).rejects.toBeInstanceOf(KeyringConflictError);
     expect(puts(s3, KEYRING_KEY)).toHaveLength(n);
+  });
+
+  it('大きすぎる keyring.json は、読み込む前に(一覧の大きさで)断る', async () => {
+    const s3 = fakeS3(SECRET);
+    await s3box(s3).write('keyring.json', new Blob(['x'.repeat(5000)]), null);
+    await expect(new EncryptedBox({ inner: s3box(s3), crypto: c, key: null }).loadKeyring()).rejects.toBeInstanceOf(KeyringFormatError);
+    expect(s3.seen.filter((r) => r.method === 'GET' && decodeURIComponent(new URL(r.url).pathname).endsWith('/keyring.json')), '本体を GET していない').toEqual([]);
   });
 
   it('壊れた keyring.json は KeyringFormatError(曖昧に読まない)', async () => {
@@ -251,7 +275,7 @@ describe('🔴 keyring.json(同期フォルダ: 条件付き書き込みが無�
     expect(r).toEqual({ keyring: a.keyring, created: false });
     // 包み直し(フォルダは条件が無いので、読み直した束と同じ keyId のときだけ書く)
     const next = await rewrapKeyring(c, a.keyring, { passphrase: 'A' }, 'A2');
-    await box.rewrapKeyring(next);
+    await box.rewrapKeyring(next, undefined);
     expect((await box.loadKeyring())!.keyring).toEqual(next);
   });
 
