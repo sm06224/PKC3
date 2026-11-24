@@ -1285,7 +1285,7 @@ tags: [設計, 実装]
 | この PKC3 のノート | `entries` / `relations` / `revisions` / `assets` と、本文の名前つき csv |
 | 添付の `.sqlite`(`.db` なども) | ファイルの中の表の名前 |
 | 添付の `.csv` / `.tsv` | `csv`(先頭に `_note` と `_lid` の列が付きます) |
-| 添付の `.xlsx` | シートごとに `sheet1` / `sheet2` …(対応は `xlsx_sheets`) |
+| 添付の `.xlsx` | 1 枚目・2 枚目の表ごとに `sheet1` / `sheet2` …(対応は `xlsx_sheets`) |
 | 添付の `.parquet` / `.json` / `.ndjson` | `parquet` / `json`(DuckDB だけで調べます) |
 | **手持ちのファイルを開く…** | 取り込まずにその場で選んだファイル。保存しません |
 
