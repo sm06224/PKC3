@@ -994,7 +994,7 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
     /**
      * ⑧ 🔴 **左のペインの組み込みアプリが、ペインの外へはみ出さない**(#1442)。同じ起動に載せる(起動を増やさない)。
      * ⚠ 直す前の実測:「予定」の「週の始まり」の選択欄が 1440px で 3px、1024px で 37px ペインの右端を越えて切れていた。
-     * 🔑 全部のタブを開いて数える(タブを足した日もここが見る)。畳まれたタブは「⋯」を介さず押し所を直に押す
+     * 🔑 全部のタブを開いて数える(タブを追加した日もここが見る)。畳まれたタブは「⋯」を介さず押し所を直に押す
      *   (見るのは開いた後の版面で、「⋯」から開けることは上の⑦が見ている)。
      */
     if (w === 1440 || w === 1024) {
@@ -1050,10 +1050,10 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
         expect(g.textLeft - g.left, '群の見出しが左に寄っていない(中央に浮いている)').toBeLessThan(16);
         const urlRight = await lp.locator('[data-pkc-field="launcher-add-url"]').evaluate((e) => e.getBoundingClientRect().right);
         const rowRight = await lp.locator('[data-pkc-action="open-tile"]').first().evaluate((e) => e.getBoundingClientRect().right);
-        expect(Math.abs(urlRight - rowRight), `リンクを足す欄の右端(${urlRight})が一覧の右端(${rowRight})と揃っていない`).toBeLessThan(6);
-        // 「リンクを足す」は欄の右端に寄る / 説明の上下の間は余白の段(直す前は p の既定 ≒ 13px)
+        expect(Math.abs(urlRight - rowRight), `リンクを追加欄の右端(${urlRight})が一覧の右端(${rowRight})と揃っていない`).toBeLessThan(6);
+        // 「リンクを追加」は欄の右端に寄る / 説明の上下の間は余白の段(直す前は p の既定 ≒ 13px)
         const goRight = await lp.locator('[data-pkc-field="launcher-add-go"]').evaluate((e) => e.getBoundingClientRect().right);
-        expect(Math.abs(goRight - urlRight), `「リンクを足す」が右端に寄っていない(${goRight} / ${urlRight})`).toBeLessThan(2);
+        expect(Math.abs(goRight - urlRight), `「リンクを追加」が右端に寄っていない(${goRight} / ${urlRight})`).toBeLessThan(2);
         const leadTop = await lp.locator('[data-pkc-field="launcher-lead"]').evaluate((e) => parseFloat(getComputedStyle(e).marginTop));
         expect(leadTop, `説明の上の間が余白の段でない(${leadTop}px)`).toBeLessThanOrEqual(8);
       }

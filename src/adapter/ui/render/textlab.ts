@@ -5,7 +5,7 @@
  *
  * 左の列に同じ面は置かない。理由: 貼り付けた文章を整える間、左の列の一覧も本文も
  * 動かさずに済む「道具」であって、ノートの見方ではない(SQL で調べると同じ判断。
- * 左のタブを足すと、広い画面でも既存のタブが「⋯」へ畳まれるため)。ブラウザが別ウィンドウを
+ * 左のタブを追加と、広い画面でも既存のタブが「⋯」へ畳まれるため)。ブラウザが別ウィンドウを
  * 塞いだときは、本文を消さないよう**聞いてから**中央で開く(`view-window.ts` の `fallback`)。
  *
  * ## 構え
@@ -220,7 +220,7 @@ export function syncTextLabButtons(pane: HTMLElement, state: AppState): void {
     const ready = state.selectedLid !== null && state.openBody?.lid === state.selectedLid;
     load.disabled = !ready;
     load.title = ready
-      ? '開いているノートの本文を、左の欄に読み込みます(欄に打った字は置き換わります)'
+      ? '開いているノートの本文を、左の欄に読み込みます(欄に入力した字は置き換わります)'
       : '先に、左の一覧でノートを開いてください';
   }
   const apply = field<HTMLButtonElement>(pane, 'textlab-apply-note');

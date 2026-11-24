@@ -190,7 +190,7 @@ export function installScheduleGridCreate(
     if (parked === null) return false;
     dispatcher.dispatch({
       type: 'OP_FAILED',
-      error: `${parked.date} に、名前を打ちかけの予定があります。その日を開いて、書くか取り消すかしてから作ってください`,
+      error: `${parked.date} に、名前を入力途中の予定があります。その日を開いて、書くか取り消すかしてから作ってください`,
     });
     return true;
   };
@@ -248,7 +248,7 @@ export function installScheduleGridCreate(
     const cancelBtn = doc.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.setAttribute('data-pkc-field', GRID_CREATE_CANCEL_FIELD);
-    cancelBtn.setAttribute('aria-label', '予定を作るのをやめる');
+    cancelBtn.setAttribute('aria-label', '予定の作成をやめる');
     cancelBtn.title = '作らずにやめます';
     cancelBtn.addEventListener('click', (e) => {
       e.preventDefault();

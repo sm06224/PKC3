@@ -2049,12 +2049,12 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    *   飛んで aside 面(`sql`)から detail へ戻される(上の下ごしらえのコメント)。
    */
   await expect(
-    // 🔴 「もう 1 つ足す…」の仕切りにも同じ名前が出る(#918 段⑦)── 数えるのは**添付の仕切り**の中だけ
+    // 🔴 「もう 1 つ追加…」の仕切りにも同じ名前が出る(#918 段⑦)── 数えるのは**添付の仕切り**の中だけ
     source.locator('optgroup[label="添付"] option', { hasText: 'uriage.xlsx' }),
     '.csv の下に .xlsx が並んでいない',
   ).toHaveCount(1);
   // 🔴 **`.xlsx` は `.csv` の下**(#854 段①②③、`paintSource` の並び順)
-  const optionLabels = await source.locator('optgroup:not([label="もう 1 つ足す…"]) option').allTextContents();
+  const optionLabels = await source.locator('optgroup:not([label="もう 1 つ追加…"]) option').allTextContents();
   const csvIndex = optionLabels.indexOf('uriage.csv');
   const xlsxIndex = optionLabels.indexOf('uriage.xlsx');
   expect(csvIndex, '.csv が選び所に見つからない').toBeGreaterThanOrEqual(0);
@@ -2222,7 +2222,7 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * 🔴 **`.parquet` は選び所のいちばん下**(#682 段④c)── `.xlsx` より後ろに並ぶ。
    * ⚠ 「在る」と「その位置に在る」は別の主張である(上の `.xlsx` 対 `.csv` と同じ形)。
    */
-  const labelsWithParquet = await source.locator('optgroup:not([label="もう 1 つ足す…"]) option').allTextContents();
+  const labelsWithParquet = await source.locator('optgroup:not([label="もう 1 つ追加…"]) option').allTextContents();
   const idxXlsx = labelsWithParquet.indexOf('uriage.xlsx');
   const idxParquet = labelsWithParquet.indexOf('uriage.parquet');
   const idxJson = labelsWithParquet.indexOf('meisai.json');
@@ -2439,12 +2439,12 @@ test('🔴 囲みの中身を添付から取る ── csv の添付が表にな
    * ⚠ **観測点は「答えの表」を待ってから読む**(`toHaveText` で待つ形)── 直前の答えの表が
    *   残っているうちに読むと、前の答えを読んで通ってしまう(2026-10-01 に直した罠と同じ)。
    */
-  const addGroup = source.locator('optgroup[label="もう 1 つ足す…"]');
-  await expect(addGroup, '「もう 1 つ足す…」が相手の一覧に無い').toHaveCount(1);
+  const addGroup = source.locator('optgroup[label="もう 1 つ追加…"]');
+  await expect(addGroup, '「もう 1 つ追加…」が相手の一覧に無い').toHaveCount(1);
   expect(
     await source.locator('optgroup').evaluateAll((gs) => (gs[gs.length - 1] as HTMLOptGroupElement).label),
-    '「もう 1 つ足す…」が一覧の末尾に無い',
-  ).toBe('もう 1 つ足す…');
+    '「もう 1 つ追加…」が一覧の末尾に無い',
+  ).toBe('もう 1 つ追加…');
   // 🔴 足せない形(.xlsx)は薄い字で理由つき(消えていない / 選べない)
   const xlsxAdd = addGroup.locator('option', { hasText: 'uriage.xlsx' });
   await expect(xlsxAdd, '.xlsx が足す口から消えている(理由つきの薄い字のはず)').toHaveCount(1);

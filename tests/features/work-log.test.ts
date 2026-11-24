@@ -97,7 +97,7 @@ describe('本文の書換(work-log)', () => {
     ).toBe('x\r\ny\r\n');
   });
 
-  it('🔴 押した時点の行と違えば書かない(別の窓が行を足した形で、別の行を消さない)', () => {
+  it('🔴 押した時点の行と違えば書かない(別の窓が行を追加した形で、別の行を消さない)', () => {
     const shifted = `新しい行\n${body}`;
     expect(applyBodyRewrite(shifted, { kind: 'work-log', line: 1, openLine: A, next: null })).toBeNull();
     expect(applyBodyRewrite(body, { kind: 'work-log', line: 99, openLine: A, next: null })).toBeNull();

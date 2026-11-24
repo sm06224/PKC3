@@ -99,12 +99,12 @@ export const SQL_SOURCE_GROUP_PKC = 'この PKC3';
 export const SQL_SOURCE_GROUP_ATTACHED = '添付';
 export const SQL_SOURCE_GROUP_LOCAL = '手持ちのファイル';
 /**
- * 🔴 **「もう 1 つ足す…」の仕切り**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
- * ⚠ 並びは**いちばん最後**(一覧の末尾)。中身は「足せる添付」と「手持ちのファイルを足す…」。
+ * 🔴 **「もう 1 つ追加…」の仕切り**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
+ * ⚠ 並びは**いちばん最後**(一覧の末尾)。中身は「足せる添付」と「手持ちのファイルを追加…」。
  */
-export const SQL_SOURCE_GROUP_ADD = 'もう 1 つ足す…';
+export const SQL_SOURCE_GROUP_ADD = 'もう 1 つ追加…';
 /** 手持ちの file を**足す**ほうの項目の字(`手持ちのファイルを開く…` の隣の物)。 */
-export const SQL_ADD_LOCAL_FILE_LABEL = '手持ちのファイルを足す…';
+export const SQL_ADD_LOCAL_FILE_LABEL = '手持ちのファイルを追加…';
 
 // 🔑 字にする規則は 1 か所(本文に埋め込んだ SQL の答えと同じ ── #1223)
 const cellText = sqlCellText;
@@ -230,7 +230,7 @@ export class SqlRenderer {
     const box = document.createElement('textarea');
     box.setAttribute('data-pkc-action', 'set-sql-text');
     box.setAttribute('data-pkc-field', 'sql-input');
-    box.setAttribute('aria-label', '打つ SQL');
+    box.setAttribute('aria-label', 'SQL の入力欄');
     box.placeholder = sqlPlaceholder(null);
     /**
      * 🔴 **握った鍵は、乗せたら読める所に書く**(user 裁定 2026-09-14
@@ -871,7 +871,7 @@ export class SqlRenderer {
     const local = guest !== null && isSqlLocalFileLid(guest.lid) ? guest : null;
     // ⚠ 仕切りが変わっても組み直せるよう、**どの仕切りに居るか**も鍵に入れる
     /**
-     * 🔴 **「もう 1 つ足す…」を出してよいか**(#918 段⑦)。⚠ 1 件目が DuckDB で読める相手で、
+     * 🔴 **「もう 1 つ追加…」を出してよいか**(#918 段⑦)。⚠ 1 件目が DuckDB で読める相手で、
      *   上限に達していないときだけ(押せるのに必ず断られる口を作らない)。
      *   🔑 足した相手(`extraGuests`)は一覧から**外す** ── もう並べてあるので、選べても
      *   「もう並べてあります」と断られるだけになる。
@@ -932,7 +932,7 @@ export class SqlRenderer {
       localGroup.append(option(SQL_PICK_LOCAL_FILE_VALUE, '手持ちのファイルを開く…'));
       sel.append(localGroup);
       /**
-       * 🔴 **一覧の末尾に「もう 1 つ足す…」**(#918 段⑦。設問 1 = A)。
+       * 🔴 **一覧の末尾に「もう 1 つ追加…」**(#918 段⑦。設問 1 = A)。
        * ⚠ **足せない形の添付は薄い字で理由つきに並べる**(`engine` の選び所と同じ作法)──
        *   消すと「在るのに出てこない」になる。`value` が `add:` で始まるので、
        *   読めない形(`.xlsx`)を押しても**置き換わらない**(`binder.ts` が足す口へ通す)。

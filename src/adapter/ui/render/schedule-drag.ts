@@ -143,7 +143,7 @@ export interface GrabbedTask {
   readonly repeat: string;
   /**
    * 🔴 **掴んだ時点の、その行の中身**(`taskScan` の `rawLine`。#1087)。落とした時点の走査から引き直さない ──
-   * 掴んでいる間に別のタブが上へ行を足すと、同じ `(lid, line)` が**別の札**を指す。書換の `openLine` にこれを渡せば、
+   * 掴んでいる間に別のタブが上へ行を追加すと、同じ `(lid, line)` が**別の札**を指す。書換の `openLine` にこれを渡せば、
    * 食い違いは書換が `SHOWN_LINE_LOST` で断る。省略(古い荷物 / 取れなかった)= 従来どおり落とした時点の走査から引く。
    */
   readonly rawLine?: string;

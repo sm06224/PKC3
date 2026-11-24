@@ -55,7 +55,7 @@ function editingLid(st: Pick<AppState, 'phase' | 'selectedLid'>): string | null 
 }
 
 /**
- * タブを確定する。⚠ タブを足したあとは**必ず**上限を通す(溢れたら、ピン留め・編集中・有効なタブ以外の
+ * タブを確定する。⚠ タブを追加したあとは**必ず**上限を通す(溢れたら、ピン留め・編集中・有効なタブ以外の
  * いちばん古いものを閉じて「最近閉じたタブ」へ)。`tabSeq` も進める。
  */
 function commitTabs(st: AppState, set: TabSet, seq: number): AppState {

@@ -103,7 +103,7 @@ async function otherSettingCount(image: Uint8Array): Promise<number> {
 }
 
 /**
- * c1(使っているワークスペース)と別のワークスペースを持つ DB に、同期の行と対照の行を足して返す。
+ * c1(使っているワークスペース)と別のワークスペースを持つ DB に、同期の行と対照の行を追加して返す。
  * 画像から開いた DB(memdb)の経路は `storage-worker-image-from-image-2015.test.ts`(#2015)が見る。ここは素の DB に直に足す。
  */
 async function seeded(opts: { single?: boolean } = {}): Promise<{ w: Worker; other: string }> {

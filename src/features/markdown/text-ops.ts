@@ -496,7 +496,7 @@ export const CODE_BLOCK = template(`\`\`\`\n${CARET}\n\`\`\`\n`);
  * ⚠ **前後に空行が要る** ── `$$` の塊は markdown-it の block token で、
  *   段落を切る印を持たない(`markdown-render.ts` の `pkc_math_block`)。
  *   段落の直後に置くと**字のまま出る**ので、雛形の側で空けておく。
- *   🔑 `insertBlock` が行の途中なら改行を足すので、ここは**後ろの空行**を持つ。
+ *   🔑 `insertBlock` が行の途中なら改行を追加すので、ここは**後ろの空行**を持つ。
  */
 export const MATH_BLOCK = template(`$$\n${CARET}\n$$\n`);
 

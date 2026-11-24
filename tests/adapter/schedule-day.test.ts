@@ -364,7 +364,7 @@ describe('予定の面の「一覧 / 日」', () => {
     expect(d.getState().scheduleDay, '今日に着いたのに実日付が残った').toBeNull();
   });
 
-  it('🔴 「日」では、「予定を足す」の日付が見ている日に合う / 直した字は描き直しで奪わない', () => {
+  it('🔴 「日」では、「予定を追加」の日付が見ている日に合う / 直した字は描き直しで奪わない', () => {
     const { q, d, showDay } = setup({ e1: '- [ ] 用 @2026-08-23 09:00\n' });
     const date = q<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')!;
     expect(date.value).toBe('2026-08-23');

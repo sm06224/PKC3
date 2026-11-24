@@ -25,7 +25,7 @@ export interface WarnCollector {
    */
   add(bucket: string, label: string, message: string): void;
   /**
-   * 畳んだぶんの行を足して確定する。⚠ **呼び忘れると件数が消える** ──
+   * 畳んだぶんの行を追加して確定する。⚠ **呼び忘れると件数が消える** ──
    * 「10 件までは出るが、それ以上あったことは誰も知らない」になる。
    */
   finish(): string[];

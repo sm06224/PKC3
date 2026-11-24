@@ -75,9 +75,9 @@ describe('書式の帯の説明と字(#717)', () => {
 
 describe('道具の列の 4 ボタンの説明は、字の繰り返しではなく「押すと何が起きるか」(#1087)', () => {
   const EXPECT: Record<string, string> = {
-    'insert-date': '日付を選んで、打っている場所に入れます',
-    'insert-entry-link': '別のノートを題名で探して、そこへのリンクを打っている場所に入れます',
-    'insert-snippet': 'テンプレートを一覧から選んで、打っている場所に入れます',
+    'insert-date': '日付を選んで、カーソルの位置に入れます',
+    'insert-entry-link': '別のノートを題名で探して、そこへのリンクをカーソルの位置に入れます',
+    'insert-snippet': 'テンプレートを一覧から選んで、カーソルの位置に入れます',
     'toggle-replace': '編集中のノートの本文で、探す語を全部置き換える欄を開きます / 閉じます',
   };
   it.each(Object.entries(EXPECT))('🔴 %s:説明が文として載り、字(label)と同じではない', (action, text) => {

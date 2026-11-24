@@ -193,7 +193,7 @@ describe('中身は条件で決まる(#421 段①)', () => {
     expect(empty(), '集めている間は黙る').toBeNull();
     s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: EMPTY_SMART }).state;
     r.render(s);
-    expect(empty()).toBe('まだ条件がありません。上の「タグ」に入れて「条件に足す」を押してください');
+    expect(empty()).toBe('まだ条件がありません。上の「タグ」に入れて「条件に追加す」を押してください');
     s = reduce(s, { type: 'SMART_SCANNED', lid: 's1', lids: [], total: 0, spec: { ...EMPTY_SMART, tags: ['請求'] } }).state;
     r.render(s);
     expect(empty()).toBe('条件に合うノートがありません(条件を外すか、別のタグにしてみてください)');
@@ -1115,7 +1115,7 @@ describe('配線(effect 層まで)', () => {
 });
 
 describe('押し口の配線(#421 段①)', () => {
-  it('🔴 「条件に足す」を押すと、欄の語が条件として撃たれる', () => {
+  it('🔴 「条件に追加す」を押すと、欄の語が条件として撃たれる', () => {
     document.body.textContent = '';
     const root = document.createElement('div');
     document.body.append(root);
@@ -1361,7 +1361,7 @@ describe('条件の欄で複数のタグ(#637)', () => {
   });
 
   /**
-   * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを打つ人は毎回踏む。
+   * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを入力人は毎回踏む。
    * 🔑 対照群は上の test(変換中でない Enter は通る)。守りは `binder` の入口の
    *   1 行なので、**振る舞いで留める**(門の在り処が変わっても主張は変わらない)。
    */

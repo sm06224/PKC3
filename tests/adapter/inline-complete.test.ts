@@ -295,11 +295,11 @@ describe('/ から先に聞く挿入の道具を呼ぶ(#1982 段 3)', () => {
     }
   });
 
-  it('/日付 → 「日付を入れる」が出て、Tab で `/日付` が消え、帯と同じ受け手(日付の選び)が開く', () => {
+  it('/日付 → 「日付を挿入」が出て、Tab で `/日付` が消え、帯と同じ受け手(日付の選び)が開く', () => {
     const { type, key, menu, rows, ta } = setup();
     type('前の行\n/日付');
     expect(menu(), '小窓が出ない').not.toBeNull();
-    expect(rows()).toContain('日付を入れる');
+    expect(rows()).toContain('日付を挿入');
     key('Tab');
     expect(ta.value, '/日付 が残っている').toBe('前の行\n');
     expect(document.querySelector('dialog'), '日付の選びが開かない(受け手が呼ばれていない)').not.toBeNull();

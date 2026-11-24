@@ -98,7 +98,7 @@ export class ShellSession {
     this.notify();
   }
 
-  /** 行を足す(結果の文を後から継ぐ)。 */
+  /** 行を追加す(結果の文を後から継ぐ)。 */
   say(block: ShellBlock, line: string, failed = false): void {
     this.update(block, { lines: [...block.lines, line], failed: block.failed || failed });
   }

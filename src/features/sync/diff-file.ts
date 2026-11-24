@@ -216,7 +216,7 @@ function fpList(v: unknown, what: string): DiffFingerprint[] {
       throw new ZipReadError(`差分ファイルの${what}に、読み取れない行があります`);
     }
     if (keyIsReserved(x.key)) continue;
-    // 運べない種類のつながり(structural・知らない種類)の指紋は持たない(判定に入れると、つながりを足す・外す判定が出る)
+    // 運べない種類のつながり(structural・知らない種類)の指紋は持たない(判定に入れると、つながりを追加・外す判定が出る)
     if (x.key.startsWith('rel:') && !isSyncRelationKind(x.key.slice(4).split('|')[2] ?? '')) continue;
     out.push(x.p === undefined ? { key: x.key, c: x.c } : { key: x.key, c: x.c, p: x.p });
   }

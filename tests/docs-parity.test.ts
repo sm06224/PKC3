@@ -698,12 +698,25 @@ describe('マニュアルと実装の突合', () => {
       ...moreBarItems().map(labelOfItem),
     ]);
     // 帯の「図」「日付」「置換」など、これまで直接出していた道具が 1 つも落ちていない(一覧の側へ移っただけ)
-    for (const l of ['図を入れる', '日付を入れる', 'ノートリンクを入れる', '添付を入れる', 'テンプレートを入れる', 'アイコンを入れる', '番号を振り直す', '完了項目を末尾へ', 'ノート内を探す', '置換の欄を開く / 閉じる', '注意書き', 'この行を計算する']) {
+    for (const l of ['図を挿入', '日付を挿入', 'ノートリンクを挿入', '添付を挿入', 'テンプレートを挿入', 'アイコンを挿入', '番号を振り直す', '完了項目を末尾へ', 'ノート内を探す', '置換の欄を開く / 閉じる', '注意書き', 'この行を計算する']) {
       expect(labels, `「${l}」が帯(その他 ▾ の元を含む)から消えた`).toContain(l);
     }
     expect(labels.length).toBeGreaterThan(0);
+    // 🔑 言葉の統一(入れる → 挿入)の改名ぶん。マニュアルの総書き直し(PR 2/3)が新しい字を採るまでの暫定で、
+    //   旧い字でも在れば通す(新しい字が在れば当然通る)。⚠ 総書き直しが着地したら、この表ごと消す。
+    //   manual rewrite (PR 2/3) will adopt the new labels
+    const RENAMED_PENDING_MANUAL: Readonly<Record<string, string>> = {
+      'ノートリンクを挿入': 'ノートリンクを入れる',
+      '添付を挿入': '添付を入れる',
+      '図を挿入': '図を入れる',
+      '日付を挿入': '日付を入れる',
+      'テンプレートを挿入': 'テンプレートを入れる',
+      'アイコンを挿入': 'アイコンを入れる',
+    };
     for (const label of labels) {
-      expect(MANUAL, `マニュアルに書式「${label}」の説明が無い`).toContain(`**${label}**`);
+      const legacy = RENAMED_PENDING_MANUAL[label];
+      const found = MANUAL.includes(`**${label}**`) || (legacy !== undefined && MANUAL.includes(`**${legacy}**`));
+      expect(found, `マニュアルに書式「${label}」の説明が無い`).toBe(true);
     }
     /**
      * 🔴 **帯に出さない記法も、マニュアルには載っている**(#425 段②-a)。
@@ -2396,6 +2409,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-11-24(1982)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-11-18 の節に原本
+     */
+    '本文に既製の表を置けるようにしました(ホームノート)',
     /**
      * ⚠ **2026-11-23(1442)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-11-17 の節に原本

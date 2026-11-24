@@ -159,7 +159,7 @@ export type FormRowRequest =
       readonly row: number;
       /**
        * 🔴 **押した時点のその行の中身**(`SET_CSV_CELL` の `openLine` と同じ型)。⚠ 書く側が disk の行と**一致するか**を確かめ、
-       *   食い違えば断る ── 行を足した / 別のタブが書いた後に、番号だけで別の行を書き換えない。省略すると照合しない(test 用)。
+       *   食い違えば断る ── 行を追加した / 別のタブが書いた後に、番号だけで別の行を書き換えない。省略すると照合しない(test 用)。
        */
       readonly openRow?: readonly string[];
     };
@@ -232,7 +232,7 @@ export function planFormRow(body: string, req: FormRowRequest): FormRowPlan {
     const missing = req.fields.filter((f) => !data.header.includes(f.name) && !data.header.includes(f.label)).map((f) => f.name);
     return {
       ok: false,
-      why: `表「${req.table}」の見出しに列を足せません(セルの中に改行がある、または空行がある表です)。見出しに ${missing.join('・')} を足してください`,
+      why: `表「${req.table}」の見出しに列を足せません(セルの中に改行がある、または空行がある表です)。見出しに ${missing.join('・')} を追加してください`,
     };
   }
 

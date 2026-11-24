@@ -49,7 +49,7 @@ function boot(archetype: string) {
   return { d, creates, appends };
 }
 
-describe('予定を足す先の「今日のノート」(#1087)', () => {
+describe('予定を追加先の「今日のノート」(#1087)', () => {
   it.each(['folder', 'attachment', 'stack', 'app'])(
     '🔴 題名が今日の日付の %s には書かず、新しいノートを作ってそこへ足す',
     (archetype) => {

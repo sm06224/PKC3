@@ -1167,7 +1167,7 @@ const SMART_COND_ELSEWHERE_FAILED =
   '条件を書き換えられませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください';
 
 /**
- * 🔴 **予定を足す先の「今日のノート」は、追記できる種類だけ**(#1087)。
+ * 🔴 **予定を追加先の「今日のノート」は、追記できる種類だけ**(#1087)。
  * ⚠ 直す前は `findTodayNote` の答えをそのまま使っていた ── 題名が今日の日付のフォルダ・添付・スタック・アプリがあると、
  *   足した行がそこへ書かれ、**本文を持たない / 読まれない種類なので予定がどこにも出なかった**。
  * 🔑 追記できない種類は「無い」ものとして飛ばし、新しいテキストのノートを作る(`isAppendable` ── 追記欄と同じ 1 本)。
@@ -1219,7 +1219,7 @@ export function addScheduleItemChecked(
       dispatcher.dispatch({
         type: 'OP_FAILED',
         // ⚠ 例外の英語を画面に出さない / 次にすることを言う(#1087)
-        error: `予定を足せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください`,
+        error: `予定を追加できませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください`,
       });
       return false;
     },
@@ -1261,7 +1261,7 @@ export function addScheduleItem(
    *   同じ門 `bodyWriteBlockReason` で理由を出して断る)。
    */
   if (st.phase !== 'ready' && st.phase !== 'editing') {
-    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
+    dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}追加してください` });
     return false;
   }
   const text = item.text.trim();
@@ -1307,7 +1307,7 @@ export function addScheduleItem(
     if (st.phase === 'editing') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `今日のノートがまだ無いので、${phaseBlockReason('editing')}足してください`,
+        error: `今日のノートがまだ無いので、${phaseBlockReason('editing')}追加してください`,
       });
       return false;
     }
@@ -1370,7 +1370,7 @@ export function addScheduleItem(
   });
 }
 /**
- * 予定を足した直後の 1 行(#1163 の依頼 57-5 / 100-4)。どの字を、どのノートへ足したかを言う。
+ * 予定を追加した直後の 1 行(#1163 の依頼 57-5 / 100-4)。どの字を、どのノートへ足したかを言う。
  * @param undated 日付なしで足した
  * @param hidden 日付なしで足し、かつ「日付のないもの」を出していない(= 足した予定が予定表に見えない)
  */
@@ -1382,7 +1382,7 @@ export function scheduleAddedNotice(text: string, noteTitle: string, undated: bo
   );
 }
 
-/** 予定を足した書込の結末を待つ上限。他の呼び手(引用・AI の書き足し・章の欄)と同じ 10 秒。 */
+/** 予定を追加した書込の結末を待つ上限。他の呼び手(引用・AI の書き足し・章の欄)と同じ 10 秒。 */
 const SCHEDULE_ADD_SETTLE_MS = 10000;
 
 export function generateLid(): string {
@@ -3054,7 +3054,7 @@ function cancelFromEditor(dispatcher: Dispatcher, root: HTMLElement): void {
       input.value !== (input.getAttribute('data-pkc-title-base') ?? input.value);
     if (s.openBody.body !== s.openBody.baseline || titleChanged) {
       cancelAsking = true;
-      void confirmInApp(root, '打った内容を捨てますか', { okLabel: '編集をやめる', cancelLabel: '編集を続ける' }).then(
+      void confirmInApp(root, '入力した内容を捨てますか', { okLabel: '編集をやめる', cancelLabel: '編集を続ける' }).then(
         (answer) => {
           cancelAsking = false;
           if (answer !== 'ok') return;
@@ -3243,7 +3243,7 @@ const DUAL_KEY_ACTION: Readonly<Record<string, string>> = {
 };
 
 /**
- * 🔴 **選んだ全部にタグを足す / 外す**(#402 ①)。
+ * 🔴 **選んだ全部にタグを追加 / 外す**(#402 ①)。
  * ⚠ 2 つのボタンで**同じ関数**を通す ── 片方だけ相手の集合の採り方が変わる、
  *   という形を作らない(§7)。
  */
@@ -3736,7 +3736,7 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'workspace-delete',
   'toggle-app-tile',
   /**
-   * 🔴 **リンクを足すのも「作る」である**(#401 ①)。⚠ `create-entry` と同じ理由で
+   * 🔴 **リンクを追加のも「作る」である**(#401 ①)。⚠ `create-entry` と同じ理由で
    *   載せる ── 取り込みが entry を総入れ替えしている裏で新しい行を挿させない。
    * 🔑 「押しうるか」ではなく「**撃ちうるか**」で判断する(`open-today` と同じ)。
    */
@@ -4854,7 +4854,7 @@ function cancelPartialDraftAsking(dispatcher: Dispatcher, root: HTMLElement): vo
   }
   if (cancelAsking) return;
   cancelAsking = true;
-  void confirmInApp(root, '打った内容を捨てますか', { okLabel: '編集をやめる', cancelLabel: '編集を続ける' }).then(
+  void confirmInApp(root, '入力した内容を捨てますか', { okLabel: '編集をやめる', cancelLabel: '編集を続ける' }).then(
     (answer) => {
       cancelAsking = false;
       if (answer !== 'ok') return;
@@ -5341,7 +5341,7 @@ function setImageAttr(
     dispatcher.dispatch({ type: 'OP_FAILED', error: '取り込みが終わってから、画像の大きさを変えてください' });
     return;
   }
-  // 🔴 押した時点のその行の中身(#1087)── 別の窓が上へ行を足しても、別の画像を変えない
+  // 🔴 押した時点のその行の中身(#1087)── 別の窓が上へ行を追加しても、別の画像を変えない
   const openLine = shownBodyLine(st, lid, line);
   if (openLine === null) {
     dispatcher.dispatch({ type: 'OP_FAILED', error: SHOWN_LINE_LOST });
@@ -5973,7 +5973,7 @@ function applyTableFormat(
     return;
   }
   /**
-   * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ行を足したあと、
+   * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ行を追加したあと、
    *   同じノートの**別の表**(2 つ目の表を押したのに 1 つ目)が変わる。画面の本文から引き、引けなければ断る。
    */
   const openLine = shownBodyLine(st, ob.lid, line);
@@ -8809,7 +8809,7 @@ function runShellFrom(from: Element, dispatcher: Dispatcher, services: BinderSer
  * 🔴 **1 面のライブ編集で、左の探す欄へ焦点が移る直前の「打っていた行」**(#582)。
  *
  * ⚠ 探す欄を押すと焦点が外れて行は確定し、`row-source` が DOM から消える ── そのままでは `>` の一覧から
- *   「日付を入れる」などを選んでも書き込む欄が無い。消える前に、どの行の・どの字で・どこに caret が居たかを控える。
+ *   「日付を挿入」などを選んでも書き込む欄が無い。消える前に、どの行の・どの字で・どこに caret が居たかを控える。
  * ⚠ 控えるのは**行が探す欄へ焦点を渡した瞬間だけ**(それ以外の blur では捨てる ── 古い控えで別の場所へ入れない)。
  */
 interface LiveRowMemo {
@@ -8831,7 +8831,7 @@ function takeLiveRowMemo(): LiveRowMemo | null {
 const MEMO_KEEP = '[data-pkc-field="entry-filter"],[data-pkc-action="run-command-row"]';
 
 /**
- * 🔴 **左の `>` の一覧から「打っている場所に入れる」操作を呼ぶ前に、1 面の行を開き直して caret を戻す**(#582)。
+ * 🔴 **左の `>` の一覧から「カーソルの位置に入れる」操作を呼ぶ前に、1 面の行を開き直して caret を戻す**(#582)。
  *
  * @returns `true` = 呼び側がそのまま実行してよい(欄が在る / 開き直せた)。`false` = 実行しない(理由は出した。
  *   予約に回ったときは着弾後に `run` を呼ぶ ── 同期とは限らない)
@@ -8863,7 +8863,7 @@ function reopenLiveRowThen(env: CommandEnv, id: string, memo: LiveRowMemo | null
   return false;
 }
 
-/** 一覧を開いている間に、書き込む欄が組み直されたとき(記法 / 本文の欄へ当てる命令 / 打っている場所に入れる命令で共通)。 */
+/** 一覧を開いている間に、書き込む欄が組み直されたとき(記法 / 本文の欄へ当てる命令 / カーソルの位置に入れる命令で共通)。 */
 const FIELD_CHANGED = '書き込む欄が変わったので入れませんでした(もう一度選んでから実行してください)';
 
 /**
@@ -8936,11 +8936,11 @@ export function openPaletteFor(
     if (picked === null) return;
     // ⚠ 既定を止める口は要らない(打鍵ではないので) ── 実行だけする
     /**
-     * 🔴 **「打っている場所に入れる」操作は、開いたときの範囲を戻してから押す**(#582 段③ 第 3 群)。
+     * 🔴 **「カーソルの位置に入れる」操作は、開いたときの範囲を戻してから押す**(#582 段③ 第 3 群)。
      *
      * ⚠ 一覧を閉じた直後の欄は、器が焦点を返す瞬間に選択が `0,0` へ戻っている(上の `range` の注釈と同じ事象)。
      *   画面のボタン(日付 / ノートリンク / テンプレート / 図 / アイコン)は押した瞬間の `selectionStart` を読むので、
-     *   戻さずに押すと**本文の先頭に入る**。実ブラウザで、`hello world` の 5 字目で一覧から「日付を入れる」を呼んだら
+     *   戻さずに押すと**本文の先頭に入る**。実ブラウザで、`hello world` の 5 字目で一覧から「日付を挿入」を呼んだら
      *   `@2026-10-12hello world` になった(1 面の行・2 列の欄とも。`insert-date` / `insert-snippet` は第 1 群から登記済みで、同じ穴を持っていた)。
      * 🔑 戻すのは**押す前の 1 回だけ**でよい ── 日付 / ノート / テンプレート / 図 / アイコンは、押した瞬間に範囲を控えてから
      *   自分の小窓を開く(小窓の後に戻すのは各自の仕事。`at` を握っている)ので、小窓をまたいでも先頭には入らない。
@@ -10918,7 +10918,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const phase = dispatcher.getState().phase;
     if (phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}つながりを足してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(phase)}つながりを追加してください` });
       return;
     }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -10953,7 +10953,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (resolved.kind === 'ambiguous') {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: `「${name}」が ${resolved.count} 件あります。候補の一覧からフォルダの名前つきの題名を選ぶか、題名を分けてから足してください`,
+        error: `「${name}」が ${resolved.count} 件あります。候補の一覧からフォルダの名前つきの題名を選ぶか、題名を分けてから追加してください`,
       });
       return;
     }
@@ -11512,7 +11512,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **章の編集をやめる**(#1044 段2)。
    *
-   * 🔴 **打った字があるときだけ、1 画面の編集と同じ「打った内容を捨てますか」を出す**(台帳 #1852 束 R1、依頼 86-6 B)。
+   * 🔴 **打った字があるときだけ、1 画面の編集と同じ「入力した内容を捨てますか」を出す**(台帳 #1852 束 R1、依頼 86-6 B)。
    *   以前は聞かずに閉じ、打った字は消えていた(同じ字のボタンなのに、1 画面の「編集をやめる」とは動きが違った)。
    *   変えていなければ聞かずに閉じる。`Esc` も同じ 1 本(`cancelPartialDraftAsking`)。
    * ⚠ **ロックはここで返さない**(#1044 段2、F-B。上の `save-section-draft` と同じ理由)。
@@ -11614,7 +11614,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **予定の欄の日付を押すと、本文に日付を差すときと同じ選び方が開く**(#1635 項 2。
    * Gemini 裁定 = #1163 の依頼 36「2-B」)。
    *
-   * > 「明日」の予定を入れたい。本文の「日付を入れる」には 今日 / 明日 / 今週末 / 来週 が
+   * > 「明日」の予定を入れたい。本文の「日付を挿入」には 今日 / 明日 / 今週末 / 来週 が
    * > 出るのに、予定の欄の日付にはブラウザ標準の入力しか出ない。
    *
    * 🔑 選び方は `pickDateInApp` 1 本(本文の `insert-date` と同じ。近道の表も `DATE_SHORTCUTS`)。
@@ -11710,7 +11710,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'contacts-quick-add': (dispatcher, target, services) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}追加してください` });
       return;
     }
     const box = target.closest<HTMLElement>('[data-pkc-field="contacts-quick"]');
@@ -12145,9 +12145,9 @@ const ACTIONS: Record<string, ActionHandler> = {
   'bulk-tag-add': (dispatcher, _target, services, root) =>
     runBulkTag(dispatcher, services, root, 'add'),
   /**
-   * 🔴 **いま開いているノートにタグを打つ**(#494)。
+   * 🔴 **いま開いているノートにタグを入力**(#494)。
    *
-   * > user 指摘 2026-08-27:「**直感的にここにタグを打つ!って感じの動作じゃなくて
+   * > user 指摘 2026-08-27:「**直感的にここにタグを入力!って感じの動作じゃなくて
    * > yamlfrontmatter なのは問題だ。しかも設定動線がよくわからん**」
    *
    * 🔑 **書く口は増やさない** ── まとめて付ける経路(`BULK_TAG`)へ
@@ -12163,7 +12163,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const field = root.querySelector<HTMLInputElement>('[data-pkc-field="tag-add-input"]');
     // 🔴 打っている間に編集が始まったら、黙って欄を空にしない(reducer は捨てるので字だけ消える。#1087)
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}タグを足してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}タグを追加してください` });
       return;
     }
     /**
@@ -13130,7 +13130,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 「選択を読む → 渡す → 書き戻す」だけ。op ごとの知識をここに漏らさない。
    */
   /**
-   * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+   * 🔴 **日付を挿入道具**(user 指示 2026-08-23)。
    *
    * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
    * > ついてくるツールとか用意されてもいいかも**」
@@ -13320,7 +13320,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   /**
-   * 🔴 **図を入れる ── 押すと 5 種から選ぶ**(#528 案 B。user 裁定 2026-09-04)。
+   * 🔴 **図を挿入 ── 押すと 5 種から選ぶ**(#528 案 B。user 裁定 2026-09-04)。
    *
    * ⚠ 直す前の「図」は `format-text`(`op: 'mermaid'`)で、**必ず `graph TD` が入った**
    *   ── UML の雛形は在るのに、「図」を押した人はそこへ辿り着けなかった。
@@ -13708,7 +13708,7 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     if (text.trim() === '') {
       input?.focus();
-      services.showStatus?.('追記する内容を打ってから、もう一度押してください', CAUTION);
+      services.showStatus?.('追記する内容を入力してから、もう一度押してください', CAUTION);
       return;
     }
     /**
@@ -14021,14 +14021,14 @@ const ACTIONS: Record<string, ActionHandler> = {
      */
     const blocked = bodyWriteBlockReason(st, lid);
     if (blocked !== null) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表を打ってください`) });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: blockedWithSuffix(blocked, `表を入力してください`) });
       return;
     }
     // ⚠ 2 度押しで欄を作り直さない(打ちかけの字を捨てない)
     if (target.querySelector('[data-pkc-field="cell-input"]') !== null) return;
     /**
      * 🔴 **欄を開いた時点のその行の中身**(#1087)。⚠ 確定は打ち終わった後 ── 打っている間に別の窓が
-     *   上へ行を足していても、書換は「開いた時点の行」と disk 側を突き合わせて断る(別の行の升を書き換えない)。
+     *   上へ行を追加していても、書換は「開いた時点の行」と disk 側を突き合わせて断る(別の行の升を書き換えない)。
      */
     const openLine = shownCellLine(st, lid, line);
     if (openLine === null) {
@@ -14135,7 +14135,7 @@ const ACTIONS: Record<string, ActionHandler> = {
         dispatcher,
         services,
         [lid],
-        '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度打ってください',
+        '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度入力してください',
         () => dispatcher.dispatch({ type: 'SET_CSV_CELL', lid, line, openLine, col, value }),
         typedCellNote({ kind: 'csv-cell', value }),
       );
@@ -14250,7 +14250,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     ACTIONS['edit-cell']!(dispatcher, cell, services, root);
   },
   /**
-   * 🔴 **表の行・列を足す / 消す**(#418 段①)。
+   * 🔴 **表の行・列を追加す / 消す**(#418 段①)。
    *
    * 🔑 打てるだけでは動線が元に戻る ── 5 列で足りなくなった瞬間に
    *   CSV の原文へ帰ることになる。⚠ 足せるなら**消せる**
@@ -14275,7 +14275,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     /**
-     * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ行を足したあと、
+     * 🔴 **押した時点のその行の中身**(#1087)。⚠ 行番号だけだと、別の窓が上へ行を追加したあと、
      *   古い表示から押した「消す」が**1 行上の行**を消す。升を開くのと同じ口(`shownCellLine`)で引く。
      *   引けなければ撃たずに断る。
      */
@@ -14290,7 +14290,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, openLine, col, what, mode });
     };
     /**
-     * 🔴 **行・列を足す回も消す回も、別のタブ・窓が編集中なら断る**(追記・チェックの切り替えと同じ門。#1087)。
+     * 🔴 **行・列を追加す回も消す回も、別のタブ・窓が編集中なら断る**(追記・チェックの切り替えと同じ門。#1087)。
      * ⚠ 通すと編集中のタブの保存で上書きされ、足した行・消した行は履歴にだけ残る(足す回は `append-entry` と同じ)。
      */
     actUnlessEditedElsewhere(dispatcher, services, [lid], '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください', fire);
@@ -15884,7 +15884,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (span.open) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'このブロックは閉じていないのでコピーできません(閉じの ::: を足してください)',
+        error: 'このブロックは閉じていないのでコピーできません(閉じの ::: を追加してください)',
       });
       return;
     }
@@ -15914,7 +15914,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (span.open) {
       dispatcher.dispatch({
         type: 'OP_FAILED',
-        error: 'このブロックは閉じていないのでコピーできません(閉じの ::: を足してください)',
+        error: 'このブロックは閉じていないのでコピーできません(閉じの ::: を追加してください)',
       });
       return;
     }
@@ -15952,7 +15952,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   /**
    * 🔴 **ほかのノートを板に置く**(#1662 2。Gemini 裁定 = #1163 依頼 48 の 2 = A)── 題名で探して選ぶ小窓で 1 つ選ぶと、
    * `add-place` と同じ座標・同じ門(`ADD_PLACE`)で、そのノートの付箋(`entry=`)を本文の末尾に書く。
-   * ⚠ 器は `pickEntryInApp`(「ノートリンクを入れる」と同じ探し方)── user に 2 通りの探し方を覚えさせない。
+   * ⚠ 器は `pickEntryInApp`(「ノートリンクを挿入」と同じ探し方)── user に 2 通りの探し方を覚えさせない。
    *   自分自身は候補から外す(板に自分を置いても何も映らない)。
    * ⚠ 窓が開いている間に別のノートへ移ったら置かない / 選んだノートが消えていたら理由を言う。
    */
@@ -16494,14 +16494,14 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ archetype は **`attachment`** でなければならない ── 一覧の材料を集める
    *   `attachmentEntries` がその型で絞っている(別の型で作ると**永久に出ない**)。
    * ⚠ **`edit: false`** ── 足した直後に本文の編集へ落ちると、user は
-   *   「リンクを足したのに知らない画面が出た」になる。
+   *   「リンクを追加したのに知らない画面が出た」になる。
    */
   'add-url-tile': (dispatcher, target, services) => {
     // 🔴 編集中などは `CREATE_ENTRY` が黙って空振りする ── 作れないのに「足しました」と言わない(#1087)。
     //    断り文の前置きは `contacts-quick-add` と同じ(`phaseBlockReason`)。欄の字は残す
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}足してください` });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}追加してください` });
       return;
     }
     const root = target.closest<HTMLElement>('[data-pkc-slot="root"]') ?? target.ownerDocument.body;
@@ -16536,7 +16536,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       archetype: 'attachment',
       body: `---\nattachment.launcher_url: ${url}\n---\n`,
       edit: false,
-      // 🔴 開いているノートも絞りも動かさない(#1087。リンクを足しただけで本文が中央から消えない)
+      // 🔴 開いているノートも絞りも動かさない(#1087。リンクを追加しただけで本文が中央から消えない)
       keepSelection: true,
     });
     // ⚠ 作れなかった回(lid 衝突など ── reducer が理由を立てる)は「足しました」と言わず、欄も消さない(打った字を失わせない)
@@ -18457,7 +18457,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     /**
-     * 🔴 **「もう 1 つ足す…」の中の 2 種類**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
+     * 🔴 **「もう 1 つ追加…」の中の 2 種類**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A)。
      *
      * ⚠ どちらも**選び所の値を元へ戻す** ── 足しても 1 件目は変わらないので、選び所は
      *   1 件目を指したままでなければならない(戻さないと「足す…」で居座る)。
@@ -20445,7 +20445,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       return;
     }
     if (noteWindowHasTyping(root, st)) {
-      dispatcher.dispatch({ type: 'OP_FAILED', error: '打ちかけの字が残っています。足すか消してから閉じてください' });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: '入力途中の字が残っています。足すか消してから閉じてください' });
       return;
     }
     const closed = services.closeNoteWindow?.() ?? 'not-a-window';
@@ -20691,7 +20691,7 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
   'pc-pick-folder': '[data-pkc-action="pc-pick-folder"]',
   'hide-history': '[data-pkc-action="hide-history"]',
   /**
-   * 🔴 **第 3 群:打っている場所に入れる 2 件**(#582 段③)。第 2 群では「一覧を閉じた直後に位置が先頭へ戻る」ので見送った。
+   * 🔴 **第 3 群:カーソルの位置に入れる 2 件**(#582 段③)。第 2 群では「一覧を閉じた直後に位置が先頭へ戻る」ので見送った。
    *   いまは `openPaletteFor` が開いたときの範囲を戻してから押す(`CARET_TOOLS` の物は全部)ので撃てる。
    *   ⚠ 受け手は画面のボタンそのもの(`insert-date` などと同じ)。選んだ範囲があれば図は囲み、無ければ種類を聞く(ボタンの作り)。
    */
@@ -20759,14 +20759,14 @@ function inClosedMenuSource(btn: HTMLElement): boolean {
 const PALETTE_FIELD_FIRST: Readonly<
   Record<string, { readonly field: string; readonly pane: PaneId | null; readonly say: string }>
 > = {
-  'add-tag': { field: '[data-pkc-field="tag-add-input"]', pane: 'inspector', say: '足すタグをここに入れてから、「タグを足す」を押してください' },
-  'add-relation': { field: '[data-pkc-field="relation-target"]', pane: 'inspector', say: 'つなぐ先の題名をここに入れてから、「つながりを足す」を押してください' },
+  'add-tag': { field: '[data-pkc-field="tag-add-input"]', pane: 'inspector', say: '足すタグをここに入れてから、「タグを追加」を押してください' },
+  'add-relation': { field: '[data-pkc-field="relation-target"]', pane: 'inspector', say: 'つなぐ先の題名をここに入れてから、「つながりを追加」を押してください' },
   'append-entry': { field: '[data-pkc-field="append-input"]', pane: 'append', say: '追記する字をここに書いてから、「追記」を押してください' },
-  'schedule-quick-add': { field: '[data-pkc-field="schedule-quick-text"]', pane: null, say: '予定の字をここに書いてから、「予定を足す」を押してください' },
+  'schedule-quick-add': { field: '[data-pkc-field="schedule-quick-text"]', pane: null, say: '予定の字をここに書いてから、「予定を追加」を押してください' },
   // 第 2 群(#582 段③)── 欄はボタンと同じ親の中に居る
   'replace-all': { field: '[data-pkc-field="replace-find"]', pane: null, say: '探す語をここに入れてから、「すべて置換」を押してください' },
-  'contacts-quick-add': { field: '[data-pkc-field="contacts-quick-name"]', pane: null, say: '足す連絡先の名前をここに入れてから、「連絡先を足す」を押してください' },
-  'add-url-tile': { field: '[data-pkc-field="launcher-add-url"]', pane: null, say: '足すリンクのアドレスをここに入れてから、「リンクを足す」を押してください' },
+  'contacts-quick-add': { field: '[data-pkc-field="contacts-quick-name"]', pane: null, say: '追加する連絡先の名前をここに入れてから、「連絡先を追加」を押してください' },
+  'add-url-tile': { field: '[data-pkc-field="launcher-add-url"]', pane: null, say: '追加するリンクのアドレスをここに入れてから、「リンクを追加」を押してください' },
 };
 
 /** 整える 5 つ(#1233)。⚠ 命令 id(`keymap.ts`)→ 整え方(`text-tidy.ts`)。 */
@@ -21214,7 +21214,7 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'format-text',
   'insert-date',
   'insert-entry-link',
-  // ⚠ 2026-10-17(#1640 ④): 添付を入れる ── 同じく編集中の本文へ挿す
+  // ⚠ 2026-10-17(#1640 ④): 添付を挿入 ── 同じく編集中の本文へ挿す
   'insert-attachment',
   'insert-snippet',
   // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
@@ -22201,7 +22201,7 @@ export function bindActions(
        */
       const file = el.files?.[0] ?? null;
       el.value = '';
-      // 🔴 「もう 1 つ足す…」から開いた回は**足す**(#918 段⑦)。⚠ 印は読んだら必ず外す
+      // 🔴 「もう 1 つ追加…」から開いた回は**足す**(#918 段⑦)。⚠ 印は読んだら必ず外す
       const adding = el.getAttribute('data-pkc-sql-pick') === 'add';
       el.removeAttribute('data-pkc-sql-pick');
       if (file) {
@@ -22615,7 +22615,7 @@ export function bindActions(
      *
      * ⚠ **これが無いと、user 指摘そのものが直らない** ── 「ここに打つ!って感じ」で
      *   打った後に**押すボタンを探させる**のでは、動線は 1 手も減っていない。
-     * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを打つ人は毎回踏む。
+     * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを入力人は毎回踏む。
      *   🔑 ただし `isComposing` は**この関数の入口で弾き済み**(上の `if (ke.isComposing) return;`)
      *   ── ここで書き足すと **no-op** になる(変異試験 T2 が SURVIVED で教えた。
      *   CLAUDE.md「『これが無いと壊れる』と書く前に、外して壊れるのを見る」)。
@@ -22735,7 +22735,7 @@ export function bindActions(
       if (
         rowCmd === 'align-table' ||
         rowCmd === 'inline-calc' ||
-        // 🔴 いまの日時を入れる 5 つ(#1966 2-C)── 1 面の行の欄でも同じ口
+        // 🔴 いまの日時を挿入 5 つ(#1966 2-C)── 1 面の行の欄でも同じ口
         (rowCmd !== null && NOW_STAMP_COMMANDS[rowCmd] !== undefined) ||
         (rowCmd !== null && TIDY_COMMANDS.has(rowCmd))
       ) {
@@ -23885,7 +23885,7 @@ export function bindActions(
           .filter((x) => x !== '' && metas.has(x))
           .map((x) => formatEntryLink(metas.get(x)!.title, x));
         if (lines.length === 0) return;
-        // 🔴 落とした所の目印を渡す(#1087)── 書く直前に disk 側と突き合わせ、別の窓が行を足していれば断る
+        // 🔴 落とした所の目印を渡す(#1087)── 書く直前に disk 側と突き合わせ、別の窓が行を追加していれば断る
         // 🔴 別のタブ・窓が編集中のノートへは入れない(#1087。追記と同じ門)── 断ると赤い字で理由が出る
         actUnlessEditedElsewhere(
           dispatcher,
@@ -26112,7 +26112,7 @@ export function bindActions(
     if (el instanceof HTMLInputElement && el.matches('[data-pkc-field="entry-filter"]')) {
       /**
        * 🔴 **`Esc` は、打った字を消す**(#1650 項目 2。Gemini 裁定 = #1163 の依頼 42-2 A)。
-       * ⚠ 吹き出しは「Esc で、打った字を消します」と言うが、直す前は**ブラウザの検索欄の標準の動き**に
+       * ⚠ 吹き出しは「Esc で、入力した字を消します」と言うが、直す前は**ブラウザの検索欄の標準の動き**に
        *   頼っていた(`type="search"`)── 標準で消えないブラウザでは吹き出しが偽になる。
        * 🔑 標準の動きと**二重に走らせない**(`preventDefault`)。⚠ 欄も空にする(state だけ空にすると、
        *   打った字が残って見える ── 下の 2 ペインの絞り込みと同じ)。⚠ 変換中の Esc は変換の取り消しなので握らない。

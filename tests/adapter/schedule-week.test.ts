@@ -233,7 +233,7 @@ describe('広い面の「週」', () => {
     expect(q('[data-pkc-field="schedule-weekview-label"]')!.textContent).toBe('8月9日〜8月15日');
   });
 
-  it('「予定を足す」の日付: 今日を含む週は今日のまま / 他の週へ動くと、その週の最初の日', () => {
+  it('「予定を追加」の日付: 今日を含む週は今日のまま / 他の週へ動くと、その週の最初の日', () => {
     const { q, press } = setup({});
     const date = q<HTMLInputElement>('[data-pkc-field="schedule-quick-date"]')!;
     press('[data-pkc-action="schedule-mode"][data-pkc-mode="week"]');

@@ -490,7 +490,7 @@ export function frontmatterProblem(body: string): FrontmatterProblem | null {
   if (r.found && hasMisreadableTagShape(body.split(/\r?\n/).slice(1, Math.max(1, frontmatterLineCount(body) - 1)))) {
     return {
       kind: 'tags',
-      detail: 'この文書の情報に、タグを読み違えるかもしれない書き方があります(タグを足す・外す操作は、このノートでは止めています)',
+      detail: 'この文書の情報に、タグを読み違えるかもしれない書き方があります(タグを追加・外す操作は、このノートでは止めています)',
     };
   }
   /**

@@ -64,7 +64,7 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
     '見出し1', '見出し2', '見出し3',
     '太字', '斜体', 'コード', 'リンク',
     '箇条書き', '番号', 'チェック', '引用',
-    '表', 'ノートリンクを入れる', '添付を入れる',
+    '表', 'ノートリンクを挿入', '添付を挿入',
     'その他 ▾',
   ]);
   expect(new Set(shown.map((b) => b.top)).size, `1440px で帯が複数段に折り返している: ${shown.map((b) => b.top).join(',')}`).toBe(1);
@@ -79,7 +79,7 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await expect(moreMenu, '「その他 ▾」を押しても一覧が出ない').toBeVisible();
   const moreLabels = await moreMenu.locator('button').allTextContents();
   expect(moreLabels, '「その他 ▾」の一覧の顔ぶれと並び').toEqual([
-    '図を入れる', 'コードブロック', '数式', '注意書き', '日付を入れる', 'テンプレートを入れる', 'アイコンを入れる',
+    '図を挿入', 'コードブロック', '数式', '注意書き', '日付を挿入', 'テンプレートを挿入', 'アイコンを挿入',
     '番号を振り直す', '完了項目を末尾へ', 'この行を計算する',
     'ノート内を探す', '置換の欄を開く / 閉じる',
   ]);
@@ -456,7 +456,7 @@ test('🔴 追記すると足した所へ動き、保存しても先頭へ戻ら
 });
 
 /**
- * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+ * 🔴 **日付を挿入道具**(user 指示 2026-08-23)。
  *
  * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
  * > ついてくるツールとか用意されてもいいかも**」
@@ -470,7 +470,7 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
-  // 前提(後ろの「添付を入れる」用): 添付を 1 件足しておく ── 起動を増やさず、同じ道中の頭に置く
+  // 前提(後ろの「添付を挿入」用): 添付を 1 件足しておく ── 起動を増やさず、同じ道中の頭に置く
   await pressCreateTool(page, 'attach-file');
   await page.locator('[data-pkc-field="attach-input"]').setInputFiles({
     name: 'insert-me.png',
@@ -525,7 +525,7 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
   await expect(ta, '入れた日付が Ctrl+Z で戻らない').toHaveValue('- [ ] 見積を送る');
 
   /**
-   * 🔴 「添付を入れる」: 題名で探して選ぶと、打っている場所(caret)に画像の行が入る(#1640 ④)。
+   * 🔴 「添付を挿入」: 題名で探して選ぶと、カーソルの位置(caret)に画像の行が入る(#1640 ④)。
    * ⚠ 既存の道中の続き(新しく起動しない)。対照群: Esc で閉じても何も入らない。
    */
   await ta.evaluate((el) => {
@@ -534,7 +534,7 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
   });
   await clickReal(page, '[data-pkc-action="insert-attachment"]');
   const pickDlg = page.locator('[data-pkc-region="app-dialog"]');
-  await expect(pickDlg, '「添付を入れる」を押しても選ぶ窓が出ない').toBeVisible();
+  await expect(pickDlg, '「添付を挿入」を押しても選ぶ窓が出ない').toBeVisible();
   await pickDlg.locator('[data-pkc-field="entry-pick-filter"]').fill('insert-me');
   const pickRow = pickDlg.locator('[data-pkc-field="entry-pick-row"]');
   await expect(pickRow, '添付が候補に出ない(添付だけが並ぶはず)').toHaveCount(1);

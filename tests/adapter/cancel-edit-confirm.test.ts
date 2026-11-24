@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **編集をやめるとき、打った内容があれば「打った内容を捨てますか」と聞く**(依頼 71-1。Gemini 裁定 =
+ * 🔴 **編集をやめるとき、打った内容があれば「入力した内容を捨てますか」と聞く**(依頼 71-1。Gemini 裁定 =
  * #1163 への依頼 71 の回答)。打っていなければ聞かずにやめる。変換中の Esc は今までどおり無視する。
  *
  * ⚠ 守っているのは**聞く条件**(打った / 打っていない)と**答えの効き方**(捨てる / 続ける)と、
@@ -86,12 +86,12 @@ describe('編集をやめる前の確認(依頼 71-1)', () => {
     expect(h.d.getState().phase, 'やめられていない').toBe('ready');
   });
 
-  it('🔴 打った内容があれば「打った内容を捨てますか」と聞き、答えるまで編集を続ける', async () => {
+  it('🔴 打った内容があれば「入力した内容を捨てますか」と聞き、答えるまで編集を続ける', async () => {
     const h = await startEditing('# 打った');
     esc(h.ta);
     await tick();
     expect(dialog(), '聞いていない').not.toBeNull();
-    expect(dialogText()).toBe('打った内容を捨てますか');
+    expect(dialogText()).toBe('入力した内容を捨てますか');
     expect(h.d.getState().phase, '答える前にやめた').toBe('editing');
   });
 
@@ -169,7 +169,7 @@ describe('題名の「変えた」は編集を始めたときの題名と比べ�
     expect(input.value, '前提:欄の字が動いていない').toBe('t-a');
     esc(h.ta);
     await tick();
-    expect(dialog(), '触っていない題名で「打った内容を捨てますか」と聞いた').toBeNull();
+    expect(dialog(), '触っていない題名で「入力した内容を捨てますか」と聞いた').toBeNull();
     expect(h.d.getState().phase).toBe('ready');
   });
 

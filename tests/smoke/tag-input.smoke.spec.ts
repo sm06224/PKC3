@@ -2,7 +2,7 @@
  * 🔴 **タグを「その場で打つ」**(#494)を、実ブラウザで見る。
  *
  * > user 指摘 2026-08-27:「**タグの設定が Apple のメモアプリと違い、直感的に
- * > ここにタグを打つ!って感じの動作じゃなくて yamlfrontmatter なのは問題だ。
+ * > ここにタグを入力!って感じの動作じゃなくて yamlfrontmatter なのは問題だ。
  * > しかも設定動線がよくわからん**」
  *
  * ## ⚠ ここでしか見られないもの
@@ -32,7 +32,7 @@ async function makeNote(page: import('@playwright/test').Page, title: string, bo
   await page.waitForSelector('[data-pkc-action="start-edit"]');
 }
 
-test('🔴 情報ペインでタグを打つと本文に入り、開き直しても残る (#494)', async ({ page }) => {
+test('🔴 情報ペインでタグを入力と本文に入り、開き直しても残る (#494)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await makeNote(page, '買い出しメモ', '牛乳と卵\n');
@@ -146,7 +146,7 @@ test('🔴 札の × で外れ、本文からも消える (#494)', async ({ page
   await page.waitForSelector('[data-pkc-action="start-edit"]');
 
   /**
-   * 🔴 **41 字以上のタグを持つノートへ別のタグを足しても、長いタグが消えない**(#1087)。
+   * 🔴 **41 字以上のタグを持つノートへ別のタグを追加しても、長いタグが消えない**(#1087)。
    * ⚠ 上の道中の続きに載せる(新しく起動しない)。
    */
   const LONG = 'あ'.repeat(45);
