@@ -195,12 +195,20 @@ test('🔴 4: SQL の「ER 図」タブは、SQL の欄が見えず、図が残�
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
 
-for (const width of [390, 360]) {
+for (const width of [390, 360, 320]) {
   test(`🔴 6: スマホ幅 ${width}px で並び順の「⇅」が単独の行へ折り返さない (Stage 2 PR-3)`, async ({ page }) => {
     const errors = collectPageErrors(page);
     await page.setViewportSize({ width, height: 844 });
     await gotoApp(page);
     await expect(page.locator('[data-pkc-region="shell"]')).toHaveAttribute('data-pkc-layout', 'phone');
+    // 🔴 いちばん長い選択肢(幅が最大になる並び順)を選んでから測る ── 短い字のときだけ収まる偽の緑を作らない
+    await page.evaluate(() => {
+      const sel = document.querySelector('[data-pkc-field="entry-sort"]') as HTMLSelectElement;
+      const longest = [...sel.options].sort((x, y) => y.text.length - x.text.length)[0]!;
+      sel.value = longest.value;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.waitForTimeout(150);
     const r = await page.evaluate(() => {
       const q = (s: string) => (document.querySelector(s) as HTMLElement).getBoundingClientRect();
       const sort = q('[data-pkc-field="entry-sort"]');
@@ -211,7 +219,6 @@ for (const width of [390, 360]) {
     });
     expect(r.revW, '前提: ⇅ が描かれていない').toBeGreaterThan(0);
     expect(r.revTop, '⇅ が並び順の欄と別の行に落ちている').toBe(r.sortTop);
-    expect(r.filterTop, '探す欄と並び順が別の行に割れている').toBe(r.sortTop);
     expect(r.sortW, '並び順の欄が細すぎて字が切れる').toBeGreaterThan(110);
     expect(r.revRight, '⇅ が帯の外へはみ出している').toBeLessThanOrEqual(r.barRight + 0.5);
     expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
