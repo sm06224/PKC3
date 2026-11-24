@@ -541,7 +541,7 @@ export class FilerRenderer {
     if (hit !== null && !hit.failed && (hit.unreadable ?? 0) > 0) {
       const unread = document.createElement('span');
       unread.setAttribute('data-pkc-field', 'smart-unread');
-      unread.textContent = `本文の条件のうち ${String(hit.unreadable)} 個が読めていません(書き方はマニュアルの「条件は本文に書いてあります」)`;
+      unread.textContent = `本文の条件のうち ${String(hit.unreadable)} 個が読めていません(書き方はマニュアルの「スマートフォルダの条件」)`;
       bar.append(unread);
     }
 
