@@ -770,6 +770,8 @@ export class CapturesRenderer {
   private row(item: CaptureItem): HTMLLIElement {
     const li = document.createElement('li');
     li.setAttribute('data-pkc-capture', item.lid);
+    // 🔑 聞いている(見ている)1 件の印 ── 広い面のカードの格子で、その 1 枚だけ行いっぱいに広げる(波形・再生機が窮屈にならない。CSS が読む)
+    if (this.playing?.lid === item.lid && this.playing.url !== '') li.setAttribute('data-pkc-capture-open', '');
 
     // 🔑 名前は**そのノートを開く** ── 既存の `select-entry` を通す(開く口を増やさない)
     const open = document.createElement('button');

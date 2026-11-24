@@ -150,7 +150,7 @@ describe('288: 次の 0 時に 1 回だけ描き直す', () => {
 
 describe('191: 週の始まり', () => {
   const weekHead = (host: HTMLElement): string =>
-    [...(host.querySelector('[data-pkc-region="schedule"] > div > [data-pkc-field="schedule-week"]')?.children ?? [])]
+    [...(host.querySelector('[data-pkc-field="schedule-grid"] > [data-pkc-field="schedule-week"]')?.children ?? [])]
       .map((c) => c.textContent)
       .join('');
 

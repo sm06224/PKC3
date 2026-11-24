@@ -15256,6 +15256,135 @@ h6:hover > .pkc-heading-anchor,
   gap: var(--s1);
 }
 
+/* ══ 広い面の配置(#1442 S3-1、2026-11-24)══════════════════════════════
+ * 🔴 **別のウィンドウ(1100×800)で、縦 1 列のまま下が空く**のを直す。
+ * 判定は**面そのものの幅**(`container: pkc-wide`)に寄せる ── 「窓だから」「中央だから」と属性を足さない。
+ *   つまり同じ面が**狭ければ 1 列、広ければ複数列**になる(左の列のタブ = `data-pkc-browse-pane` は**触らない** ── 見え方はそのまま)。
+ * ⚠ 器(`data-pkc-view-pane`)ごとに**自分の子**を並べ替える規則だけを置く(器自身の配置は上の各節が持つ)。
+ * 地は無彩色、囲むのは**カード**(`--surface` + `--radius-lg` + `--hairline`)だけ。 */
+[data-pkc-view-pane='schedule'],
+[data-pkc-view-pane='contacts'],
+[data-pkc-view-pane='timers'],
+[data-pkc-view-pane='captures'] {
+  container: pkc-wide / inline-size;
+}
+/* ── 予定: 左に操作の列(月の送り・見せ方・追加欄・小さな月・出すもの)、右に見る所(一覧 / 日 / 週 / 月 / カンバン)── */
+[data-pkc-view-pane='schedule'] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-content: flex-start;
+}
+[data-pkc-view-pane='schedule'] > [data-pkc-field='schedule-rail'],
+[data-pkc-view-pane='schedule'] > [data-pkc-field='schedule-main'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  min-width: 0;
+  /* 狭いとき(幅が足りない / スマホ)は 1 列に積む。積む順は元のまま(操作 → 見る所) */
+  flex: 1 0 100%;
+}
+/* 「+」は日の見出しの**すぐ隣**に置く(右端へ孤立させない) */
+[data-pkc-view-pane='schedule'] [data-pkc-field='schedule-group-label'] {
+  justify-content: flex-start;
+}
+/* 🔑 横並びにする幅は 60rem(960px)── 操作の列 21rem の残りに、カンバンの信号機 4 列(9rem × 4)と週の 7 列が収まる下限。
+ *   本体の窓の中央(一覧・情報を出したまま = 約 900px)はこれを下回るので、従来どおり縦 1 列のまま(カンバンの 4 列が 3 列に折れない)。 */
+@container pkc-wide (min-width: 60rem) {
+  [data-pkc-view-pane='schedule'] > [data-pkc-field='schedule-rail'] {
+    flex: 0 0 21rem;
+    height: 100%;
+    overflow: auto;
+    /* 操作の列と見る所の境は、背景の段差ではなく細い線 1 本(どちらも白地で続くため) */
+    padding-right: var(--s2);
+    border-right: 1px solid var(--hairline);
+  }
+  [data-pkc-view-pane='schedule'] > [data-pkc-field='schedule-main'] {
+    flex: 1 1 0;
+    height: 100%;
+    overflow: auto;
+  }
+  /* 月は見る所の高さいっぱいに伸ばす(週の段が余白を分け合う。足りなければ升の最小の高さでスクロール) */
+  [data-pkc-view-pane='schedule'] > [data-pkc-field='schedule-main'] > [data-pkc-region='schedule-monthview'] {
+    flex: 1 1 auto;
+  }
+  [data-pkc-view-pane='schedule'] [data-pkc-field='schedule-main'] [data-pkc-field='schedule-monthview-body'] {
+    flex: 1 1 auto;
+  }
+  [data-pkc-view-pane='schedule'] [data-pkc-field='schedule-main'] [data-pkc-field='schedule-monthview-week'] {
+    flex: 1 0 auto;
+  }
+}
+/* ── 連絡先: 名前・宛先のカードを幅に応じて複数列に ── */
+[data-pkc-view-pane='contacts'] [data-pkc-field='contacts-list'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+  align-items: start;
+  gap: var(--s2);
+}
+[data-pkc-view-pane='contacts'] [data-pkc-field='contacts-list'] > li {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+}
+/* ── 録ったもの: 1 件 1 枚のカードを複数列に。ボタンは行いっぱいに伸ばさず横に並べる。聞いている 1 枚は行いっぱいに広げる ── */
+[data-pkc-view-pane='captures'] [data-pkc-field='captures-list'] {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  align-items: start;
+  gap: var(--s2);
+}
+[data-pkc-view-pane='captures'] [data-pkc-field='captures-list'] > li {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+}
+[data-pkc-view-pane='captures'] [data-pkc-field='captures-list'] > li > * {
+  flex: 0 0 100%;
+  min-width: 0;
+}
+[data-pkc-view-pane='captures'] [data-pkc-field='captures-list'] > li > button:not([data-pkc-field='capture-name']) {
+  flex: 0 0 auto;
+  align-self: center;
+}
+[data-pkc-view-pane='captures'] [data-pkc-field='captures-list'] > li[data-pkc-capture-open] {
+  grid-column: 1 / -1;
+}
+/* ── 時間: 1 件 1 行の表(時間帯 | 名前 | ノート | 操作)。日ごとの見出しはそのまま行の上に残す ── */
+@container pkc-wide (min-width: 40rem) {
+  [data-pkc-view-pane='timers'] [data-pkc-field='timers-list'] > li {
+    display: grid;
+    grid-template-columns: 11rem minmax(0, 1fr) minmax(0, 1.2fr) auto;
+    align-items: center;
+    column-gap: var(--s3);
+  }
+  [data-pkc-view-pane='timers'] [data-pkc-field='timers-when'] {
+    grid-column: 1;
+  }
+  [data-pkc-view-pane='timers'] [data-pkc-field='timers-name'] {
+    grid-column: 2;
+  }
+  [data-pkc-view-pane='timers'] [data-pkc-field='timers-note-open'] {
+    grid-column: 3;
+  }
+  [data-pkc-view-pane='timers'] [data-pkc-field='timers-tools'] {
+    grid-column: 4;
+    flex-wrap: nowrap;
+  }
+}
+/* ── 関係グラフ: 地図は窓の高さに収める(幅いっぱい × 縦横比 0.82 だと 1100px 幅で 860px = 窓より高く、下へ送らないと全体が見えない) ── */
+[data-pkc-view-pane='graph'] [data-pkc-field='graph-map'] {
+  height: calc(100dvh - 7.5rem);
+  min-height: 20rem;
+}
+/* ── PC: 「Office のファイルを開く…」を、行いっぱいに伸ばさず左に置く(「フォルダを選ぶ…」と同じ) ── */
+[data-pkc-view-pane='pc'] [data-pkc-field='pc-office'] {
+  align-self: flex-start;
+}
+
 /* ══ テキスト整形の面(#1233、2026-10-26)══════════════════════════
  * 🔴 **中央の面(別窓)だけ**── 左の列に同じ面は無い(SQL で調べると同じ形)。
  * 地は無彩色、色は**押されている整え方**(`aria-pressed`)にだけ使う(業務画面の作法)。 */
