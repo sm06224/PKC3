@@ -34,7 +34,8 @@
  * 段①の窓(script 無し)と**同じ字の別物**が 2 つできる。配色の初期化は
  * 「最初の描画の前に属性を 1 つ立てる」ことでしか実現できないので、それだけを許す。
  */
-import { buildManualDoc } from './manual-doc';
+import { buildManualDoc, manualHeadingSlug } from './manual-doc';
+import { MANUAL_HEADING_REDIRECTS } from './manual-redirects';
 import type { ManualSection } from './manual-find';
 import { DEFAULT_TEXT_SCALE, TEXT_SCALES, textScaleSpec } from '../text-scale';
 
@@ -327,7 +328,10 @@ export function themeBootScript(
      *   **必ず外れて先頭に戻る**ので、復号してから引く(壊れた綴りなら復号せず素で引く)。
      */
     'function g(h){if(!h)return;try{h=decodeURIComponent(h)}catch(e){}' +
-    'var e=document.getElementById(h);if(e)e.scrollIntoView({block:"start"})}' +
+    'var e=document.getElementById(h);' +
+    /** 🔑 旧い章の印(組み替え前)は、いまの見出しへ送る(`manual-redirects.ts`)。 */
+    'if(!e){var r=' + REDIRECT_JSON + ';if(Object.prototype.hasOwnProperty.call(r,h))e=document.getElementById(r[h])}' +
+    'if(e)e.scrollIntoView({block:"start"})}' +
     'function j(){g(location.hash.slice(1))}' +
     'addEventListener("DOMContentLoaded",j);' +
     /**
@@ -366,6 +370,13 @@ export function themeBootScript(
     '})();'
   );
 }
+
+/** 旧い章の印 → いまの見出しの id(script に焼く)。 */
+const REDIRECT_JSON = JSON.stringify(
+  Object.fromEntries(
+    Object.entries(MANUAL_HEADING_REDIRECTS).map(([k, v]) => [k, manualHeadingSlug(v)]),
+  ),
+);
 
 /** `TEXT_SCALES` を script に焼く形(id → px)。 */
 export function textScaleSizes(): Readonly<Record<string, string>> {

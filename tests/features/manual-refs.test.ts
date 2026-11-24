@@ -112,16 +112,12 @@ describe('実物のマニュアルに当てる', () => {
   const hits = findManualRefs(text);
 
   it('空振り防止 ── 実物から参照を拾えている', () => {
-    expect(hits.length, '実物のマニュアルから参照を 1 つも拾えていない').toBeGreaterThan(100);
+    expect(hits.length, '実物のマニュアルから参照を 1 つも拾えていない').toBeGreaterThan(90);
   });
 
-  it('🔴 大半は行き先が決まる(決まらない分は素の字のまま)', () => {
+  it('🔴 参照はすべて行き先が決まる(曖昧を弾く規則は上の単体の原稿で見る)', () => {
     const ok = hits.filter((h) => resolveManualRef(h.name, heads) !== null);
-    // ⚠ **両側**を見る ── 「全部決まる」でも「1 つも決まらない」でも、規則が壊れている
-    expect(ok.length, '押せる字になる参照が少なすぎる').toBeGreaterThan(80);
-    expect(ok.length, '全部決まってしまう ── 曖昧を弾く規則が効いていない').toBeLessThan(
-      hits.length,
-    );
+    expect(ok.length, '押せる字になる参照が少なすぎる').toBeGreaterThan(90);
   });
 
   /**
@@ -139,17 +135,8 @@ describe('実物のマニュアルに当てる', () => {
    *   「その名前の節は在るか」を 1 度必ず問うことになる。
    *   ⚠ 直したら表からも消さないと落ちるので、burn-down が忘れられない。
    */
-  it('🔴 決まらない参照は、既知の 5 件だけ(新しく壊れたら落ちる)', () => {
-    const KNOWN_UNRESOLVED: readonly string[] = [
-      // ── 操作の道順(節ではない。押す物の名前)
-      '本文を CSV の表に書き換える',
-      '操作を探す',
-      // ⚠ 空きの警告の文(quota-watch.ts)をそのまま引いたので、文中の「容量を調べる」(押す物の名前)が参照に見える
-      '容量を調べる',
-      '貼り付けたとき、何が届いてどれを使ったかを画面に出す',
-      // ── 短すぎて行き先が 2 つ以上ある(どちらへ送るか決められない)
-      '表',
-    ];
+  it('🔴 決まらない参照は、0 件(新しく壊れたら落ちる)', () => {
+    const KNOWN_UNRESOLVED: readonly string[] = [];
     const bad = [
       ...new Set(
         hits.filter((h) => resolveManualRef(h.name, heads) === null).map((h) => h.name),
@@ -165,15 +152,16 @@ describe('実物のマニュアルに当てる', () => {
     /*
      * ⚠ `→「…」` は 2 つの意味で使われている ── 「その節を見よ」と
      *   「これを押して、次にこれ」。⚠ 器(丸括弧)では分けられないので、
-     *   **行き先で分ける**。下の 3 つは実物に在る**操作の道順**で、
-     *   どれも見出しではないから決まらない ── それを固定する。
+     *   **行き先で分ける**。下の 3 つは**操作の道順**で、見出しではないから決まらない。
+     *   🔑 本文では `→「…」` を使わず太字の名前で書く(押せる字に化けない)── それも留める。
      */
     for (const path of [
       '本文を CSV の表に書き換える',
       '操作を探す',
       '貼り付けたとき、何が届いてどれを使ったかを画面に出す',
     ]) {
-      expect(text, `前提が崩れている:「${path}」が本文に無い`).toContain(`→「${path}」`);
+      expect(text, `操作の道順「${path}」が \`→「…」\` の形に戻っている`).not.toContain(`→「${path}」`);
+      expect(text, `前提が崩れている:太字の「${path}」が本文に無い`).toContain(`**${path}**`);
       expect(resolveManualRef(path, heads), `操作の道順「${path}」が押せる字になっている`).toBeNull();
     }
   });
