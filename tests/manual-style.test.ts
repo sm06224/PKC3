@@ -53,7 +53,7 @@ const BASELINE = {
   dateStamps: 0,
   staleUi: 0,
   historyWords: 0,
-  lines: 2930, // 実測(目標 2,000〜2,800 の少し上。上限 3,500 は FINAL)
+  lines: 2915, // 実測(目標 2,000〜2,800 の少し上。上限 3,500 は FINAL)
   h3: 131, // 実測(目標約 100。上限 150 は FINAL)
 } as const;
 
@@ -80,6 +80,36 @@ describe('マニュアルの書き方 ── 門(違反 0 件・規模は上限)
   it('空振り防止 ── 実物のマニュアルを読めている', () => {
     expect(scanHeadings(MANUAL).length).toBeGreaterThan(60);
     expect(totalLines(MANUAL)).toBeGreaterThan(1000);
+  });
+
+  /**
+   * 🔴 **章(H2)の並びを身元で留める** ── 上限だけの門は、章を丸ごと消す退行を緑のまま通す
+   *   (2,900 行から 1,900 行消しても上限の内側)。章を足す・改名するときはこの表も直す。
+   */
+  it('章立て ── H2 は 15 章で、この並び(章を丸ごと消すと落ちる)', () => {
+    expect(scanHeadings(MANUAL).filter((h) => h.level === 2).map((h) => h.title)).toEqual([
+      'はじめに',
+      'ノートの作成と編集',
+      'Markdown と拡張記法',
+      '添付ファイルとメディア',
+      '整理と検索',
+      'SQL でデータを調べる',
+      '予定とタスク',
+      '付箋ボードと連絡先',
+      '組み込みアプリとランチャー',
+      '画面のカスタマイズ',
+      '書き出し・取り込み・バックアップ',
+      '端末間の同期',
+      'メッセージ・通知・設定',
+      'スマートフォン・タブレット',
+      'リファレンスと困ったときの対処',
+    ]);
+  });
+
+  /** 🔴 規模の下限(上限 FINAL の 6 割)── 節を大きく削る退行を止める。目標の下端(2,000 行・約 100 節)の少し下。 */
+  it('規模の下限 ── 行数 2,100 以上・H3 90 以上', () => {
+    expect(totalLines(MANUAL)).toBeGreaterThanOrEqual(2100);
+    expect(h3Count(MANUAL)).toBeGreaterThanOrEqual(90);
   });
 
   it('条 3 ── 30 字を超える見出しを増やさない(等値)', () => {
