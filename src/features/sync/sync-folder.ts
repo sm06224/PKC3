@@ -20,10 +20,30 @@ export function folderFileName(device: string): string {
   return `${SYNC_FOLDER_FILE_PREFIX}${device}${DIFF_SUFFIX}`;
 }
 
-/** ファイル名から端末 id を読む(同期フォルダのファイルでなければ `null`)。⚠ 大文字・余計な字を含む名前は読まない。 */
+/**
+ * 🔴 暗号化した差分ファイルの名前の末尾(#2000 段 4b)。平文の `.pkc3-diff.zip` とは**名前で分ける**
+ * (`pkc3-<端末>.pkc3-diff.zip.enc`。平文のファイルを暗号化したと取り違えない・逆も)。
+ */
+export const ENC_SUFFIX = '.enc';
+
+/** 暗号化した端末のファイル名。 */
+export function encFileName(device: string): string {
+  return `${folderFileName(device)}${ENC_SUFFIX}`;
+}
+
+/** 暗号化したファイルの名前か(形を満たすものだけ)。 */
+export function isEncFileName(name: string): boolean {
+  return name.endsWith(ENC_SUFFIX) && deviceOfFileName(name) !== null;
+}
+
+/**
+ * ファイル名から端末 id を読む(同期フォルダのファイルでなければ `null`)。⚠ 大文字・余計な字を含む名前は読まない。
+ * 平文(`….pkc3-diff.zip`)も暗号化(`….pkc3-diff.zip.enc`)も同じ端末のファイルとして読む(見分けは `isEncFileName`)。
+ */
 export function deviceOfFileName(name: string): string | null {
-  if (!name.startsWith(SYNC_FOLDER_FILE_PREFIX) || !name.endsWith(DIFF_SUFFIX)) return null;
-  const id = name.slice(SYNC_FOLDER_FILE_PREFIX.length, name.length - DIFF_SUFFIX.length);
+  const base = name.endsWith(ENC_SUFFIX) ? name.slice(0, name.length - ENC_SUFFIX.length) : name;
+  if (!base.startsWith(SYNC_FOLDER_FILE_PREFIX) || !base.endsWith(DIFF_SUFFIX)) return null;
+  const id = base.slice(SYNC_FOLDER_FILE_PREFIX.length, base.length - DIFF_SUFFIX.length);
   return isDeviceId(id) ? id : null;
 }
 
@@ -50,17 +70,33 @@ export interface SeenFile {
   want: string[];
 }
 
+/**
+ * 🔴 相手の端末ごとに**取り込んだ最大の連番**(#2000 段 4b ── 古いファイルへの巻き戻し・差し替えの拒否)。
+ * ファイルの印(大きさ・更新日時・版)は、同じ連番で中身が違う物を見分けるために一緒に置く。
+ */
+export interface PeerSeq {
+  seq: number;
+  size: number;
+  mtime: number;
+  version?: string;
+}
+
 /** 端末ごと・ワークスペースごとに残す同期フォルダの記録(フォルダの handle と一緒に IndexedDB へ)。 */
 export interface FolderSyncRecord {
   /** 取り込んだ他の端末のファイル(ファイル名 → 控え)。 */
   seen: Record<string, SeenFile>;
+  /**
+   * 🔴 相手の端末 id → 取り込んだ最大の連番(暗号化したファイルのヘッダの連番)。
+   * ⚠ 旧い版はこの欄を知らない(`normalizeFolderRecord` は知っている欄だけを読む ── 無視されて壊れない。`tests/features/sync/e2e-rollback.test.ts` で固定)。
+   */
+  peerSeq: Record<string, PeerSeq>;
   /** 前回自分のファイルに書いた中身の要約(同じなら書かない)。 */
   lastKey: string | null;
   /** 全件を頼んでいる相手。 */
   want: string[];
 }
 
-export const emptyFolderRecord = (): FolderSyncRecord => ({ seen: {}, lastKey: null, want: [] });
+export const emptyFolderRecord = (): FolderSyncRecord => ({ seen: {}, peerSeq: {}, lastKey: null, want: [] });
 
 /** 記録を読む(壊れていれば空から)。 */
 export function normalizeFolderRecord(v: unknown): FolderSyncRecord {
@@ -82,7 +118,38 @@ export function normalizeFolderRecord(v: unknown): FolderSyncRecord {
       };
     }
   }
+  if (typeof o.peerSeq === 'object' && o.peerSeq !== null) {
+    for (const [dev, s] of Object.entries(o.peerSeq as Record<string, unknown>)) {
+      if (!isDeviceId(dev) || typeof s !== 'object' || s === null) continue;
+      const r = s as Record<string, unknown>;
+      if (typeof r.seq !== 'number' || !Number.isSafeInteger(r.seq) || r.seq < 0 || typeof r.size !== 'number' || typeof r.mtime !== 'number') continue;
+      out.peerSeq[dev] = { seq: r.seq, size: r.size, mtime: r.mtime, ...(typeof r.version === 'string' ? { version: r.version } : {}) };
+    }
+  }
   return out;
+}
+
+/** 相手のファイルの連番の判定。 */
+export type PeerSeqVerdict = 'ok' | 'rollback' | 'replaced';
+
+/**
+ * 🔴 **巻き戻しの拒否**(#2000 段 4b-d)── 相手の端末から**取り込み済みの最大の連番より小さい**ファイルは取り込まない
+ * (古い暗号文の差し戻し)。**同じ連番で中身(版・大きさ・更新日時)が違う**ファイルも断る(差し替え)。
+ * 記録が無い相手(初めて)は通す。
+ */
+export function checkPeerSeq(rec: FolderSyncRecord, device: string, seq: number, file: { size: number; mtime: number; version?: string }): PeerSeqVerdict {
+  const prev = rec.peerSeq[device];
+  if (prev === undefined) return 'ok';
+  if (seq < prev.seq) return 'rollback';
+  if (seq === prev.seq && !sameFileVersion(prev, file)) return 'replaced';
+  return 'ok';
+}
+
+/** 取り込めた相手の連番を記録する(下げない)。 */
+export function notePeerSeq(rec: FolderSyncRecord, device: string, seq: number, file: { size: number; mtime: number; version?: string }): void {
+  const prev = rec.peerSeq[device];
+  if (prev !== undefined && prev.seq > seq) return;
+  rec.peerSeq[device] = { seq, size: file.size, mtime: file.mtime, ...(file.version === undefined ? {} : { version: file.version }) };
 }
 
 export interface FolderRound {
@@ -147,6 +214,46 @@ export function updateWant(want: readonly string[], peer: string, result: { need
   if (result.needFull) set.add(peer);
   else if (result.complete) set.delete(peer);
   return [...set].sort();
+}
+
+/** 回で読む・書く前に、置き場の一覧から「どのファイルを見るか」を選んだ結果(#2000 段 4b)。 */
+export interface RoundFiles {
+  /** 計画(`planFolderRound`)へ渡すファイル(端末ごとに 1 つ)。 */
+  files: FolderFile[];
+  /** 自分の端末の、**もう片方の形**のファイルの名前(暗号化へ切り替えた後に消す平文 / 平文へ戻した後に消す暗号化)。無ければ `null`。 */
+  ownCounterpart: string | null;
+  /** 自分は暗号化している ── 平文しか置いていない他の端末(その端末でも暗号化をオンにしてもらう)。 */
+  peersNeedEnc: string[];
+  /** 自分は暗号化していない ── 暗号化したファイルを置いている他の端末(読めない。この端末でも暗号化をオンにしてもらう)。 */
+  peersEncOnly: string[];
+}
+
+/**
+ * 🔴 **端末ごとに見るファイルを 1 つ選ぶ**(平文 / 暗号化の両方が在る端末の取り違えを 1 か所で決める)。
+ * - 暗号化している(`encOn`): 暗号化したファイルを優先。無ければ平文(まだ切り替えていない相手 ── 読んだうえで案内を出す)
+ * - 暗号化していない: 平文だけを見る。暗号化したファイルしか無い相手は**読めない**(案内を出す)
+ */
+export function chooseRoundFiles(entries: readonly FolderFile[], self: string, encOn: boolean): RoundFiles {
+  const byDev = new Map<string, { plain?: FolderFile; enc?: FolderFile }>();
+  for (const f of entries) {
+    const dev = deviceOfFileName(f.name);
+    if (dev === null) continue;
+    const g = byDev.get(dev) ?? {};
+    if (isEncFileName(f.name)) g.enc = f;
+    else g.plain = f;
+    byDev.set(dev, g);
+  }
+  const out: RoundFiles = { files: [], ownCounterpart: null, peersNeedEnc: [], peersEncOnly: [] };
+  for (const dev of [...byDev.keys()].sort()) {
+    const g = byDev.get(dev)!;
+    const use = encOn ? (g.enc ?? g.plain) : g.plain;
+    if (use !== undefined) out.files.push(use);
+    if (dev === self) {
+      out.ownCounterpart = (encOn ? g.plain : g.enc)?.name ?? null;
+    } else if (encOn && g.enc === undefined && g.plain !== undefined) out.peersNeedEnc.push(dev);
+    else if (!encOn && g.enc !== undefined) out.peersEncOnly.push(dev);
+  }
+  return out;
 }
 
 /** 定期の回の間隔(分)。⚠ 画面に出ている間だけ回す(隠れている間・閉じている間は回らない)。 */

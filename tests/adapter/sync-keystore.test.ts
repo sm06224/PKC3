@@ -14,27 +14,14 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { s3ConfigProblem, SyncKeystore, SYNC_KEYS_DB, type KeystoreBackend, type S3BoxConfig } from '../../src/adapter/platform/sync-keystore';
+import { memKeystoreBackend } from '../helpers/mem-keystore-backend';
+import { s3ConfigProblem, SyncKeystore, SYNC_KEYS_DB, type S3BoxConfig } from '../../src/adapter/platform/sync-keystore';
 
 const CANARY_ID = 'AKIA-CANARY-ID-7Q3';
 const CANARY_SECRET = 'canary/SECRET+value=Zx81';
 const CONFIG: S3BoxConfig = { kind: 's3', endpoint: 'https://s3.example.test', bucket: 'notes', region: 'auto', prefix: 'pkc3/' };
 
-/** 作り物の置き場(中身を覗ける)。 */
-function memBackend(): KeystoreBackend & { dump(): unknown[] } {
-  let key: CryptoKey | null = null;
-  const boxes = new Map<string, unknown>();
-  return {
-    getKey: async () => key,
-    putKey: async (k) => void (key = k),
-    deleteKey: async () => void (key = null),
-    getBox: async (cid) => (boxes.get(cid) as never) ?? null,
-    putBox: async (cid, v) => void boxes.set(cid, structuredClone(v)),
-    deleteBox: async (cid) => void boxes.delete(cid),
-    countBoxes: async () => boxes.size,
-    dump: () => [key, ...boxes.values()],
-  };
-}
+const memBackend = memKeystoreBackend;
 
 /** 置き場の中身を、字として探せる形に崩す(バイト列は latin1 の字に)。 */
 function flatten(v: unknown): string {
@@ -189,6 +176,37 @@ describe('🔴 着地前レビュー 🔴2: 書く操作は 1 つずつ(鍵の�
     };
     await new SyncKeystore(be, undefined, undefined, lock).save('c1', CONFIG, { accessKeyId: 'a', secretAccessKey: 'b' });
     expect(inside).toEqual(['locked']);
+  });
+});
+
+describe('暗号化キー(データ鍵)の保管(段 4b)', () => {
+  const mk = (extractable: boolean): Promise<CryptoKey> => crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, extractable, ['encrypt', 'decrypt']);
+
+  it('🔴 取り出せない鍵だけ置ける / 接続ごとに別 / 消せる(片道にしない)/ 接続を外すと一緒に消える', async () => {
+    const ks = new SyncKeystore(memBackend());
+    const k = await mk(false);
+    await ks.saveDataKey('c1', { keyId: 'KID', key: k });
+    expect(await ks.openDataKey('c2'), '別の接続には無い').toBeNull();
+    const got = await ks.openDataKey('c1');
+    expect(got?.keyId).toBe('KID');
+    expect(got?.key.extractable).toBe(false);
+    await expect(ks.saveDataKey('c1', { keyId: 'X', key: await mk(true) })).rejects.toThrow('取り出せる');
+    expect((await ks.openDataKey('c1'))?.keyId, '断った書き込みは置き場を変えない').toBe('KID');
+    await ks.removeDataKey('c1');
+    expect(await ks.openDataKey('c1')).toBeNull();
+    // 接続を外すと暗号化キーも消える
+    await ks.save('c1', CONFIG, { accessKeyId: CANARY_ID, secretAccessKey: CANARY_SECRET });
+    await ks.saveDataKey('c1', { keyId: 'KID', key: k });
+    await ks.remove('c1');
+    expect(await ks.openDataKey('c1')).toBeNull();
+  });
+
+  it('保管しない設定(B)は API を呼ばなければ何も置かれない', async () => {
+    const be = memBackend();
+    const ks = new SyncKeystore(be);
+    await ks.save('c1', CONFIG, { accessKeyId: CANARY_ID, secretAccessKey: CANARY_SECRET });
+    expect(await ks.openDataKey('c1')).toBeNull();
+    expect(be.dump().filter((x) => typeof x === 'string')).toEqual([]);
   });
 });
 

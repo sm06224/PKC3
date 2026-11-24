@@ -67,7 +67,7 @@ describe('回の計画', () => {
 
   it('壊れた記録は空から', () => {
     expect(normalizeFolderRecord(null)).toEqual(emptyFolderRecord());
-    expect(normalizeFolderRecord({ seen: { 'x.zip': { size: 1, mtime: 1 } }, want: ['nope', A], lastKey: 3 })).toEqual({ seen: {}, want: [A], lastKey: null });
+    expect(normalizeFolderRecord({ seen: { 'x.zip': { size: 1, mtime: 1 } }, want: ['nope', A], lastKey: 3 })).toEqual({ seen: {}, peerSeq: {}, want: [A], lastKey: null });
   });
 
   it('失敗が続くと間隔を延ばす(上限 60 分)', () => {
