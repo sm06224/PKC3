@@ -67,6 +67,7 @@ const SCHEMA = {
     medianMs: 'ms(rAF 間隔の中央値)',
     dropped: 'count(中央値の 1.5 倍以上の間隔)',
     glowFrames: 'count(発光の印が付いていたコマ)',
+    sceneGlow: 'object(`シーン|項目` → 光ったコマ数。`シーン|frames` はそのシーンのコマ数)',
     loafCount: 'count',
     loafTotalMs: 'ms(長い描画の duration 合計)',
     loafKind: 'long-animation-frame | longtask | none',
@@ -81,6 +82,19 @@ test.beforeEach(async ({ page }) => {
 });
 
 const FRAMES_PER_SCENE = 200; // 3 シーン × 200 = 600 コマ(ログ / 本文のブロック / 入力欄とブロックの縁)
+
+/**
+ * 🔴 **シーンごとに「そのシーンの対象が光った」を数える**(全体の合計だと、本文ブロックや欄のゾーンを消してもログのシーンの光で緑になる)。
+ * ログは直接のカード / 本文のシーンはブロック(コード・表・図・引用・折りたたみ)/ 入力欄のシーンは入力欄と追記欄の枠(+ ブロック)。
+ */
+const PROBES: Record<string, Record<string, string>> = {
+  '計測用のログ': { log: '[data-pkc-log-days] > [data-pkc-log-card][data-pkc-glow-near]' },
+  '計測用のノート': { blocks: '.pkc-md-block[data-pkc-glow-near], .pkc-details[data-pkc-glow-near], blockquote[data-pkc-glow-near]' },
+  '計測用のノート#fields': {
+    fields: 'input[data-pkc-glow-near], textarea[data-pkc-glow-near], select[data-pkc-glow-near], [data-pkc-field="append-form"][data-pkc-glow-near]',
+    blocks: '.pkc-md-block[data-pkc-glow-near], .pkc-details[data-pkc-glow-near], blockquote[data-pkc-glow-near]',
+  },
+};
 
 const LOG = Array.from({ length: 12 }, (_, i) => [
   `## 2026-10-${String(1 + Math.floor(i / 4)).padStart(2, '0')} ${String(8 + (i % 4) * 2).padStart(2, '0')}:00:00`,
@@ -179,6 +193,7 @@ interface Run {
   medianMs: number;
   dropped: number;
   glowFrames: number;
+  sceneGlow: Record<string, number>;
   loafCount: number;
   loafTotalMs: number;
   loafKind: string;
@@ -192,9 +207,10 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
   await cdp.send('Performance.enable');
   const metrics = async (): Promise<Record<string, number>> =>
     Object.fromEntries(((await cdp.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] }).metrics.map((m) => [m.name, m.value]));
-  await page.evaluate(() => {
-    const w = window as unknown as { __perf: { ts: number[]; glow: number; long: number[]; kind: string; stop: boolean; po: PerformanceObserver | null } };
-    const st = { ts: [] as number[], glow: 0, long: [] as number[], kind: 'none', stop: false, po: null as PerformanceObserver | null };
+  await page.evaluate((probes: Record<string, Record<string, string>>) => {
+    type St = { ts: number[]; glow: number; long: number[]; kind: string; stop: boolean; po: PerformanceObserver | null; scene: string; sg: Record<string, number> };
+    const w = window as unknown as { __perf: St };
+    const st: St = { ts: [], glow: 0, long: [], kind: 'none', stop: false, po: null, scene: '', sg: {} };
     w.__perf = st;
     for (const kind of ['long-animation-frame', 'longtask']) {
       if (!PerformanceObserver.supportedEntryTypes.includes(kind)) continue;
@@ -207,10 +223,15 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
       if (st.stop) return;
       st.ts.push(t);
       if (document.querySelector('[data-pkc-glow-near]') !== null) st.glow += 1;
+      const ps = probes[st.scene];
+      if (ps !== undefined) {
+        st.sg[`${st.scene}|frames`] = (st.sg[`${st.scene}|frames`] ?? 0) + 1;
+        for (const [k, sel] of Object.entries(ps)) if (document.querySelector(sel) !== null) st.sg[`${st.scene}|${k}`] = (st.sg[`${st.scene}|${k}`] ?? 0) + 1;
+      }
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
-  });
+  }, PROBES);
   // 群を切り替えた直後の再計算(change → 発光の付け外し)を測りに入れない: 2 コマ待ってから基準を取る
   await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
   const m0 = await metrics();
@@ -218,6 +239,7 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
     const [title = '', kind] = scene.split('#');
     await selectByTitle(page, title);
     await page.mouse.move(150, 450);
+    await page.evaluate((sc) => ((window as unknown as { __perf: { scene: string } }).__perf.scene = sc), scene);
     const path = kind === 'fields' ? await routeFields(page, FRAMES_PER_SCENE) : await route(page, FRAMES_PER_SCENE);
     for (const p of path) {
       await page.mouse.move(p.x, p.y);
@@ -226,13 +248,13 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
   }
   const m1 = await metrics();
   const r = await page.evaluate(() => {
-    const st = (window as unknown as { __perf: { ts: number[]; glow: number; long: number[]; kind: string; stop: boolean; po: PerformanceObserver | null } }).__perf;
+    const st = (window as unknown as { __perf: { ts: number[]; glow: number; long: number[]; kind: string; stop: boolean; po: PerformanceObserver | null; sg: Record<string, number> } }).__perf;
     st.stop = true;
     st.po?.disconnect();
     const iv = st.ts.slice(1).map((t, i) => t - st.ts[i]!);
     const sorted = [...iv].sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
-    return { frames: iv.length, median, dropped: iv.filter((d) => d >= median * 1.5).length, glow: st.glow, long: st.long, kind: st.kind };
+    return { frames: iv.length, median, dropped: iv.filter((d) => d >= median * 1.5).length, glow: st.glow, sg: st.sg, long: st.long, kind: st.kind };
   });
   await cdp.detach();
   const d = (k: string): number => ((m1[k] ?? 0) - (m0[k] ?? 0)) * 1000;
@@ -242,6 +264,7 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
     medianMs: Math.round(r.median * 100) / 100,
     dropped: r.dropped,
     glowFrames: r.glow,
+    sceneGlow: r.sg,
     loafCount: r.long.length,
     loafTotalMs: Math.round(r.long.reduce((a, b) => a + b, 0)),
     loafKind: r.kind,
@@ -288,7 +311,7 @@ test('🔴 ネオンの 600 コマ計測: 対照群(発光だけを外す)と通
   expect(parsed.runs.length).toBe(4);
   for (const r of parsed.runs) {
     expect(Object.keys(r).sort(), '出力の run の欄が SCHEMA と違う').toEqual(Object.keys(SCHEMA.runFields).sort());
-    for (const [k, v] of Object.entries(r)) expect(typeof v, `${k} の型`).toBe(k === 'label' || k === 'loafKind' ? 'string' : 'number');
+    for (const [k, v] of Object.entries(r)) expect(typeof v, `${k} の型`).toBe(k === 'label' || k === 'loafKind' ? 'string' : k === 'sceneGlow' ? 'object' : 'number');
   }
   // 🔑 GLOW_QUERY が正本の字面と一致している(import が差し替えられても、字面の写しが漂わない)
   expect(readFileSync('src/adapter/ui/render/neon-glow.ts', 'utf-8')).toContain(`export const GLOW_QUERY = '${GLOW_QUERY}'`);
@@ -298,9 +321,23 @@ test('🔴 ネオンの 600 コマ計測: 対照群(発光だけを外す)と通
   for (const r of runs) expect(r.frames, `${r.label}: コマが取れていない`).toBeGreaterThan(300);
   for (const r of control) expect(r.glowFrames, `${r.label}: 対照群で光っている(空振り)`).toBe(0);
   for (const r of glow) expect(r.glowFrames, `${r.label}: 通常で光ったコマが全体の 10% に満たない(空振り)`).toBeGreaterThanOrEqual(r.frames * 0.1);
+  // 🔴 シーンごとの下限: そのシーンのコマの 10% 以上で、そのシーンの対象(ログのカード / 本文のブロック / 入力欄)が光っている。
+  //   ⚠ 対照群では 0(発光を外した側で光っていない)。ゾーンを 1 つ消すと、そのシーンの項目だけが 0 になって赤くなる
+  for (const r of glow) {
+    for (const [scene, ps] of Object.entries(PROBES)) {
+      const frames = r.sceneGlow[`${scene}|frames`] ?? 0;
+      expect(frames, `${r.label} ${scene}: シーンのコマが取れていない`).toBeGreaterThan(50);
+      for (const k of Object.keys(ps)) {
+        expect(r.sceneGlow[`${scene}|${k}`] ?? 0, `${r.label} ${scene}: ${k} が光ったコマがシーンの 10% に満たない(そのゾーンが死んでいる)`).toBeGreaterThanOrEqual(frames * 0.1);
+      }
+    }
+  }
+  for (const r of control) for (const [k, v] of Object.entries(r.sceneGlow)) if (!k.endsWith('|frames')) expect(v, `${r.label} ${k}: 対照群で光っている(空振り)`).toBe(0);
   // 🔴 合格線(Stage 2 PR-2): 発光のコマ落ち − 対照群のコマ落ち(2 回ずつの平均)が 1 以下。
   //   ⚠ 「発光ありで 600 コマ中 1 以下」の絶対値は、この機械では安定しない(同じ構成を 3 回測って、発光側の最大が 0〜3 に揺れた。
   //   対照群(発光を外した側)ですら 0〜6 に揺れる)── だから**差**で縛る。絶対値の線を張るのは、揺れない機械が手に入ってから。
+  //   ⚠ この assert は**弱い**: 片側 2 回の平均どうしの差なので、発光側が対照より**少なくても(負でも)**通る(測るのは「増えていない」だけ。
+  //   発光の効いている確かさは上のシーンごとの下限が担う)。
   const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
   const gap = mean(glow.map((r) => r.dropped)) - mean(control.map((r) => r.dropped));
   expect(gap, `発光でコマ落ちが増えた(発光 ${glow.map((r) => r.dropped).join(',')} / 対照 ${control.map((r) => r.dropped).join(',')})`).toBeLessThanOrEqual(1);

@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createNeonGlow, GLOW_QUERY, NEAR_ATTR, NEON_FIELDS, NEON_ZONES, type NeonGlow } from '../../src/adapter/ui/render/neon-glow';
+import { createNeonGlow, GLOW_QUERY, NEAR_ATTR, NEON_FIELDS, NEON_ZONES, zoneOf, type NeonGlow } from '../../src/adapter/ui/render/neon-glow';
 import { NEON_RADIUS } from '../../src/features/neon/near-cards';
 import { atBlock, blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
@@ -882,6 +882,33 @@ describe('本文のブロックのゾーン(`.pkc-md-rendered`)', () => {
   });
 });
 
+describe('🔴 ゾーンの入れ子: 外側のログ・情報ペイン・バーが、内側の本文のゾーンに優先する', () => {
+  it('ログの本文の中の `.pkc-md-rendered` のブロックへ直接ポインタが入っても、ログのゾーンに入りログのカードが光る(`closest` の最内に奪われない)', () => {
+    const rig = makeLog();
+    const inner = document.createElement('div');
+    inner.className = 'pkc-md-rendered';
+    const block = document.createElement('div');
+    block.className = 'pkc-md-block';
+    block.getBoundingClientRect = rectOf(100, 400, 400, 40);
+    inner.append(block);
+    rig.zone.append(inner);
+    expect(zoneOf(block)?.spec.zone, '優先順でログが先に当たらない').toBe('[data-pkc-log-days]');
+    glow = createNeonGlow(document, () => media(true));
+    block.dispatchEvent(pointer('pointerover', 300, 160)); // カード 1(top 160)の上
+    runFrame();
+    expect(rig.zone.isConnected && glow.inZone()).toBe(true);
+    expect(rig.cards[1]!.hasAttribute(NEAR_ATTR), 'ログのカードが光らない(内側の本文のゾーンに奪われた)').toBe(true);
+    expect(block.hasAttribute(NEAR_ATTR), 'ログのゾーンの中で本文のブロックを光らせた(二重)').toBe(false);
+  });
+
+  it('入れ子でない所は今までどおり(本文だけ → 本文のゾーン / 情報ペインの中の欄 → 情報ペイン)', () => {
+    document.body.innerHTML = '<div class="pkc-md-rendered"><div class="pkc-md-block" id="b"></div></div><div data-pkc-region="inspector"><input id="i"></div>';
+    expect(zoneOf(document.getElementById('b')!)?.spec.zone).toBe('.pkc-md-rendered');
+    expect(zoneOf(document.getElementById('i')!)?.spec.zone).toBe('[data-pkc-region="inspector"]');
+    expect(zoneOf(document.body)).toBeNull();
+  });
+});
+
 describe('🔴 画面に出ている候補だけ(IntersectionObserver)', () => {
   beforeEach(() => {
     ioInstances = [];
@@ -967,27 +994,52 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
   const forced = atBlock(css, '@media (forced-colors: active)').body;
   const outsideForced = css.replace(`@media (forced-colors: active) {${forced}}`, '');
 
+  /** 選択子の文字列を**含む**規則の宣言(`:not(a, b)` の `,` を含む選択子リストを読むため)。 */
+  const ruleHaving = (src: string, sel: string): string =>
+    [...src.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => m[1]!.replace(/\s+/g, ' ').includes(sel))
+      .map((m) => m[2]!)
+      .join('\n');
+  const TYPES = "[type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']";
+  const FOCUS_INPUT = `input:not(${TYPES}):focus-visible`;
+
   it('🔴 入力欄のフォーカスは `--neon` の線を全周に静止させる ── 既存の `outline` と二重にしない(outline は消す)', () => {
-    const d = blocksFor(outsideForced, 'input:focus-visible').join('\n');
+    const d = ruleHaving(outsideForced, FOCUS_INPUT);
     expect(d, '入力欄のフォーカスが neon の線でない').toMatch(/border-color:\s*var\(--neon\)/);
     expect(d, '全周の線(内側の影)が無い').toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--neon\)/);
     expect(d, 'outline が残っている(neon の線と二重になる)').toMatch(/outline:\s*none/);
     expect(d).not.toMatch(/outline:\s*\d/);
-    // 全体で `input:focus-visible` が outline を引く規則は、強制色のときだけ
-    const all = blocksFor(css, 'input:focus-visible');
-    const drawing = all.filter((b) => /outline:\s*\d+px solid/.test(b));
-    expect(drawing.length, '強制色の外にも outline を引く規則がある').toBe(1);
-    expect(blocksFor(forced, 'input:focus-visible').join('\n'), '強制色で outline へ戻していない').toMatch(/outline:\s*2px solid var\(--accent\)/);
+    // 強制色の外で、neon の規則と同じ対象に outline を引く規則は無い(輪郭を持たない型の規則は別の選択子)
+    expect(ruleHaving(outsideForced, 'select:focus-visible').match(/outline:\s*\d/), 'neon の規則に outline が混ざっている').toBeNull();
+    const forcedRule = ruleHaving(forced, ':is(input, textarea, select):not([data-pkc-field=\'append-input\']):focus-visible:focus-visible');
+    expect(forcedRule, '強制色で outline へ戻していない').toMatch(/outline:\s*2px solid var\(--accent\)/);
+    expect(forcedRule, '強制色で影を残している(二重)').toMatch(/box-shadow:\s*none/);
   });
 
-  it('🔴 textarea / select も同じ規則(3 つが 1 つの選択子リスト)', () => {
-    for (const el of ['textarea:focus-visible', 'select:focus-visible']) expect(blocksFor(outsideForced, el).join('\n')).toMatch(/var\(--neon\)/);
+  it('🔴 輪郭を持たない型(checkbox / radio / range / file / color)は neon の規則から除き、従来の outline のまま ── 除外は近接発光の入力欄(NEON_FIELDS)と同じ並び', () => {
+    const native = ruleHaving(outsideForced, `input:is(${TYPES}):focus-visible`);
+    expect(native, '除外型の焦点が outline でない(焦点が見えなくなる)').toMatch(/outline:\s*2px solid var\(--accent\)/);
+    expect(native).not.toMatch(/var\(--neon\)/);
+    const types = (src: string, head: string): string[] => {
+      const m = src.match(new RegExp(`${head}\\(([^)]*)\\)`));
+      return [...(m?.[1] ?? '').matchAll(/type=["']([a-z]+)["']/g)].map((x) => x[1]!).sort();
+    };
+    // ⚠ 実際の CSS の原文から読む(テスト側で組み立てた字を読むと、CSS が変わっても緑になる)
+    const actual = css.match(/input:not\([^)]*\):focus-visible/)?.[0] ?? '';
+    const css1 = types(actual, 'input:not');
+    const ts1 = types(NEON_FIELDS.split(', textarea')[0]!, 'input:not').filter((t) => t !== 'hidden');
+    expect(css1.length, '除外型が読めていない(空振り)').toBe(5);
+    expect(css1, 'CSS の除外と NEON_FIELDS の除外が食い違う').toEqual(ts1);
+  });
+
+  it('🔴 textarea / select も neon の規則(3 つが 1 つの選択子リスト)', () => {
+    for (const el of ['textarea:focus-visible', 'select:focus-visible']) expect(ruleHaving(outsideForced, el)).toMatch(/var\(--neon\)/);
   });
 
   it('🔴 追記欄の枠は `:focus-within` で neon の線 / 枠の中の打つ欄は線を重ねない(二重にしない)', () => {
     expect(decls("[data-pkc-field='append-form']:focus-within")).toMatch(/border-color:\s*var\(--neon\)/);
     expect(decls("[data-pkc-field='append-form']:focus-within")).not.toMatch(/var\(--accent\)/);
-    const inner = decls("[data-pkc-field='append-input']:focus-visible");
+    const inner = decls("[data-pkc-field='append-input'][data-pkc-field]:focus-visible");
     expect(inner).toMatch(/outline:\s*none/);
     expect(inner, '打つ欄が自分でも neon の線を引く(枠と二重)').toMatch(/box-shadow:\s*none/);
     expect(inner).toMatch(/border-color:\s*transparent/);
@@ -1001,10 +1053,10 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
   });
 
   it('🔴 フォーカスの枠は動きを減らす・指の端末などの問い(`GLOW_QUERY` / `prefers-reduced-motion` / `hover` / `pointer`)で外れない(静止の枠は残る)', () => {
-    const d = blocksFor(outsideForced, 'input:focus-visible');
-    expect(d.length).toBeGreaterThan(0);
+    expect(ruleHaving(outsideForced, FOCUS_INPUT).length).toBeGreaterThan(0);
     // フォーカスの規則を包む `@media` は無い(強制色の外では常に効く)
-    const at = css.indexOf('input:focus-visible,\ntextarea:focus-visible');
+    const at = css.indexOf(FOCUS_INPUT);
+    expect(at).toBeGreaterThan(0);
     const before = css.slice(Math.max(0, at - 400), at);
     expect(before.lastIndexOf('@media'), '直前に開いた @media がある').toBeLessThan(before.lastIndexOf('}'));
     for (const q of ['prefers-reduced-motion', '(hover', '(pointer']) expect(forced + css.slice(at, at + 300)).not.toContain(q);
