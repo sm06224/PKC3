@@ -4683,7 +4683,7 @@ describe('🔴 調べる相手の選び所(#992)', () => {
  *
  * ## user の物語(ここを見る)
  *
- * ①取り込んだ `売上.csv` を選ぶ ②調べる相手の一覧の**末尾**「もう 1 つ足す…」から
+ * ①取り込んだ `売上.csv` を選ぶ ②調べる相手の一覧の**末尾**「もう 1 つ追加…」から
  * 添付か手持ちの file を足す ③案内が「いま調べているのは 売上 / … の N つの表です」と言い直す
  * ④走らせると**全部の file が器へ届く** ⑤足した相手の **×** で外せる(片道にしない)
  * ⑥足す / 外す / 選び直すと、**作った表は消える**と字で言っている(確認は出さない)。
@@ -4706,12 +4706,12 @@ describe('🔴 複数の file を並べて引く(#918 段⑦)', () => {
   const extrasHost = (pane: HTMLElement): HTMLElement =>
     pane.querySelector<HTMLElement>('[data-pkc-field="sql-extras"]')!;
 
-  /** 「もう 1 つ足す…」から添付を足す。 */
+  /** 「もう 1 つ追加…」から添付を足す。 */
   const addAttached = (s: ReturnType<typeof setup>, lid: string): void => {
     s.sourceSel.selectedIndex = [...s.sourceSel.options].findIndex((o) => o.value === `add:${lid}`);
     s.sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
   };
-  /** 「手持ちのファイルを足す…」→ file を選ぶ(実機の 2 段と同じ)。 */
+  /** 「手持ちのファイルを追加…」→ file を選ぶ(実機の 2 段と同じ)。 */
   const addLocal = (s: ReturnType<typeof setup>, file: File): void => {
     s.sourceSel.selectedIndex = [...s.sourceSel.options].findIndex((o) => o.value === SQL_ADD_LOCAL_FILE_VALUE);
     s.sourceSel.dispatchEvent(new Event('change', { bubbles: true }));
@@ -5130,7 +5130,7 @@ describe('🔴 DuckDB で書いた後のつながり図(R1)', () => {
     await write(s, 'DROP TABLE 新');
     expect(s.schemaDuckDb).toHaveBeenCalledTimes(2);
     await write(s, 'INSERT INTO 新 VALUES (1)');
-    expect(s.schemaDuckDb, '行を足したのに、四角の行数が古いまま').toHaveBeenCalledTimes(3);
+    expect(s.schemaDuckDb, '行を追加したのに、四角の行数が古いまま').toHaveBeenCalledTimes(3);
   });
 
   it('対照群:読むだけの文では採り直さない(打鍵のたびに器を舐めない)', async () => {

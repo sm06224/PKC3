@@ -3,7 +3,7 @@
  * `build/office-wasm/patch-lo-qt-menu-scroll.py` を検める(#126 / #774 の**直し**)。
  *
  * 🔴 **直す物**: 書式(Format)など縦に長いメニューが 2 列に割れて下端で切れる。メニューは VCL ではなく Qt の `QMenu`
- * (`QtMenu.cxx`)で、wasm の style は `SH_Menu_Scrollable` が偽 = 画面に収まらないと列を足して割る。
+ * (`QtMenu.cxx`)で、wasm の style は `SH_Menu_Scrollable` が偽 = 画面に収まらないと列を追加して割る。
  * 直しは 2 か所: `SH_Menu_Scrollable` だけ真にする `QProxyStyle`(file scope)と、`QtMenu` が作る全部の `QMenu` が通る
  * `connectHelpSignalSlots` の末尾でそれを付ける。
  *

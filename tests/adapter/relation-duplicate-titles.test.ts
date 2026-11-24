@@ -1,8 +1,8 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **同じ題名のノートが 2 件あっても、つながりを足す相手を見分けて選べる**(Gemini 裁定 = #1163 の依頼 45 の 3、#1657)。
+ * 🔴 **同じ題名のノートが 2 件あっても、つながりを追加相手を見分けて選べる**(Gemini 裁定 = #1163 の依頼 45 の 3、#1657)。
  *
- * 直す前は、候補の一覧に同じ字が並ぶだけで、足すときは「題名を分けてから足してください」で止まった。
+ * 直す前は、候補の一覧に同じ字が並ぶだけで、足すときは「題名を分けてから追加してください」で止まった。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta, Relation } from '../../src/core/model/entry-meta';
@@ -74,7 +74,7 @@ describe('候補の見分け(純粋な部分)', () => {
   });
 });
 
-describe('情報ペインの候補と「つながりを足す」', () => {
+describe('情報ペインの候補と「つながりを追加」', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
   });

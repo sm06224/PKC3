@@ -2789,9 +2789,9 @@ test('🔴 目次を見せて起動すると、アプリがノートの一覧を
 });
 
 /**
- * 🔴 **リンクを足して、リンク先の印を取り込む**(#856 段②)。
+ * 🔴 **リンクを追加して、リンク先の印を取り込む**(#856 段②)。
  *
- * ⚠ **この動線には検査が 1 件も無かった** ── 「リンクを足す」(#401)も、
+ * ⚠ **この動線には検査が 1 件も無かった** ── 「リンクを追加」(#401)も、
  *   段② で足した「リンク先の印を取り込む」も、smoke を全数 grep して **0 件**だった。
  *   🔑 CLAUDE.md の「**新しく作った動線に検査が 1 つも無くても、全量は緑**」そのもの。
  *
@@ -2805,19 +2805,19 @@ test('🔴 目次を見せて起動すると、アプリがノートの一覧を
  * ⚠ **起動を 1 つ増やした**(491 → 492 / 予算 500)。理由:URL のタイルを作る
  *   smoke が**1 本も無い**ので、既に在る道中に assert を足すことができない。
  */
-test('🔴 リンクを足して、リンク先の印を取り込む (#856 段②)', async ({ page }) => {
+test('🔴 リンクを追加して、リンク先の印を取り込む (#856 段②)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await openBrowse(page, 'launcher');
 
-  // ① 「リンクを足す」── 足し先はこのアプリ自身(外へ出ない)
+  // ① 「リンクを追加」── 足し先はこのアプリ自身(外へ出ない)
   const here = new URL(page.url()).origin + new URL(page.url()).pathname;
   await page.locator('[data-pkc-field="launcher-add-name"]').fill('じぶん');
   await page.locator('[data-pkc-field="launcher-add-url"]').fill(here);
   await clickReal(page, '[data-pkc-field="launcher-add-go"]');
 
   const tile = page.locator('[data-pkc-field="launcher-list"] [data-pkc-tile-kind="url"]');
-  await expect(tile, 'リンクを足したのにタイルが出ない').toHaveCount(1);
+  await expect(tile, 'リンクを追加したのにタイルが出ない').toHaveCount(1);
 
   // ② 1 回押すと、右の列にそのノートが出る(2 回押すと開く、の 1 回目)
   await tile.first().click();

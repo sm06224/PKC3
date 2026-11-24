@@ -4,7 +4,7 @@
  *
  * 🔴 ここで守るのは **「口を通らない経路が生えていないこと」**である。
  * コピーの口は `platform/clipboard.ts` の 2 つだけで、そこに 13 か所が集まっている ──
- * ⚠ 誰かが `navigator.clipboard.writeText` を**直に**呼ぶ 1 行を足した日、
+ * ⚠ 誰かが `navigator.clipboard.writeText` を**直に**呼ぶ 1 行を追加した日、
  * その経路は**黙って履歴に載らなくなる**(画面は何も変わらないので、誰も気づけない)。
  */
 import { readdirSync, readFileSync } from 'node:fs';

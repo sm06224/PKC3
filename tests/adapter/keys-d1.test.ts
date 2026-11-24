@@ -8,7 +8,7 @@
  * - 183 `F12` はフラグの既定から外れた
  * - 185 探す欄で字が無いときの `Esc` は欄から出る(字が在るときは消すだけ)
  * - 132 `Ctrl+Z` がフォルダの表の行で「ゴミ箱へ移した直後の元に戻す」に当たる(本文の編集の `Ctrl+Z` とは別の場面)
- * - 313 / 117-3 割り当てを断る(ブラウザが先に取るキー / 文字を打つ欄の編集キー)
+ * - 313 / 117-3 割り当てを断る(ブラウザが先に取るキー / 文字を入力する欄の編集キー)
  * - 153 ノートの並べ替えを鍵と「操作を探す」から呼べる(既定のキーは置かない)
  *
  * ⚠ 守っていない物:実ブラウザでの `Alt+←` の挙動(mac の Option+← の単語移動)。happy-dom は既定の動きを持たないので、
@@ -213,11 +213,11 @@ describe('313 / 117-3: 割り当てを断る', () => {
     expect(store.addBinding('create-entry', 'Mod+N')?.kind).toBe('refused');
   });
 
-  it('🔴 文字を打つ欄の編集キーは、打つ欄で効く操作には割り当てられない(表の操作・自分の既定は別)', () => {
+  it('🔴 文字を入力する欄の編集キーは、打つ欄で効く操作には割り当てられない(表の操作・自分の既定は別)', () => {
     for (const k of ['Mod+Backspace', 'Mod+ArrowLeft', 'Alt+Delete', 'Mod+Home', 'Mod+End', 'Alt+ArrowUp']) {
       const p = validateBinding('inline-calc', k, {});
       expect(p?.kind, `${k} を断っていない`).toBe('refused');
-      expect(p?.message).toContain('文字を打つ欄の編集に使うキー');
+      expect(p?.message).toContain('文字を入力する欄の編集に使うキー');
     }
     // 打っている間も効く全域の操作も同じ
     expect(validateBinding('insert-date', 'Mod+Backspace', {})?.kind).toBe('refused');

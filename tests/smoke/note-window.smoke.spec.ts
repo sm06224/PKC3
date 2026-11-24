@@ -676,7 +676,7 @@ test('🔴 付箋を開いた直後、カーソルは追記欄に在る (#690 I4
   await expect(
     win.locator('[data-pkc-region="status"]'),
     '打ちかけが在るのに理由が出ない',
-  ).toContainText('打ちかけの字が残っています');
+  ).toContainText('入力途中の字が残っています');
   expect(win.isClosed(), '打ちかけが在るのに付箋が閉じた').toBe(false);
   // 空にすれば閉じる
   await win.locator('[data-pkc-field="append-input"]').fill('');

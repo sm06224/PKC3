@@ -257,7 +257,7 @@ export class InspectorRenderer {
     kind: HTMLSelectElement;
     add: HTMLButtonElement;
   } | null = null;
-  /** 「つながり」の行(`dd`)。つながりを足す欄をこの中に置く(依頼 77-6 C)。 */
+  /** 「つながり」の行(`dd`)。つながりを追加欄をこの中に置く(依頼 77-6 C)。 */
   private relDd: HTMLElement | null = null;
   /** タグを打つ欄の器(#494)。⚠ 打てない状況では**畳む**(押せない物を出さない)。 */
   private tagForm: HTMLElement | null = null;
@@ -1911,7 +1911,7 @@ export class InspectorRenderer {
       dl.append(dt, dd);
       this.rows.set(field, dd);
       /**
-       * 🔴 **つながりの行も器を 2 つに割る**(台帳 #1852 / 依頼 77-6 C)。⚠ 直す前は、つながりを足す欄が
+       * 🔴 **つながりの行も器を 2 つに割る**(台帳 #1852 / 依頼 77-6 C)。⚠ 直す前は、つながりを追加欄が
        *   ペインのいちばん下(「つながりの図」のさらに下)にあり、スクロールしないと届かなかった。
        *   「タグ」と同じく、**一覧と足す欄を同じ行に置く**(見る場所と足す場所を離さない)。
        * ⚠ 一覧は描き直しのたびに作り直すが、**打つ欄は作り直さない**(打ちかけの相手名と焦点が消える)。
@@ -1933,14 +1933,14 @@ export class InspectorRenderer {
         input.type = 'text';
         input.setAttribute('data-pkc-field', 'tag-add-input');
         input.setAttribute('list', 'pkc-tag-candidates');
-        input.placeholder = 'タグを打つ';
-        input.setAttribute('aria-label', 'このノートに足すタグ');
+        input.placeholder = 'タグを入力';
+        input.setAttribute('aria-label', '追加するタグ');
         const cands = document.createElement('datalist');
         cands.id = 'pkc-tag-candidates';
         this.tagCandidates = cands;
-        const add = iconButton('add-tag', 'タグを足す', null);
+        const add = iconButton('add-tag', 'タグを追加', null);
         add.title =
-          'このノートにタグを足します(本文の先頭の「この文書の情報」に入ります)。井桁を付けて空白で並べると、まとめて足せます';
+          'このノートにタグを追加します(本文の先頭の「この文書の情報」に入ります)。井桁を付けて空白で並べると、まとめて追加できます';
         form.append(input, cands, add);
         dd.append(chips, form);
         this.rows.set('inspector-tag-chips', chips);
@@ -2033,7 +2033,7 @@ export class InspectorRenderer {
     row('本文のタグ', 'inspector-body-tags');
     /**
      * 🔴 **タグを「その場で打つ」**(#494。user 指摘 2026-08-27
-     * 「**直感的にここにタグを打つ!って感じの動作じゃなくて yamlfrontmatter なのは
+     * 「**直感的にここにタグを入力!って感じの動作じゃなくて yamlfrontmatter なのは
      * 問題だ。しかも設定動線がよくわからん**」)。
      *
      * ⚠ **打つ口が無かったわけではない** ── 数えたら 3 経路あった:
@@ -2142,7 +2142,7 @@ export class InspectorRenderer {
       opt.textContent = RELATION_LABELS[k];
       kind.append(opt);
     }
-    const add = iconButton('add-relation', 'つながりを足す', null);
+    const add = iconButton('add-relation', 'つながりを追加', null);
     add.title = '選んでいるノートから、つなぐ先のノートへつながりを付けます';
     addBar.append(target, list, kind, add);
     // 🔴 つながりの行の中に置く(上の `row('つながり', …)` が用意した行。無ければ従来どおりペインの末尾)

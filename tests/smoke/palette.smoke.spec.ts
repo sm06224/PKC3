@@ -136,7 +136,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
    * ⑧ 🔴 **場面ごとに足した操作(#582 段③ 第 1 群)が、実ブラウザで走る**。
    * ⚠ 同じ起動の続き(新しい起動を足さない)。見るのは 3 つ:
    *   ア 開いていない場面の操作は**灰色 + 理由**(予定の画面を開いていない)
-   *   イ 欄が先に要る操作(タグを足す)は、空なら**欄へ移り**、字を入れて呼び直すと**足せる**
+   *   イ 欄が先に要る操作(タグを追加)は、空なら**欄へ移り**、字を入れて呼び直すと**足せる**
    *   ウ 「今日を開く」は、押しボタンと同じく今日のノートを作って開く
    */
   await createEntry(page, 'text');
@@ -147,7 +147,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
     await page.locator('[data-pkc-field="palette-filter"]').fill(q);
   };
   const rowOf = (id: string) => page.locator(`[data-pkc-field="palette-row"][data-pkc-command="${id}"]`);
-  await ask('予定を足す');
+  await ask('予定を追加');
   await expect(rowOf('schedule-quick-add'), '予定の画面を開いていないのに押せる顔').toBeDisabled();
   await expect(rowOf('schedule-quick-add').locator('[data-pkc-field="palette-why"]')).toContainText(
     '予定の画面を開いているとき',
@@ -161,7 +161,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await expect(dialog).toBeHidden();
 
   const tagField = page.locator('[data-pkc-field="tag-add-input"]');
-  await ask('タグを足す');
+  await ask('タグを追加');
   await expect(rowOf('add-tag'), 'ノートを選んでいるのに押せない').toBeEnabled();
   await expect(page.locator('[data-pkc-field="palette-row"]').first()).toHaveAttribute('data-pkc-command', 'add-tag');
   /**
@@ -191,7 +191,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await expect(dialog).toBeHidden();
   await expect(tagField, '欄が空なのに、欄へ移っていない').toBeFocused();
   await page.keyboard.type('烏龍');
-  await ask('タグを足す');
+  await ask('タグを追加');
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
   await expect(
@@ -209,7 +209,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
     .toBe(listedBefore + 1);
 
   /**
-   * ⑩ 🔴 **打っている場所に入れる操作(#582 段③ 第 3 群)が、1 面のライブ編集で「打っていた場所」に入る**。
+   * ⑩ 🔴 **カーソルの位置に入れる操作(#582 段③ 第 3 群)が、1 面のライブ編集で「打っていた場所」に入る**。
    * ⚠ 同じ起動の続き(新しい起動を足さない)。一覧を閉じた直後は欄の選択が先頭(0,0)へ戻る(実ブラウザで測った)ので、
    *   戻していなければ**全部が本文の先頭に入る**。`hello world` の 5 字目(`hello` と `world` の間)に caret を置いて呼ぶ。
    *   見るのは 5 つ:日付 / アイコン / 図(caret)/ ノートリンク(前から登記済みで同じ穴を持っていた)と、図(選んだ範囲)。
@@ -239,7 +239,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   };
   // 日付
   await caretAt('hello world', 5);
-  await callByName('日付を入れる', 'insert-date');
+  await callByName('日付を挿入', 'insert-date');
   await page.locator('[data-pkc-field="pick-shortcut"]').first().click();
   await page.locator('[data-pkc-field="dialog-ok"]').click();
   await expect(dialog).toBeHidden();
@@ -248,7 +248,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   );
   // アイコン
   await caretAt('hello world', 5);
-  await callByName('アイコンを入れる', 'insert-icon');
+  await callByName('アイコンを挿入', 'insert-icon');
   const iconBtn = page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name]').first();
   const iconName = await iconBtn.getAttribute('data-pkc-icon-name');
   expect(iconName, '前提:押したアイコンの名前が読めない').toBeTruthy();
@@ -257,7 +257,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await expect(liveRow, 'アイコンが打っていた場所に入っていない(先頭に入った?)').toHaveValue(`hello:${iconName}: world`);
   // 図(caret): 種類を聞かれ、選ぶとそこへ入る
   await caretAt('hello world', 5);
-  await callByName('図を入れる', 'insert-diagram');
+  await callByName('図を挿入', 'insert-diagram');
   await page.locator('[data-pkc-field="pick-diagram"]').first().click();
   await expect(dialog).toBeHidden();
   // ⚠ 器が閉じる(`open` が外れる)のは、本文へ入る**より前**(`close` event は後の task で来て、答えを返してから書く)
@@ -269,7 +269,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   expect(diagramValue.trimEnd().endsWith('world'), `後ろの字が動いた: ${diagramValue}`).toBe(true);
   // 図(選んだ範囲): 一覧を出さずに、選んだ範囲だけを囲む
   await caretAt('あいうえお', 1, 4);
-  await callByName('図を入れる', 'insert-diagram');
+  await callByName('図を挿入', 'insert-diagram');
   await expect(dialog).toBeHidden();
   // ⚠ 上と同じ:パレットが閉じたのを見ても、命令が本文へ書くのはその後
   await expect(liveRow, '選んだ範囲が図の囲みにならない').toHaveValue(/```mermaid/u);
@@ -277,7 +277,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   expect(wrapped, `選んだ範囲(いうえ)が図の囲みになっていない: ${wrapped}`).toMatch(/^あ\n?```mermaid\nいうえ\n```\n?お$/u);
   // ノートリンク(前から登記済み。同じ穴)
   await caretAt('hello world', 5);
-  await callByName('ノートリンクを入れる', 'insert-entry-link');
+  await callByName('ノートリンクを挿入', 'insert-entry-link');
   await page.locator('[data-pkc-field="entry-pick-row"]').first().click();
   await expect(dialog).toBeHidden();
   await expect(liveRow, 'リンクが入っていない').not.toHaveValue('hello world');
@@ -289,7 +289,7 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
   await caretAt('hello world', 5);
   await clickReal(page, '[data-pkc-action="open-palette"]');
   await expect(dialog, 'マウスで操作を探すが開かない').toBeVisible();
-  await page.locator('[data-pkc-field="palette-filter"]').fill('アイコンを入れる');
+  await page.locator('[data-pkc-field="palette-filter"]').fill('アイコンを挿入');
   await expect(rowOf('insert-icon'), 'マウスで開くと、本文を打っている間なのに押せない').toBeEnabled();
   await page.keyboard.press('Enter');
   const mouseIcon = page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name]').first();
@@ -312,14 +312,14 @@ test('🔴 名前で探して実行できる ── 開く / 絞る / Enter で�
     await expect(rowBtn, `左の一覧に「${q}」が出ていない`).toBeEnabled();
     await rowBtn.click();
   };
-  await callFromLeft('>日付を入れる', 'insert-date');
+  await callFromLeft('>日付を挿入', 'insert-date');
   await page.locator('[data-pkc-field="pick-shortcut"]').first().click();
   await page.locator('[data-pkc-field="dialog-ok"]').click();
   await expect(dialog).toBeHidden();
   await expect(liveRow, '左の探す欄から呼んだ日付が、打っていた場所に入っていない').toHaveValue(
     /^hello @\d{4}-\d{2}-\d{2} world$/u,
   );
-  await callFromLeft('>アイコンを入れる', 'insert-icon');
+  await callFromLeft('>アイコンを挿入', 'insert-icon');
   const leftIcon = page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name]').first();
   const leftIconName = await leftIcon.getAttribute('data-pkc-icon-name');
   await leftIcon.click();
@@ -669,14 +669,14 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
   await manualWin.close();
 
   /**
-   * 🔴 **2 列の編集でも、マウスで操作を探すを開いて「アイコンを入れる」を呼ぶと、打っていた場所に入る**(#582 段③ 第 3 群)。
+   * 🔴 **2 列の編集でも、マウスで操作を探すを開いて「アイコンを挿入」を呼ぶと、打っていた場所に入る**(#582 段③ 第 3 群)。
    * ⚠ 同じ起動の続き。ボタンを押すと焦点が欄からボタンへ移る道(キーで開く道は上で見た)。
    */
   await ta.fill('hello world');
   await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(5, 5));
   await clickReal(page, '[data-pkc-action="open-palette"]');
   await expect(dialog, 'マウスで操作を探すが開かない(2 列)').toBeVisible();
-  await filter.fill('アイコンを入れる');
+  await filter.fill('アイコンを挿入');
   await expect(
     page.locator('[data-pkc-field="palette-row"][data-pkc-command="insert-icon"]'),
     'マウスで開くと押せない(2 列)',
@@ -692,7 +692,7 @@ test('🔴 選んでからパレットで記法を入れると、選んだ範囲
   await ta.fill('hello world');
   await ta.evaluate((el) => (el as HTMLTextAreaElement).setSelectionRange(5, 5));
   await clickReal(page, '[data-pkc-field="entry-filter"]');
-  await page.locator('[data-pkc-field="entry-filter"]').fill('>アイコンを入れる');
+  await page.locator('[data-pkc-field="entry-filter"]').fill('>アイコンを挿入');
   await page.locator('[data-pkc-region="sidebar"] [data-pkc-command="insert-icon"]').click();
   const leftColIcon = page.locator('[data-pkc-field="pick-body-icon"] button[data-pkc-icon-name]').first();
   const leftColIconName = await leftColIcon.getAttribute('data-pkc-icon-name');

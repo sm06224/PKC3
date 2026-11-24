@@ -344,17 +344,18 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: '別のウィンドウ(予定表・連絡先)ではウィンドウごと閉じます',
   },
   /**
-   * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+   * 🔴 **日付を挿入道具**(user 指示 2026-08-23)。
    * ⚠ 近道であって**主の口ではない** ── 主は書式の帯のボタン(マウスだけで完結する)。
    * ⚠ `Mod+;` は表計算系の「今日を入れる」と同じ位置 ── 覚え直さなくてよい。
    */
   {
     id: 'insert-date',
-    label: '日付を入れる',
+    label: '日付を挿入',
     contexts: ['global'],
     defaults: ['Mod+Semicolon'],
     whileTyping: true,
     note: '編集中だけ効きます(本文のカーソルの位置に入ります)',
+    alias: '日付を入れる 入れる',
   },
   /**
    * 🔴 **いまの日時を 1 打鍵で入れる 5 つ**(#1966 2-C。PKC2 の作業ログの近道を戻す)。
@@ -365,52 +366,52 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    * ⚠ 文脈は本文の欄・追記の欄・章の欄だけ(`editor` / `row` / `append`)── 編集していないときの `Ctrl + D`(ブラウザのブックマーク)は奪わない。
    * ⚠ 日本語配列の `Ctrl + Shift + ;` は `Ctrl + +`(拡大)と同じ打鍵なので、日時の別名は足さない(拡大を奪わない)。
    *   日本語配列で日時を入れるのは `Ctrl + Shift + D`(曜日つき)か、操作を探す。
-   * ⚠ `Ctrl + ;`(日付を入れる)は予定に載る `@日付` を小さなウィンドウで選ぶ別の命令。こちらは選ばずにその場の時刻を入れる。
+   * ⚠ `Ctrl + ;`(日付を挿入)は予定に載る `@日付` を小さなウィンドウで選ぶ別の命令。こちらは選ばずにその場の時刻を入れる。
    */
   {
     id: 'insert-now-time',
-    label: 'いまの時刻を入れる',
+    label: 'いまの時刻を挿入',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+Quote'],
     whileTyping: true,
     note: 'カーソルの位置に 14:05:30 の形で入れます',
-    alias: 'じこく 時間 タイム time',
+    alias: 'じこく 時間 タイム time いまの時刻を入れる 入れる',
   },
   {
     id: 'insert-now-datetime',
-    label: 'いまの日時を入れる',
+    label: 'いまの日時を挿入',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+Shift+Semicolon'],
     whileTyping: true,
     note: 'カーソルの位置に 2026/11/15 14:05:30 の形で入れます',
-    alias: 'にちじ 日付 時刻 datetime',
+    alias: 'にちじ 日付 時刻 datetime いまの日時を入れる 入れる',
   },
   {
     id: 'insert-now-date-weekday',
-    label: '曜日つきの日付を入れる',
+    label: '曜日つきの日付を挿入',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+D'],
     whileTyping: true,
     note: 'カーソルの位置に 26/11/15 日 の形で入れます(今日の日付と曜日)',
-    alias: 'ようび 日付 date',
+    alias: 'ようび 日付 date 曜日つきの日付を入れる 入れる',
   },
   {
     id: 'insert-now-datetime-weekday',
-    label: '曜日つきの日時を入れる',
+    label: '曜日つきの日時を挿入',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+Shift+D'],
     whileTyping: true,
     note: 'カーソルの位置に 26/11/15 日 14:05:30 の形で入れます',
-    alias: 'ようび にちじ 日付 時刻',
+    alias: 'ようび にちじ 日付 時刻 曜日つきの日時を入れる 入れる',
   },
   {
     id: 'insert-now-iso',
-    label: 'いまの日時を ISO 8601 で入れる',
+    label: 'いまの日時を ISO 8601 で挿入',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Mod+Alt+Shift+D'],
     whileTyping: true,
     note: 'カーソルの位置に 2026-11-15T14:05:30+09:00 の形で入れます(時差つき)',
-    alias: 'あいえすおー 日時 iso8601 timestamp',
+    alias: 'あいえすおー 日時 iso8601 timestamp いまの日時を ISO 8601 で入れる 入れる',
   },
   /**
    * 🔴 **その場で計算する**(#766 D-2、2026-09-08)。
@@ -442,11 +443,12 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'insert-entry-link',
-    label: 'ノートリンクを入れる',
+    label: 'ノートリンクを挿入',
     contexts: ['global'],
     defaults: ['Mod+Shift+K'],
     whileTyping: true,
     note: '編集中だけ効きます(題名で探して、カーソルの位置にリンクが入ります)',
+    alias: 'ノートリンクを入れる 入れる',
   },
   /**
    * 🔴 **雛形を入れる**(#196 / B-2 段②-b)。
@@ -456,11 +458,12 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'insert-snippet',
-    label: 'テンプレートを入れる',
+    label: 'テンプレートを挿入',
     contexts: ['global'],
     defaults: ['Mod+Slash'],
     whileTyping: true,
     note: '編集中だけ効きます(本文のカーソルの位置に入ります)',
+    alias: 'テンプレートを入れる 入れる',
   },
   {
     id: 'toggle-replace',
@@ -1040,19 +1043,19 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
    */
   {
     id: 'add-relation',
-    label: 'つながりを足す',
+    label: 'つながりを追加',
     contexts: ['global'],
     defaults: [],
     note: 'つなぐ先の題名を入れて、選んでいるノートにつながりを付けます。欄が空なら、その欄へ移ります(ノートを選んでいるときだけ効きます)',
-    alias: 'つながり リンク 関連 関係',
+    alias: 'つながり リンク 関連 関係 つながりを足す 足す',
   },
   {
     id: 'add-tag',
-    label: 'タグを足す',
+    label: 'タグを追加',
     contexts: ['global'],
     defaults: [],
-    note: 'このノートにタグを足します。欄が空なら、その欄へ移ります(ノートを選んでいるときだけ効きます)',
-    alias: 'タグ 付ける ラベル 分類',
+    note: 'このノートにタグを追加します。欄が空なら、その欄へ移ります(ノートを選んでいるときだけ効きます)',
+    alias: 'タグ 付ける ラベル 分類 タグを足す 足す',
   },
   {
     id: 'append-entry',
@@ -1190,11 +1193,11 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'schedule-quick-add',
-    label: '予定を足す',
+    label: '予定を追加',
     contexts: ['global'],
     defaults: [],
-    note: '予定の画面で、書いた字と日付から予定を 1 件足します。欄が空なら、その欄へ移ります(予定の画面を開いているときだけ効きます)',
-    alias: '予定 追加 スケジュール カレンダー タスク',
+    note: '予定の画面で、書いた字と日付から予定を 1 件追加します。欄が空なら、その欄へ移ります(予定の画面を開いているときだけ効きます)',
+    alias: '予定 追加 スケジュール カレンダー タスク 予定を足す 足す',
   },
   {
     id: 'schedule-today',
@@ -1485,11 +1488,11 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'dual-tab-add',
-    label: 'タブを足す',
+    label: 'タブを追加',
     contexts: ['global'],
     defaults: [],
     note: '2 ペインで、いま使っている側に、いまの場所をもう 1 枚のタブで開きます(2 ペインを開いていて、タブが上限に届いていないときだけ効きます)',
-    alias: '2 ペイン ファイラ タブ 追加 新しいタブ',
+    alias: '2 ペイン ファイラ タブ 追加 新しいタブ タブを足す 足す',
   },
   {
     id: 'clear-kind-filter',
@@ -1525,11 +1528,11 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'contacts-quick-add',
-    label: '連絡先を足す',
+    label: '連絡先を追加',
     contexts: ['global'],
     defaults: [],
     note: '名前を題名にしたノートを作ります。名前の欄が空なら、その欄へ移ります(連絡先の画面を開いているときだけ効きます)',
-    alias: '連絡先 追加 電話 メール vCard',
+    alias: '連絡先 追加 電話 メール vCard 連絡先を足す 足す',
   },
   {
     id: 'export-vcards',
@@ -1562,11 +1565,11 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'add-url-tile',
-    label: 'リンクを足す',
+    label: 'リンクを追加',
     contexts: ['global'],
     defaults: [],
-    note: 'アプリの一覧に、リンクを 1 つ足します。アドレスの欄が空なら、その欄へ移ります(アプリの画面を開いているときだけ効きます)',
-    alias: 'アプリ リンク 追加 URL ブックマーク',
+    note: 'アプリの一覧に、リンクを 1 つ追加します。アドレスの欄が空なら、その欄へ移ります(アプリの画面を開いているときだけ効きます)',
+    alias: 'アプリ リンク 追加 URL ブックマーク リンクを足す 足す',
   },
   {
     id: 'pc-pick-folder',
@@ -1585,18 +1588,18 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: '履歴 版 閉じる',
   },
   /**
-   * 🔴 **名前で呼べなかった「高」の操作 第 3 群**(#582 段③。第 1 群・第 2 群と同じ作法)── 打っている場所に入れる 2 件。
+   * 🔴 **名前で呼べなかった「高」の操作 第 3 群**(#582 段③。第 1 群・第 2 群と同じ作法)── カーソルの位置に入れる 2 件。
    *   第 2 群では、一覧を閉じた直後に位置が先頭へ戻って本文の先頭に入るので見送った。いまは一覧を開いたときの範囲を戻してから押す。
    * 🔑 命令 id は押しボタンの `data-pkc-action` と同じ綴り、字は画面のボタンの字と同じ、鍵は付けない(`KEYLESS` に足すこと)。
    *   末尾の「(…のときだけ効きます)」が押せない間の理由になる。
    */
   {
     id: 'insert-diagram',
-    label: '図を入れる',
+    label: '図を挿入',
     contexts: ['global'],
     defaults: [],
     note: '本文を選んでいれば選んだ範囲を図のブロックにし、選んでいなければ図の種類を選んで、カーソルの位置に入れます(ノートを編集していて、本文の書式バーが出ているときだけ効きます)',
-    alias: '図 ダイアグラム フローチャート シーケンス mermaid',
+    alias: '図 ダイアグラム フローチャート シーケンス mermaid 図を入れる 入れる',
   },
   {
     id: 'insert-callout',
@@ -1608,11 +1611,11 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'insert-icon',
-    label: 'アイコンを入れる',
+    label: 'アイコンを挿入',
     contexts: ['global'],
     defaults: [],
     note: 'アイコンの一覧から選んで、カーソルの位置に入れます(ノートを編集していて、本文の書式バーが出ているときだけ効きます)',
-    alias: 'アイコン 絵 マーク 記号',
+    alias: 'アイコン 絵 マーク 記号 アイコンを入れる 入れる',
   },
   /**
    * 🔴 **開いているノートを別のウィンドウで開く**(#690 I5、2026-09-04)。
@@ -2620,7 +2623,7 @@ export const REFUSED: readonly string[] = [
  */
 const LEGACY_KEPT: ReadonlyArray<readonly [commandId: string, chord: string]> = [['create-entry', 'Mod+N']];
 
-/** 文字を打つ欄の編集に使うキー(`Ctrl` / `Alt` と組むと、単語・行・文書の端への移動や削除になる)。 */
+/** 文字を入力する欄の編集に使うキー(`Ctrl` / `Alt` と組むと、単語・行・文書の端への移動や削除になる)。 */
 const FIELD_EDIT_KEYS: ReadonlySet<string> = new Set([
   'ArrowLeft',
   'ArrowRight',
@@ -2694,14 +2697,14 @@ export function validateBinding(
   }
   const me = findCommand(commandId);
   if (me === null) return { kind: 'unreadable', message: '知らないコマンドです' };
-  // 🔴 **文字を打つ欄の編集キーは、打つ欄で効く操作へ割り当てない**(#1163 依頼 117-3 = A)。`Ctrl+Backspace`(単語ごと消す)・
+  // 🔴 **文字を入力する欄の編集キーは、打つ欄で効く操作へ割り当てない**(#1163 依頼 117-3 = A)。`Ctrl+Backspace`(単語ごと消す)・
   //   `Ctrl+←`(単語ごと動く)・`Ctrl+Home` などを奪うと、その欄で元の働きが効かなくなる。素の文字キーを断るのと同じ向き。
   //   ⚠ 自分の既定は断らない(`nav-back` の `Alt+←` など。上の `ownDefault`)。範囲は「欄の中で効く操作」(`typesInField`)だけ ──
   //   表やペインの中だけで効く操作は、欄が無いので奪う相手が居ない。
   if (!stored && !ownDefault && (c.mod || c.alt) && FIELD_EDIT_KEYS.has(c.key) && actsInField(me)) {
     return {
       kind: 'refused',
-      message: '文字を打つ欄の編集に使うキーです。割り当てると、欄でこのキーの元の働き(単語ごとの移動や削除など)が効かなくなります',
+      message: '文字を入力する欄の編集に使うキーです。割り当てると、欄でこのキーの元の働き(単語ごとの移動や削除など)が効かなくなります',
     };
   }
   for (const other of KEY_COMMANDS) {

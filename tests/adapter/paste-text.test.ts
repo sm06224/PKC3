@@ -527,7 +527,7 @@ describe('貼付の切替(設定)と診断(フラグ)', () => {
   it('⚠ 行頭に貼るときは、余計な改行を足さない', () => {
     const { ta } = setup();
     ta.dispatchEvent(pasteEvent({ 'text/plain': '品名\t数\nりんご\t3' }));
-    expect(ta.value.startsWith('```tsv'), '行頭なのに改行を足した').toBe(true);
+    expect(ta.value.startsWith('```tsv'), '行頭なのに改行を追加した').toBe(true);
   });
 
   /**
@@ -550,7 +550,7 @@ describe('貼付の切替(設定)と診断(フラグ)', () => {
   it('⚠ 行頭に貼るときは改行を足さない / 字で始まる変換結果(段落)は行の途中のまま', () => {
     const a = setup();
     a.ta.dispatchEvent(pasteEvent({ 'text/html': '<h2>題</h2>', 'text/plain': '題' }));
-    expect(a.ta.value, '行頭なのに改行を足した').toBe('## 題');
+    expect(a.ta.value, '行頭なのに改行を追加した').toBe('## 題');
     // 対照群: 段落(`<b>` だけ)は行の途中に入る ── 改行を足さない
     const b = setup();
     b.ta.value = '値は ';

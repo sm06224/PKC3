@@ -15,7 +15,7 @@
  * 予定タブの「足す」と目盛りの作成(`addScheduleItemChecked`、`binder.ts`)/
  * 履歴の「この版に戻す」(`restore-revision`、`binder.ts`。#1087)/
  * 塊を別のノートへ持っていく「⠿」(元と先の両方。`actUnlessEditedElsewhere`、#1087)/
- * 表の行・列を足す「＋」と消す「×」(`shape-cell`。#1087)/
+ * 表の行・列を追加す「＋」と消す「×」(`shape-cell`。#1087)/
  * 板の付箋の操作(置く・前へ出す・形・色・線の太さ・矢じり・文字の大きさ・回す・グループ・位置と大きさ。
  *   `placeEditedElsewhereGate`、`binder.ts`。#1087)/
  * 表の升の書換(`edit-cell` の確定。断ったら打った字を知らせに残す)と、表の形変え(「表にする」`applyTableFormat`)(#1087)/

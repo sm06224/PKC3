@@ -347,7 +347,7 @@ describe('#121 の計装(menu-trace)── 他の patch と同じ行を触らな
         .join('\n');
       return /["']vcl\/(qt5\/QtMenu|source\/window\/menu)\.cxx["']/.test(code);
     });
-    // 🔴 #1344(2026-10-05): `patch-lo-uev-trace.py` が `QtMenu.cxx` に `exec-ret` の 1 行を足すようになった。
+    // 🔴 #1344(2026-10-05): `patch-lo-uev-trace.py` が `QtMenu.cxx` に `exec-ret` の 1 行を追加すようになった。
     //    錨の区間が重ならないこと・両順で出力が同一なことは `tests/office-uev-trace-patch.test.ts`
     //    (「idles-trace / menu-trace の錨と区間が交わらない」)が見る。⚠ 3 本目が増えたら、そちらへ足す。
     //    (一時 3 本になったが、#1344 で足した LO 側の直しは効かなかったので外した = 2 本へ戻った。真因は Qt 側。)

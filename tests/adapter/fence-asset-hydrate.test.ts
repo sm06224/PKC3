@@ -234,7 +234,7 @@ describe('#444 段① 憶えが効いているか(編集中)', () => {
     const ta = root.querySelector<HTMLTextAreaElement>('[data-pkc-field="editor-body"]');
     expect(ta, '前提: 2 列の編集欄が出ていない').not.toBeNull();
     /**
-     * ⚠ **囲みの上に行を足す** ── 囲みそのものを変えると別の塊になるので、
+     * ⚠ **囲みの上に行を追加す** ── 囲みそのものを変えると別の塊になるので、
      *   「同じ囲みが作り直された」を測れない。位置がずれるだけで塊は作り直される。
      */
     for (let i = 1; i <= 3; i += 1) {

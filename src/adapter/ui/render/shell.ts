@@ -481,7 +481,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
    * ⚠ 指だけの端末には吹き出しが出ない ── そこは既存の「操作を探す」(左下)が入口である。
    */
   filter.title =
-    '題名と本文から探します(Esc で、打った字を消します)。先頭に > を打つと、操作を探せます';
+    '題名と本文から探します(Esc で、入力した字を消します)。先頭に > を入力すると、操作を探せます';
   // ⚠ `placeholder` は名前ではない ── 値を入れると読み上げから消える
   filter.setAttribute('aria-label', '題名と本文から探す');
   /**

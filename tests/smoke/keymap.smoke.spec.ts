@@ -101,7 +101,7 @@ test('🔴 既定の鍵が実機で効き、設定で割り当て直すと入れ
   await expect(
     page.locator('[data-pkc-field="keymap-row"][data-pkc-command="inline-calc"]'),
     'Ctrl+Backspace の断りの字が出ない',
-  ).toContainText('文字を打つ欄の編集に使うキーです');
+  ).toContainText('文字を入力する欄の編集に使うキーです');
   await expect(
     page
       .locator('[data-pkc-field="keymap-row"][data-pkc-command="inline-calc"] [data-pkc-field="keymap-chord"]'),

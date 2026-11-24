@@ -1065,12 +1065,12 @@ test('🔴 表・コードの行を押しても編集欄が縮まず、左端も
   ).toBeLessThanOrEqual(2);
   expect(codeW, 'コードが散文より広くない').toBeGreaterThan(proseW + 100);
 
-  // 🔴 打った後の Esc は「打った内容を捨てますか」と聞く(2 列の編集と同じ)。「編集をやめる」で捨てる
+  // 🔴 打った後の Esc は「入力した内容を捨てますか」と聞く(2 列の編集と同じ)。「編集をやめる」で捨てる
   await live.locator('[data-pkc-field="row-source"]').press('End');
   await page.keyboard.type('x');
   await page.keyboard.press('Escape');
   await expect(escDialog, '打った後の Esc で確認が出ない').toBeVisible();
-  await expect(escDialog, '確認に「打った内容を捨てますか」が無い').toContainText('打った内容を捨てますか');
+  await expect(escDialog, '確認に「入力した内容を捨てますか」が無い').toContainText('入力した内容を捨てますか');
   await expect(escDialog.getByRole('button', { name: '編集を続ける' })).toBeVisible();
   await escDialog.getByRole('button', { name: '編集をやめる' }).click();
   await expect(escDialog, '「編集をやめる」で確認が閉じていない').toBeHidden();
@@ -1625,7 +1625,7 @@ test('🔴 インライン編集中に「雛形を入れる」を押すと、行
   const row = live.locator('[data-pkc-field="row-source"]');
   await expect(row, '前提: 行が開いていない(この検査は何も見ていない)').toBeVisible();
 
-  // 🔴 #1982 段 3: 「テンプレートを入れる」は帯の「その他 ▾」の一覧 ── 本文の行に居たまま開き、項目を選んでも行は閉じない
+  // 🔴 #1982 段 3: 「テンプレートを挿入」は帯の「その他 ▾」の一覧 ── 本文の行に居たまま開き、項目を選んでも行は閉じない
   await clickBarMoreItem(page, '[data-pkc-action="insert-snippet"]');
 
   /**

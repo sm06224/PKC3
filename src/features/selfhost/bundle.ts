@@ -42,7 +42,7 @@ export const SELFHOST_SITE = 'site';
 /** 一式の版(中身が変わったら上げる)。⚠ はじめに.txt に出す。 */
 export const SELFHOST_LAYOUT = 1;
 
-/** zip の名前。⚠ 日付を入れる ── 古い一式と混ざったとき、どちらが新しいか分かる。 */
+/** zip の名前。⚠ 日付を挿入 ── 古い一式と混ざったとき、どちらが新しいか分かる。 */
 export function selfhostZipName(stamp: string): string {
   return `pkc3-selfhost-${stamp}.zip`;
 }

@@ -651,7 +651,7 @@ export function reduceSql(state: AppState, action: SqlAction): ReduceResult {
       };
     }
     /**
-     * 🔴 **調べる相手をもう 1 つ足す**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A、設問 2 は B)。
+     * 🔴 **調べる相手をもう 1 つ追加**(#918 段⑦。Gemini 裁定 2026-10-01 = 設問 1 は A、設問 2 は B)。
      *
      * ⚠ **確認は出さない**(設問 2 = B)── 代わりに字で言う(案内文と、作った表が通った直後の 1 行)。
      *   足すと**器を作り直す**ので、作った表は消える(`DUCKDB_TABLE_RESET`)。

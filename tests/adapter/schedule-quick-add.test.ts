@@ -529,7 +529,7 @@ describe('時刻の欄(台帳 #1852 束 E2、依頼 57-4)', () => {
     await tick();
     const text = s.q<HTMLInputElement>('[data-pkc-field="schedule-quick-text"]')!;
     expect(text.placeholder).toBe('予定(例: 打ち合わせ)');
-    expect(text.getAttribute('aria-label')).toBe('足す予定');
+    expect(text.getAttribute('aria-label')).toBe('追加する予定');
     expect(s.q('[data-pkc-field="schedule-quick-date"]')!.getAttribute('aria-label')).toBe('いつの予定');
     expect(s.q('[data-pkc-field="schedule-quick-time"]')!.getAttribute('aria-label')).toContain('時刻');
     type(s, '');

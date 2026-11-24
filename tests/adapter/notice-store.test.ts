@@ -64,7 +64,7 @@ describe('既読の集合', () => {
    * 🔑 だから**対で置く**:足しても出ない(実害)/ 新しい id なら出る(直し方)。
    *   ⚠ 片方だけだと「そもそも未読が出ない台」でも緑になる。
    */
-  it('🔴 読んだ id へ行を足しても未読に戻らない ── 新しい id にすれば出る', () => {
+  it('🔴 読んだ id へ行を追加しても未読に戻らない ── 新しい id にすれば出る', () => {
     const s = new NoticeStore(fakeStorage());
     const shipped = { id: '2026-09-06-x', title: 't', items: ['配った 1 行'] };
     s.markSeen([shipped.id]);

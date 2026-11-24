@@ -455,7 +455,7 @@ describe('取り込んだ外部画像を当てる(#264 段①)', () => {
   });
 
   /**
-   * 🔴 **番号ではなく宛先で当てる**(取りに行っている間に別の窓が行を足しうる)。
+   * 🔴 **番号ではなく宛先で当てる**(取りに行っている間に別の窓が行を追加しうる)。
    * ⚠ 行番号で当てる `kind: 'task'` と**作法が違う**理由がここに在る。
    */
   it('🔴 取りに行っている間に行が増えていても、宛先で当たる', () => {
@@ -803,7 +803,7 @@ describe('保存したスタックの並べ替え(link-move、#633 段④)', () 
     expect(applyBodyRewrite(tail, { kind: 'link-move', line: 1, openLine: '- [b](entry:b)', dir: 'down' })).toBe(tail);
   });
 
-  it('🔴 押した時点の行と食い違えば断る(別の窓が行を足していた形)', () => {
+  it('🔴 押した時点の行と食い違えば断る(別の窓が行を追加していた形)', () => {
     expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 6, openLine: '- [議事録](entry:a1)', dir: 'down' })).toBeNull();
     // frontmatter の中 / 範囲外も断る
     expect(applyBodyRewrite(DOC, { kind: 'link-move', line: 1, openLine: 'date: 2026-09-05', dir: 'down' })).toBeNull();

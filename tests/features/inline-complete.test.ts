@@ -132,3 +132,12 @@ describe('(asset: の補完(#2001 段 4)', () => {
     expect(assetInsertEdit('![](asset:', 3, 10, rows[0]!).text).toBe('[請求書.pdf](asset:k1)');
   });
 });
+
+describe('言葉の統一のあとも、旧い言い方(入れる)で / の道具が見つかる', () => {
+  it('「入れる」「日付を入れる」で、改名した「日付を挿入」が出る', () => {
+    expect(slashToolChoices('入れる').map((t) => t.action)).toEqual(
+      expect.arrayContaining(['insert-date', 'insert-entry-link', 'insert-attachment', 'insert-icon']),
+    );
+    expect(slashToolChoices('日付を入れる').map((t) => t.label)).toEqual(['日付を挿入']);
+  });
+});
