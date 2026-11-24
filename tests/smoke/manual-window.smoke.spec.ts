@@ -304,6 +304,24 @@ test('🔴 窓で F5 を押しても、マニュアルはそのまま読み直�
   expect(landed!.top, 'ブックマークから開いても、その節に着いていない').toBeGreaterThanOrEqual(0);
   expect(landed!.top).toBeLessThan(landed!.h);
 
+  /**
+   * 🔴 **組み替え前の章の印(`#作る-開く`)で開いても、いまの見出しへ送られる**(#779 段⑨)。
+   * ⚠ 起動の数を増やさないよう、同じ窓で続ける。⚠ 実ブラウザでは未実行(unit は happy-dom で script を走らせて見ている)。
+   */
+  // ⚠ `.goto(` は smoke-budget が起動として数えるので、断片を書き換えて読み直す(DOMContentLoaded で `j` が走る)
+  await win.evaluate((h) => history.replaceState(null, '', h), `#${encodeURIComponent('作る-開く')}`);
+  await win.reload();
+  await expect(win.locator(MAIN)).toBeVisible();
+  const redirected = await win.evaluate(() => {
+    const el = document.getElementById('ノートの作成と編集');
+    if (!el) return null;
+    const box = el.getBoundingClientRect();
+    return { top: box.top, h: window.innerHeight };
+  });
+  expect(redirected, '旧い章の印の行き先が本文に無い').not.toBeNull();
+  expect(redirected!.top, '旧い章の印で開いても、新しい見出しへ送られていない').toBeGreaterThanOrEqual(0);
+  expect(redirected!.top).toBeLessThan(redirected!.h);
+
   await win.close();
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });

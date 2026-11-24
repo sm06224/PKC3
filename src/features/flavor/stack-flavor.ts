@@ -49,7 +49,7 @@ export const stackFlavor: FlavorSpec = {
  * スタックの本文を組む ── **上から順に 1 行 1 リンク**。
  *
  * ⚠ 題名は保存時点の字で焼き込まれる(`entry:` の lid で飛ぶので、改名しても壊れない。
- *   マニュアルの「参照をコピー」と同じ性質)。
+ *   マニュアルの **参照をコピー**と同じ性質)。
  */
 export function stackBody(items: readonly { readonly title: string; readonly lid: string }[]): string {
   return items.map((it) => `- ${formatEntryLink(it.title, it.lid)}`).join('\n') + (items.length > 0 ? '\n' : '');

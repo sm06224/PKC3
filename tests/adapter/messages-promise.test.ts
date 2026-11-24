@@ -71,9 +71,11 @@ describe('マニュアル「残りが少なくなったとき」と実装の数�
       expect(alarm, `実装が出さない文を書いた: ${sentence}`).toContain(sentence);
       expect(sec).toContain(sentence);
     }
-    for (const sentence of ['空きが少なくなってきました。重いノートから整理しておくと安全です。', 'システム → 保存領域 →「容量を調べる」で、重いノートを探せます。']) {
-      expect(warn, `実装が出さない文を書いた: ${sentence}`).toContain(sentence);
-      expect(sec).toContain(sentence);
-    }
+    const quoted = '空きが少なくなってきました。重いノートから整理しておくと安全です。';
+    expect(warn, `実装が出さない文を書いた: ${quoted}`).toContain(quoted);
+    expect(sec).toContain(quoted);
+    // 続きの案内(押す物の名前)は引かずに言い換える ── 実装の文にその名前が在ることと、マニュアルが太字で言うことを留める
+    expect(warn).toContain('「容量を調べる」で、重いノートを探せます。');
+    expect(sec).toContain('**容量を調べる**');
   });
 });

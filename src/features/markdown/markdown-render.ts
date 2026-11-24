@@ -2142,7 +2142,7 @@ export function sanitizeAuthorClasses(
   return classes.filter((c) => c !== '' && (!/^pkc-/i.test(c) || allow.has(c)));
 }
 
-/** `:::format` の class で通す予約 class(マニュアル「板」「線」の章の綴り)。 */
+/** `:::format` の class で通す予約 class(マニュアル「付箋ボードの作り方」「付箋どうしをつなぐ線」の綴り)。 */
 export const FORMAT_RESERVED_CLASS_ALLOW: ReadonlySet<string> = new Set(['pkc-place', 'pkc-line']);
 
 /**
