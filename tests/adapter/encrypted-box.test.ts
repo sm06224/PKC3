@@ -275,8 +275,41 @@ describe('🔴 keyring.json(同期フォルダ: 条件付き書き込みが無�
     expect(r).toEqual({ keyring: a.keyring, created: false });
     // 包み直し(フォルダは条件が無いので、読み直した束と同じ keyId のときだけ書く)
     const next = await rewrapKeyring(c, a.keyring, { passphrase: 'A' }, 'A2');
-    await box.rewrapKeyring(next, undefined);
+    await box.rewrapKeyring(next, a.keyring);
     expect((await box.loadKeyring())!.keyring).toEqual(next);
+  });
+
+  it('🔴 フォルダ: v1 から導出したあと別の端末が v2 に変えた → 書く前に照らして止まり、v2 はそのまま', async () => {
+    const files = new Map<string, Blob>();
+    const v1 = await createKeyMaterial(c, 'p');
+    const box = new EncryptedBox({ inner: folderBox(dirOf(files)), crypto: c, key: null });
+    await box.ensureKeyring(v1.keyring);
+    const mine = await rewrapKeyring(c, v1.keyring, { passphrase: 'p' }, 'mine');
+    const v2 = await rewrapKeyring(c, v1.keyring, { passphrase: 'p' }, 'theirs');
+    files.set('keyring.json', new Blob([serializeKeyring(v2)])); // 導出のあとで変わった
+    await expect(box.rewrapKeyring(mine, v1.keyring)).rejects.toBeInstanceOf(KeyringConflictError);
+    expect(await files.get('keyring.json')!.text(), 'v2 が無傷').toBe(serializeKeyring(v2));
+  });
+
+  it('フォルダ: 照らしたあと・書いたあとに別の端末が上書きした → 読み直しで検出して止まる(完全には防げないが、黙って通さない)', async () => {
+    const files = new Map<string, Blob>();
+    const v1 = await createKeyMaterial(c, 'p');
+    let theirs = '';
+    let armed = false;
+    const box = new EncryptedBox({
+      inner: folderBox(
+        dirOf(files, (n) => {
+          if (n === 'keyring.json' && armed) files.set('keyring.json', new Blob([theirs]));
+        }),
+      ),
+      crypto: c,
+      key: null,
+    });
+    await box.ensureKeyring(v1.keyring);
+    const mine = await rewrapKeyring(c, v1.keyring, { passphrase: 'p' }, 'mine');
+    theirs = serializeKeyring(await rewrapKeyring(c, v1.keyring, { passphrase: 'p' }, 'theirs'));
+    armed = true;
+    await expect(box.rewrapKeyring(mine, v1.keyring)).rejects.toBeInstanceOf(KeyringConflictError);
   });
 
   it('差分ファイルの暗号化の往復(フォルダ)', async () => {
