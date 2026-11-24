@@ -1264,7 +1264,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(mgAdd).toBeEnabled();
   await expect(mgAdd).toHaveAttribute(
     'title',
-    '別の PDF を選んで、そのページをこの PDF の後ろに足します(添付から、またはパソコンのファイルから選べます)。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)',
+    '別の PDF を選んで、そのページをこの PDF の後ろに追加します(添付から、またはパソコンのファイルから選べます)。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)',
   );
   // 外した(隠した)項目は数えない ── 見えている項目だけ
   const mgThumbs = mg.locator('.thumb-cell:not([hidden]) [data-pkc-field="pdf-page-thumb"]');
