@@ -37,7 +37,7 @@ function proseLines(md: string): { no: number; text: string }[] {
  * ⚠ `鍵` はアイコンの名前(`src/features/icon/tile-icons.ts` の `label: '鍵'`)── マニュアルは
  *   アイコンを選ぶ画面の字をそのまま引いている。
  */
-const KNOWN: readonly string[] = ['鍵', '鍵'];
+const KNOWN: readonly string[] = ['鍵'];
 
 describe('マニュアルの地の文に使わない語が無い', () => {
   const md = readFileSync('docs/manual.md', 'utf8');

@@ -8,7 +8,7 @@
  *   箱の中なので、評価を許して外へ出せる物は無い
  * ランタイム(React / ReactDOM / sucrase / Tailwind)は**この HTML に inline で入る**。
  *
- * ## 書き方(マニュアル「React」の節と同じ)
+ * ## 書き方(マニュアル「コードブロックと埋め込み」の節と同じ)
  * - `export default` でコンポーネントを書く、または `App` という名前のコンポーネントを書く
  * - 本文が `<` で始まる(JSX の式 1 つだけ)なら、それを描く
  * - `import { useState } from 'react'` と書ける(他の import は使えない)

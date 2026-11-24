@@ -2242,7 +2242,7 @@ export class InspectorRenderer {
       this.buttons.get(action)?.setAttribute(ENTRY_ACTION_WIDTH_ATTR, entryActionWidthTier(label));
     };
     // ⚠ 文言は**実際に落ちるもの**に合わせる(P8 段⑱)── ここは可逆な
-    //    アーカイブで、Markdown ではない(マニュアル「出す・取り込む」の表と同じ材料)
+    //    アーカイブで、Markdown ではない(マニュアル「書き出し・取り込み・バックアップ」の表と同じ材料)
     /**
      * 🔴 **このノートの参照をコピー**(#427 段①)。
      *

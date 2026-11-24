@@ -338,7 +338,7 @@ export function reduceBoot(state: AppState, action: BootAction): ReduceResult {
       // 🔴 **設定を開いたまま一覧を押したら、中央をノートへ戻す**(P8 段⑲)。
       //    直す前は右の情報ペインだけ切り替わり、中央は設定のまま・追記欄も
       //    消えたままで、ノートが開かない理由が画面のどこにも無かった
-      //    (マニュアル「行の右クリックから整理する」の「中央は常にいま開いているノート」の当の破れ)
+      //    (マニュアル「右クリックメニューの項目」の「中央は常にいま開いているノート」の当の破れ)
       // 🔴 **`isAsidePane` ではない**(#906)── SQL の面は退かない(`app-state.ts` の `leavesOnSelect`)
       const leaveSettings = leavesOnSelect(state.viewMode);
       if (state.selectedLid === action.lid && state.openBody?.lid === action.lid) {
