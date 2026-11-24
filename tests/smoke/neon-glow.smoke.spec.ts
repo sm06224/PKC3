@@ -226,6 +226,13 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     });
     await page.waitForTimeout(100);
     expect(changed(restR, await pixels(page, edgeR)), `${kind}: 横スクロールで輪郭が消えた`).toBeGreaterThan(rows * 0.9);
+    // 🔴 ゾーンの入れ子: ポインタが**外から直接**器の上へ入っても(1 回の移動)、ログのゾーンが握り、器(ログのカード)が光る
+    await page.mouse.move(OUT_X, OUT_Y);
+    await expect(page.locator(NEAR)).toHaveCount(0);
+    await page.mouse.move(bb.x + 30, bb.y + bb.h / 2);
+    await expect
+      .poll(() => page.locator(`${BODY} > [data-pkc-log-card][data-pkc-glow-near]`).count(), { message: `${kind}: 器の上へ直接入ってもログのカードが光らない(内側のゾーンに奪われた)` })
+      .toBeGreaterThan(0);
     await page.mouse.move(OUT_X, OUT_Y);
   }
 
@@ -685,6 +692,82 @@ test('🔴 フォーカス: キーボード(Tab)で入力欄・追記欄の枠�
   ring(pab, 1).forEach((r, i) => expect(changed(pRest[i]!, pF[i]!), `スマホ幅でフォーカスの線が ${r.name} の辺に出ない`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.6));
   await page.setViewportSize({ width: 1440, height: 900 });
   await pa.blur();
+
+  // ⑦ 🔴 輪郭を持たない型(checkbox / radio)は neon の規則から外れ、従来の outline で焦点が見える(焦点が消えない)
+  {
+    await page.evaluate(() => {
+      const box = document.createElement('div');
+      box.id = 'zz-native';
+      box.style.cssText = 'position:fixed;left:700px;top:300px;z-index:99999;background:#fff;padding:12px;display:flex;gap:24px';
+      box.innerHTML = '<button id="zz-before">before</button><input id="zz-cb" type="checkbox"><input id="zz-radio" type="radio" name="zz">';
+      document.body.append(box);
+    });
+    await page.locator('#zz-before').focus();
+    for (const id of ['zz-cb', 'zz-radio']) {
+      const r = await page.locator(`#${id}`).evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        return { x: b.x, y: b.y, w: b.width, h: b.height };
+      });
+      const ringClip = { x: r.x - 6, y: r.y - 6, width: r.w + 12, height: r.h + 12 };
+      await page.mouse.move(OUT_X, OUT_Y);
+      const before = await pixels(page, ringClip);
+      await page.keyboard.press('Tab');
+      await expect(page.locator(`#${id}`)).toBeFocused();
+      await page.waitForTimeout(100);
+      const st = await page.locator(`#${id}`).evaluate((el) => {
+        const c = getComputedStyle(el);
+        return { fv: el.matches(':focus-visible'), style: c.outlineStyle, width: c.outlineWidth, shadow: c.boxShadow };
+      });
+      expect(st.fv, `${id}: キーボードで入ったのに :focus-visible でない`).toBe(true);
+      expect(st.style, `${id}: outline が消えている(焦点が見えない)`).not.toBe('none');
+      expect(parseFloat(st.width), `${id}: outline の太さが 0`).toBeGreaterThan(0);
+      expect(st.shadow, `${id}: neon の影を引いている(ネイティブの部品は従来の outline のまま)`).toBe('none');
+      // 画素で焦点の輪が見える(部品のまわり 6px の帯が、焦点前と変わる)
+      expect(changed(before, await pixels(page, ringClip)), `${id}: 焦点の輪が画素で見えない`).toBeGreaterThan(20);
+    }
+    await page.evaluate(() => document.getElementById('zz-native')?.remove());
+  }
+
+  // ⑧ 🔴 強制色(forced-colors: active): 入力欄(通常の欄・追記欄・SQL の欄)の焦点は outline で出る。影は無い(二重にならない)
+  {
+    await page.emulateMedia({ forcedColors: 'active' });
+    const info = (sel: string): Promise<{ outline: string; width: string; shadow: string }> =>
+      page.locator(sel).evaluate((el) => {
+        const c = getComputedStyle(el);
+        return { outline: c.outlineStyle, width: c.outlineWidth, shadow: c.boxShadow };
+      });
+    await page.focus('[data-pkc-field="entry-filter"]');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('[data-pkc-field="entry-sort"]')).toBeFocused();
+    const sortSel = await info('[data-pkc-field="entry-sort"]');
+    expect(sortSel.outline, '強制色で選択欄の焦点の outline が出ない').not.toBe('none');
+    expect(sortSel.shadow, '強制色で影が残っている(二重)').toBe('none');
+    await page.focus('[data-pkc-field="entry-filter"]');
+    const filter = await info('[data-pkc-field="entry-filter"]');
+    expect(filter.outline, '強制色で入力欄の焦点の outline が出ない(特異度で負けている)').not.toBe('none');
+    expect(filter.shadow).toBe('none');
+    // 追記欄: 枠(`append-form`)が outline を持ち、中の打つ欄は持たない(二重にしない)
+    await page.focus('[data-pkc-field="append-input"]');
+    const form = await info('[data-pkc-field="append-form"]');
+    const inner = await info('[data-pkc-field="append-input"]');
+    expect(form.outline, '強制色で追記欄の枠の outline が出ない').not.toBe('none');
+    expect(inner.outline, '強制色で追記欄の打つ欄にも outline がある(枠と二重)').toBe('none');
+    expect(inner.shadow).toBe('none');
+    await page.evaluate(() => {
+      location.hash = '#pkc?view=sql';
+    });
+    const sqlIn = page.locator('[data-pkc-view-pane="sql"] [data-pkc-field="sql-input"]');
+    await expect(sqlIn).toBeVisible({ timeout: 15_000 });
+    await sqlIn.focus();
+    const sql = await info('[data-pkc-view-pane="sql"] [data-pkc-field="sql-input"]');
+    expect(sql.outline, '強制色で SQL の欄の焦点の outline が出ない').not.toBe('none');
+    expect(sql.shadow).toBe('none');
+    await page.emulateMedia({ forcedColors: 'none' });
+    await sqlIn.blur();
+    await page.evaluate(() => {
+      location.hash = '#pkc';
+    });
+  }
 
   // ⑥ 🔴 2 ペイン整理: 焦点のある側のペインに同じ全周の枠(内側の影)。焦点のない側には無い
   await page.evaluate(() => {

@@ -72,7 +72,19 @@ export const NEON_ZONES: readonly NeonZoneSpec[] = [
   { zone: '[data-pkc-region="find-bar"]', targets: [{ cards: NEON_FIELDS, radius: NEON_RADIUS.field, direct: false }] },
   { zone: '[data-pkc-field="sql-editor"]', targets: [{ cards: '[data-pkc-field="sql-input-wrap"]', radius: NEON_RADIUS.block, direct: false }] },
 ];
-const ANY_ZONE = NEON_ZONES.map((z) => z.zone).join(', ');
+
+/**
+ * 🔴 **ポインタの下の要素が属するゾーン** ── ⚠ 最も内側(`closest` の複数選択子)でなく、**`NEON_ZONES` の並び(優先順)で最初に当たるもの**。
+ * ゾーンが入れ子になる所(ログの本文の中の `.pkc-md-rendered` のブロックなど)で、内側の本文のゾーンが外側のログのゾーンを奪い、
+ * ログのカードの輪郭が光らなくなるのを防ぐ(外側のログ / 情報ペイン / バーが先)。
+ */
+export function zoneOf(t: Element): { el: HTMLElement; spec: NeonZoneSpec } | null {
+  for (const spec of NEON_ZONES) {
+    const el = t.closest<HTMLElement>(spec.zone);
+    if (el !== null) return { el, spec };
+  }
+  return null;
+}
 
 type MediaLike = {
   readonly matches: boolean;
@@ -356,9 +368,8 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     leave();
     const t = doc.elementFromPoint?.(x, y);
     if (t === null || t === undefined) return;
-    const z = t.closest<HTMLElement>(ANY_ZONE);
-    const sp = z === null ? undefined : NEON_ZONES.find((c) => z.matches(c.zone));
-    if (z !== null && sp !== undefined) enter(z, sp, { clientX: x, clientY: y } as PointerEvent);
+    const hit = zoneOf(t);
+    if (hit !== null) enter(hit.el, hit.spec, { clientX: x, clientY: y } as PointerEvent);
   }
 
   /** ゾーンの外 → 中、ゾーンどうしの移り変わりだけを拾う(要素をまたぐときに 1 回)。 */
@@ -366,12 +377,10 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     const t = e.target;
     if (!(t instanceof Element)) return;
     if (zone !== null && zone.contains(t)) return;
-    const z = t.closest<HTMLElement>(ANY_ZONE);
-    if (z === zone) return;
+    const hit = zoneOf(t);
+    if (hit !== null && hit.el === zone) return;
     leave();
-    if (z === null) return;
-    const s = NEON_ZONES.find((c) => z.matches(c.zone));
-    if (s !== undefined) enter(z, s, e);
+    if (hit !== null) enter(hit.el, hit.spec, e);
   };
 
   /** ポインタがウィンドウの外へ出た ── 最後の位置を忘れ、光を消す(古い座標で描き直しの後に光らせない)。 */

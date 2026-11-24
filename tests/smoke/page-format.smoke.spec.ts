@@ -104,8 +104,8 @@ test('🔴 紙面を変えると散文の幅が変わる(表に読み幅の cap 
     return r.getClientRects().length;
   });
   expect(foldedLines, '表の升が 1 つも折れていない = 内容が器より狭い(前提が崩れている)').toBeGreaterThan(1);
-  // ⚠ 幅いっぱいの表は、近接発光の枠(透明な 2px)が右へ出られないぶん 2px 狭い(Stage 2 PR-2)── 許すのは 3px まで
-  expect(tableWide, '表に読み幅が掛かっている(器に cap を掛けた実装)').toBeGreaterThan(wide - 3);
+  // ⚠ 幅いっぱいの表は、近接発光の枠(透明な 2px)が右へ出られないぶん**ちょうど 2px 狭い**(Stage 2 PR-2。左は −2px の余白で相殺される)── 正確な値で縛る(±1 は丸め)
+  expect(Math.abs(tableWide - (wide - 2)), `表の幅が「器 − 2px」でない(表 ${tableWide} / 器 ${wide})── 読み幅が掛かった(狭い)か、枠のぶんが相殺されていない(広い)`).toBeLessThanOrEqual(1);
   expect(
     tableWide,
     '上限を外したのに表が広がっていない(左の余白が 0 に戻っていない)',

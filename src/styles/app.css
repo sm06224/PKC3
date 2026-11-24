@@ -983,12 +983,18 @@ textarea {
 /* 🔴 **キーボードのフォーカスは、`--neon` の線を全周に静止させる**(Stage 2 PR-2。末尾の「本文のブロック・入力欄の輪郭と、キーボードのフォーカス」の塊も参照)。
  * ⚠ 既存の `outline` と二重にしない(`outline` は消す)。強制色(`forced-colors: active`)では枠も影も消えるので、末尾で `outline` へ戻す。
  * 線は内側へ 1px(枠の 1px と合わせて 2px)。外へ出さないので、overflow に切られる枠でも全周が見える。 */
-input:focus-visible,
+/* ⚠ **輪郭を持たない型(checkbox / radio / range / file / color)は除く** ── ネイティブの部品は枠が無いので、`outline` を消すと焦点が見えなくなる(従来の outline のまま)。
+ *   除外の並びは近接発光の入力欄(`neon-glow.ts` の `NEON_FIELDS`)と同じ(`tests/adapter/neon-glow.test.ts` が突き合わせる)。 */
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']):focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline: none;
   border-color: var(--neon);
   box-shadow: inset 0 0 0 1px var(--neon);
+}
+input:is([type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 /* 🔴 **いま打っている行**(#2001 段 4。`render/current-line.ts` が欄に印と変数 2 つを置く)。
  * 現在地は**形**で示す(§2-10): 左端の 3px の線(`--accent`。選択中の行の左端線と同じ)+ ごく薄い地(`--surface-hover`)。
@@ -2180,7 +2186,7 @@ tr[data-pkc-note-label] td:first-child {
   border-radius: var(--radius) var(--radius) 0 0;
   background: transparent;
 }
-[data-pkc-field='append-input']:focus-visible {
+[data-pkc-field='append-input'][data-pkc-field]:focus-visible {
   outline: none;
   /* 枠(`append-form`)が全周の線を持つ ── 共通の入力欄の線(`--neon`)を重ねて二重にしない */
   border-color: transparent;
@@ -16199,7 +16205,7 @@ h6:hover > .pkc-heading-anchor,
     border: 1px solid var(--hairline);
     border-radius: var(--radius-lg);
   }
-  /* 段組みのとき、縦に長い図はカードの余白(上 28 + 下 12 + 枠 2)のぶん低くする(`[data-pkc-columns-on]` の図の高さの頭打ち(−30px)に重ねる) ── でないと段をまたいで割れる */
+  /* 段組みのとき、縦に長い図はカードの余白(上 28 + 下 8 + 枠 2)のぶん低くする(`[data-pkc-columns-on]` の図の高さの頭打ち(−30px)に重ねる) ── でないと段をまたいで割れる */
   [data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='detail-body'] .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) img {
     max-height: calc(var(--pkc-col-h, 100vh) - 48px);
   }
@@ -16302,15 +16308,15 @@ h6:hover > .pkc-heading-anchor,
 /* ── キーボードのフォーカス: 同じ線(`--neon`)を全周に静止させる(入力欄の `:focus-visible` は上の共通の規則。SQL の打つ欄もその枠が線) ── */
 /* 2 ペイン整理: 焦点のある側(`data-pkc-focused`)にも同じ枠 */
 @media (forced-colors: active) {
-  input:focus-visible,
-  textarea:focus-visible,
-  select:focus-visible {
+  /* ⚠ 特異度を重ねて**確実に勝たせる**(0,3,1)── 追記欄の打つ欄の `outline: none`(0,3,0)や、除外型の規則に負けない。
+   *   追記欄の打つ欄は枠(`append-form`)が輪郭を持つので、ここでは除く(二重にしない) */
+  :is(input, textarea, select):not([data-pkc-field='append-input']):focus-visible:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -1px;
     box-shadow: none;
   }
-  [data-pkc-field='append-form']:focus-within,
-  [data-pkc-region='dual-pane'][data-pkc-focused] {
+  [data-pkc-field='append-form']:focus-within:focus-within,
+  [data-pkc-region='dual-pane'][data-pkc-focused][data-pkc-focused] {
     outline: 2px solid var(--accent);
     outline-offset: -1px;
   }
