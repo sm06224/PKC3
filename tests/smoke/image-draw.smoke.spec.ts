@@ -189,7 +189,17 @@ test('🔴 画像に描き込む ── 描く・取り消す・新しい画像�
   expect(extra, '押し直したら窓がもう 1 枚開いた').toBe(0);
   const closed2 = win2.waitForEvent('close', { timeout: 10_000 });
   await win2.locator('[data-pkc-field="image-draw-cancel"]').click();
-  await win2.locator('[data-pkc-field="image-draw-discard"]').click();
+  /**
+   * ⚠ 「捨てて閉じる」は押した瞬間に窓が閉じる ── click の応答が返る前に閉じると
+   *   `locator.click: Target page, context or browser has been closed` で落ちる(フル smoke で 1 回、単独でも再現)。
+   * 🔑 失敗は**窓が本当に閉じたときだけ**受ける(閉じていないのに落ちたなら、そのまま赤)。閉じたことは `closed2` で確かめる。
+   */
+  await win2
+    .locator('[data-pkc-field="image-draw-discard"]')
+    .click()
+    .catch((e: unknown) => {
+      if (!win2.isClosed()) throw e;
+    });
   await closed2;
   // 窓が閉じた後の保存の流れが終わるのを、少なくとも 1 周待ってから数える
   await page.waitForTimeout(500);
