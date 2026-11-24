@@ -440,7 +440,7 @@ export class SqlEmbedHydrator {
     host.setAttribute('data-pkc-sql-embed-state', 'ready');
     /**
      * ⚠ **列の並べ替えは付けない** ── `applyTableSort` は描くたびに本文の表へ付けるが、
-     *   ここは「さらに N 行」で行を足すので、並べ替えると**足した行の位置が食い違う**。
+     *   ここは「さらに N 行」で行を追加するので、並べ替えると**足した行の位置が食い違う**。
      *   付与済みの印を先に置いておけば、あちらは触らない(冪等の門が読む印)。
      */
     const table = host.querySelector('table');

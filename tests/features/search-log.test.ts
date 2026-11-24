@@ -22,7 +22,7 @@ describe('最近探した語(#1172)', () => {
   });
 
   /** ⚠ 同じ語を 2 行にしない ── 候補に同じ字が並ぶ。 */
-  it('🔴 同じ語を打ち直すと、行は増えず先頭へ動く', () => {
+  it('🔴 同じ語を入力し直すと、行は増えず先頭へ動く', () => {
     const list = ['bbb', 'aaa', 'ccc'];
     expect(pushSearchTerm(list, 'ccc')).toEqual(['ccc', 'bbb', 'aaa']);
   });

@@ -4,7 +4,7 @@
  *
  * 隣の欄は前の升の書き戻しを待たずに開くので、`openLine` に**書き戻し前の行**を掴む。
  * 自分が直前に書いた行を先へ進めて数える(`shownCellLine` / `noteCellWrite`)ことで断られなくなる。
- * ⚠ 別の窓が行を足した形(画面の本文が古いまま)は**断るまま**でなければならない ──
+ * ⚠ 別の窓が行を追加した形(画面の本文が古いまま)は**断るまま**でなければならない ──
  *   その門は `body-rewrite-open-line.test.ts` が見る。ここは「自分の書換だけが数えられる」ことを見る。
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -59,7 +59,7 @@ describe('shownCellLine / noteCellWrite ── 自分が書いた行を先へ進
     expect(shownCellLine(half, 'e1', LINE, 4)).toBe('| りんご | 3 |');
   });
 
-  it('🔴 画面の行が、覚えている列のどれでもなければ、画面の行をそのまま使う(別の窓が行を足した形)', () => {
+  it('🔴 画面の行が、覚えている列のどれでもなければ、画面の行をそのまま使う(別の窓が行を追加した形)', () => {
     const s = stateOf(BODY);
     noteCellWrite(s, 'e1', { line: LINE, openLine: L0, col: 0, value: 'りんご' }, 0);
     const other = stateOf(BODY.replace(L0, '| x | y |'));
@@ -87,7 +87,7 @@ describe('shownCellLine / noteCellWrite ── 自分が書いた行を先へ進
 /**
  * 🔴 **表の行・列の足し引きも、自分が直前に書いた行を数える**(#1087)。
  *
- * 列を足すとその行の字が変わる。書き戻しが画面に届く前に(ダブルクリックなど)もう一度押すと、
+ * 列を追加するとその行の字が変わる。書き戻しが画面に届く前に(ダブルクリックなど)もう一度押すと、
  * 画面の行は書く前のままで `openLine` が disk と食い違い、2 度目が断られる ── 升の `Tab` と同じ形。
  * ⚠ 行を**消す**回は覚えない:消した行の番号は次の行の字になるので、覚えると二度押しが**続けて 2 行消す**。
  */
@@ -102,7 +102,7 @@ describe('noteShapeWrite ── 行・列の足し引きを続けて押す', () 
     ...over,
   });
 
-  it('🔴 列を足した直後(書き戻し前)の二度押しは、足した後の行を openLine にする', () => {
+  it('🔴 列を追加した直後(書き戻し前)の二度押しは、足した後の行を openLine にする', () => {
     const s = stateOf(CSV);
     expect(shownCellLine(s, 'e1', 1, 0), '対照群(何も書いていない)').toBe('a,b');
     noteShapeWrite(s, 'e1', shape({}), 0);
@@ -116,7 +116,7 @@ describe('noteShapeWrite ── 行・列の足し引きを続けて押す', () 
     const s = stateOf(CSV);
     noteShapeWrite(s, 'e1', shape({}), 0);
     expect(shownCellLine(s, 'e1', 2, 1), '押していない行の予測が無い').toBe('c,,d');
-    // 対照群:行を足す回は他の行の番号がずれるので、他の行は覚えない
+    // 対照群:行を追加する回は他の行の番号がずれるので、他の行は覚えない
     resetCellChains();
     noteShapeWrite(s, 'e1', shape({ what: 'row' }), 0);
     expect(shownCellLine(s, 'e1', 2, 1)).toBe('c,d');
@@ -126,7 +126,7 @@ describe('noteShapeWrite ── 行・列の足し引きを続けて押す', () 
     const s = stateOf(CSV);
     noteShapeWrite(s, 'e1', shape({ what: 'row', mode: 'remove' }), 0);
     expect(shownCellLine(s, 'e1', 1, 1), '消した行の番号に、次の行の予測を載せた').toBe('a,b');
-    // 対照群:行を足す回は押した行の字が変わらないので、そのまま
+    // 対照群:行を追加する回は押した行の字が変わらないので、そのまま
     noteShapeWrite(s, 'e1', shape({ what: 'row', mode: 'add' }), 2);
     expect(shownCellLine(s, 'e1', 1, 3)).toBe('a,b');
   });

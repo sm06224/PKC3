@@ -151,7 +151,7 @@ export type BodyRewrite =
     }
   | {
       /**
-       * 🔴 **入力欄の値を表の行へ書く / 行を足す**(#1456)。
+       * 🔴 **入力欄の値を表の行へ書く / 行を追加する**(#1456)。
        *
        * > user の物語:入力欄に打った日報を、押した 1 回で ` ```csv name=日報一覧 ` の表の末尾に足したい
        * > (または N 行目を書き換えたい)。
@@ -436,12 +436,12 @@ export type BodyRewrite =
     }
   | {
       /**
-       * 🔴 **表の行・列を足す / 消す**(#418 段①)。
+       * 🔴 **表の行・列を追加する / 消す**(#418 段①)。
        *
        * 🔑 **打てるだけでは動線が元に戻る** ── 5 列で足りなくなった瞬間に
        *   CSV の原文へ帰ることになる。⚠ そして user 指示 2026-08-23
        *   「**片道の操作を作らない**」に従い、足せるなら**消せる**。
-       * ⚠ `line` / `col` は**押した所**(行を足すならその行の下、列を足すならその列の右)。
+       * ⚠ `line` / `col` は**押した所**(行を追加するならその行の下、列を追加するならその列の右)。
        * ⚠ **最後の 1 行 / 1 列は消さない** ── 消すと表そのものが消えて、
        *   user は CSV の原文に放り出される(戻す口が無くなる)。
        */
@@ -557,7 +557,7 @@ export type BodyRewrite =
       /**
        * 🔴 **外部の画像を手元の添付へ差し替える**(#264 段①)。
        *
-       * ⚠ **行番号を持たない** ── 取りに行っている間に別の窓が行を足していれば
+       * ⚠ **行番号を持たない** ── 取りに行っている間に別の窓が行を追加していれば
        *   番号はずれる。持つのは **`url → asset:<key>` の対応**で、
        *   `link-scan` が**いま disk に在る本文**から同じ宛先を探して当てる。
        * 🔴 **当てるのは画像だけ**(`acceptsExternalImage`)── 同じ URL を
@@ -657,7 +657,7 @@ export type BodyRewrite =
        * 🔴 **保存したスタックの中の 1 行を、隣のリンク行と入れ替える**(#633 段④)。
        *
        * ⚠ `line` は**原文の行番号**(0 始まり)、`openLine` は**押した時点のその行そのもの** ──
-       *   disk 側と byte 一致しなければ書かない(`place-move` と同じ門。別の窓が行を足していれば
+       *   disk 側と byte 一致しなければ書かない(`place-move` と同じ門。別の窓が行を追加していれば
        *   番号は別の行を指す)。
        * ⚠ 入れ替える相手も**リンクの箇条書きの行**でなければ動かさない ── 見出しや空行と
        *   入れ替えると入れ物の形が崩れる。端(上が無い / 下が無い)では**同じ本文を返す**
@@ -728,7 +728,7 @@ export type BodyRewrite =
        * `{w=50% align=center}` だけを書き換える。画像の右クリックの「大きさ」「寄せ」が撃つ。
        *
        * ⚠ `line` は**原文の行番号**(0 始まり)、`openLine` は**押した時点のその行の中身**(`task` と同じ門:
-       *   別の窓が上へ行を足して同じ番号が別の行を指す形で、別の画像を変えない)。
+       *   別の窓が上へ行を追加して同じ番号が別の行を指す形で、別の画像を変えない)。
        * ⚠ `key` は画像の添付の鍵 ── 同じ行に画像が 2 つあっても、押した物だけを書く。
        * 🔑 渡さなかった札は**いま書かれているものを保つ**、`null` は**外す**(置けるなら外せる)。
        * ⚠ 綴りの読み書きは `image-attrs.ts` の 1 本 ── 描画(読む側)と共用する。
@@ -747,7 +747,7 @@ export type BodyRewrite =
        * 🔴 **計った時間の行を直す・消す**(#683 ①)── `- 作業 2026-08-27 06:40–07:03(23:11)` の 1 行。
        *
        * ⚠ `line` は**原文の行番号**(0 始まり)、`openLine` は**押した時点のその行そのもの**(`task` と同じ門:
-       *   別の窓が上へ行を足して同じ番号が別の行を指す形で、別の行を書き換えない)。
+       *   別の窓が上へ行を追加して同じ番号が別の行を指す形で、別の行を書き換えない)。
        * 🔑 `next` が行の新しい中身、`null` なら**行ごと消す**(前後の行・改行コードは触らない)。
        *   名前の付け替えの字は `features/timer/work-log.ts` の `relabelWorkLine` が作る(綴りを 2 か所に持たない)。
        */
@@ -915,7 +915,7 @@ export function applyTaskRun(
       at < fm ||
       line === undefined ||
       mask[at] === true ||
-      // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の項目を指す形。#1087)
+      // 🔴 押した時点の中身と違う行は書かない(別の窓が行を追加して、同じ番号が別の項目を指す形。#1087)
       openLines.length !== targets.length ||
       openLines[k] !== line
     ) {
@@ -1301,7 +1301,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
-  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の項目を指す形。#1087)
+  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を追加して、同じ番号が別の項目を指す形。#1087)
   if (line !== rewrite.openLine) return null;
   const m = TASK_LINE.exec(line);
   if (m === null) return null;
@@ -1722,7 +1722,7 @@ function rewriteCsvCell(
   const lines = splitLines(body);
   const line = lines[rewrite.line];
   if (line === undefined) return null;
-  // 🔴 升を開いた時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の行を指す形。`task` と同じ。#1087)
+  // 🔴 升を開いた時点の中身と違う行は書かない(別の窓が行を追加して、同じ番号が別の行を指す形。`task` と同じ。#1087)
   if (line !== rewrite.openLine) return null;
   const eol = detectEol(body);
   const table = csvTableAt(body, rewrite.line);
@@ -1767,7 +1767,7 @@ function rewriteCsvCell(
      *   空行にも**押せる印が焼かれる**。直す前はそこを断っていたので、
      *   「**押せる → 打てる → 消える**」だった(実測 2026-09-07:9 升のうち 2 升)。
      * 🔑 だから**足りない区切りを補って書く** ── `1` の 3 列目に `x` なら `1,,x`。
-     *   行を足したときにできる空の升と**同じ動き**になる。
+     *   行を追加したときにできる空の升と**同じ動き**になる。
      * ⚠ **表の幅を超える依頼は断る** ── 焼く側は幅までしか升を出さないので、
      *   それを超えるのは「別の窓から来た古い依頼」である。
      * ⚠ **空を書いても原文は変わらない**ので断る(「同じ字なら書かない」と同じ向き)。
@@ -1840,7 +1840,7 @@ function rewriteTableFormat(
   body: string,
   rewrite: { line: number; openLine: string; to: TableFormat; header?: boolean },
 ): string | null {
-  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の表を指す形。`task` と同じ。#1087)
+  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を追加して、同じ番号が別の表を指す形。`task` と同じ。#1087)
   if (splitLines(body)[rewrite.line] !== rewrite.openLine) return null;
   // 🔴 1 行目を見出しにする / やめる(#1662 3)── 形は変えず、囲みの旗だけを書く
   if (rewrite.header !== undefined) return rewriteTableHeader(body, rewrite.line, rewrite.header);
@@ -1939,9 +1939,9 @@ function csvTableAt(
 }
 
 /**
- * 🔴 **表の行・列を足す / 消す**(#418 段①)。
+ * 🔴 **表の行・列を追加する / 消す**(#418 段①)。
  *
- * 🔑 **触る所だけを触る** ── 行を足すのは 1 行の挿入、列は各行の
+ * 🔑 **触る所だけを触る** ── 行を追加するのは 1 行の挿入、列は各行の
  *   **そのセルの範囲**の surgery で済ませる。組み直すと、触っていないセルの
  *   `\"a\"` が `a` になるなど**字面が黙って変わる**。
  * ⚠ **またがっている行が 1 つでもあれば、列の操作は丸ごと断る** ──
@@ -2037,7 +2037,7 @@ function csvShapeResult(
     return 'refused' in md ? md : rejoinLines(body, md.lines);
   }
   const lines = splitLines(body);
-  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を足して、同じ番号が別の行を指す形。`csv-cell` と同じ。#1087)
+  // 🔴 押した時点の中身と違う行は書かない(別の窓が行を追加して、同じ番号が別の行を指す形。`csv-cell` と同じ。#1087)
   if (lines[rewrite.line] !== rewrite.openLine) return null;
   const eol = detectEol(body);
   /**

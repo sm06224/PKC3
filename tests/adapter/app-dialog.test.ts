@@ -326,7 +326,7 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
 });
 
 /**
- * 🔴 **日付を入れる道具が返す形**(user 指示 2026-08-23)。
+ * 🔴 **日付を挿入する道具が返す形**(user 指示 2026-08-23)。
  *
  * ⚠ 画面までの繋がりは `tests/adapter/format-append.test.ts` が見る。
  * **ここが見るのは返り値の契約**である ── `time` は「空なら `null`」であって
@@ -335,7 +335,7 @@ describe('アプリ自身の確認ダイアログ(#299)', () => {
  *   区別がつかない(2026-08-23 の変異試験 T8 が SURVIVED で教えた)──
  *   同じ規則を守る場所が 2 つあるとき、**上流の契約は上流で見る**。
  */
-describe('日付を入れる道具の返り値(2026-08-23)', () => {
+describe('日付を挿入する道具の返り値(2026-08-23)', () => {
   /**
    * ⚠ **この describe にも要る。** 上の `beforeEach` は別の describe の中に在るので
    *   ここには効かない ── 掃除しないと `okBtn()`(document 先頭)が
@@ -520,10 +520,10 @@ describe('まとめて貼るの選び方(#679)', () => {
   it('🔴 1 件も選んでいなければ押せない(無言の dead click を作らない)', async () => {
     const answered = pickScrapInApp(document.body, ROWS);
     expect(okBtn().disabled, '選んでいないのに押せる').toBe(true);
-    expect(okBtn().textContent).toBe('選んだ物を入れる');
+    expect(okBtn().textContent).toBe('選んだ物を挿入');
     pick(0);
     expect(okBtn().disabled).toBe(false);
-    expect(okBtn().textContent, '何件入るかが字に出ていない').toBe('選んだ 1 件を入れる');
+    expect(okBtn().textContent, '何件入るかが字に出ていない').toBe('選んだ 1 件を挿入');
     cancelBtn().click();
     await answered;
   });

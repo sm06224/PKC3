@@ -75,7 +75,7 @@ export function formatISO8601(d: Date): string {
 /**
  * 🔴 **いまの日時を 1 打鍵で入れる命令と、入れる字の形**(#1966 2-C。PKC2 の `Ctrl+:` / `Ctrl+Shift+;` / `Ctrl+D` などと同じ形)。
  * ⚠ 命令の綴り → 字の組み立ての表は**ここ 1 か所**(鍵・操作を探す・1 面の行の欄が同じ表を引く)。
- * ⚠ `Ctrl+;`(日付を入れる)は小さなウィンドウで選ぶ別の命令(予定に載る `@日付` を入れる)── ここには入れない。
+ * ⚠ `Ctrl+;`(日付を挿入)は小さなウィンドウで選ぶ別の命令(予定に載る `@日付` を入れる)── ここには入れない。
  */
 export const NOW_STAMP_COMMANDS: Readonly<Record<string, (d: Date) => string>> = {
   'insert-now-time': formatTime,

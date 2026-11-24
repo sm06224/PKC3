@@ -134,7 +134,7 @@ test('🔴 コピーした物が残り、選ぶともう一度コピーされる
   await expect(
     page.locator('[data-pkc-field="dialog-ok"]'),
     '何件入るかが字に出ていない',
-  ).toHaveText('選んだ 2 件を入れる');
+  ).toHaveText('選んだ 2 件を挿入');
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
   const appendInput = page.locator('[data-pkc-field="append-input"]');
   await expect(appendInput, '追記の欄へ入っていない').toHaveValue(/ひとつめの中身/);

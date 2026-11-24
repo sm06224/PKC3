@@ -78,7 +78,7 @@ export interface PdfEditResult {
 }
 
 /**
- * 窓の「PDF を足す → 添付から選ぶ」に出す、この collection の PDF の添付 1 件(#275)。
+ * 窓の「PDF を追加 → 添付から選ぶ」に出す、この collection の PDF の添付 1 件(#275)。
  * ⚠ 窓へ渡すのは**題名と大きさと鍵だけ**(bytes は `attach-get` で貸した URL から取る)。
  */
 export interface PdfAttachmentItem {

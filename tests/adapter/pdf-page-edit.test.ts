@@ -351,7 +351,7 @@ describe('本体の返事を依頼に突き合わせる(#275 段②-1c)', () => 
   });
 });
 
-describe('別の PDF を足す(#275 結合)── 通し番号で元のページと同じ操作ができる', () => {
+describe('別の PDF を追加(#275 結合)── 通し番号で元のページと同じ操作ができる', () => {
   it('足したページは並びの最後に、回していない形で付く / 元の並びは書き換えない', () => {
     const base = api.fresh(3);
     const next = api.appendPages(base, 4, 2);
@@ -449,8 +449,8 @@ describe('別の PDF を足す(#275 結合)── 通し番号で元のページ
   });
 
   it('断りの字: 暗号化 / 読めない / ほか ── どれも「何も変えていません」と言う', () => {
-    expect(api.appendRefusal('encrypted')).toContain('パスワードで守られた PDF は足せません');
-    expect(api.appendRefusal('unreadable')).toContain('PDF として読めないため足せません');
+    expect(api.appendRefusal('encrypted')).toContain('パスワードで守られた PDF は追加できません');
+    expect(api.appendRefusal('unreadable')).toContain('PDF として読めないため追加できません');
     expect(api.appendRefusal(undefined)).toContain('もう一度試してください');
     for (const c of ['encrypted', 'unreadable', 'worker']) expect(api.appendRefusal(c)).toContain('何も変えていません');
     expect(new Set(['encrypted', 'unreadable', 'worker'].map((c) => api.appendRefusal(c))).size).toBe(3);

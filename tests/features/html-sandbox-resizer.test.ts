@@ -161,7 +161,7 @@ describe('🔴 送り主の同一性(なりすましを通さない)', () => {
     expect(viewer, '閲覧側が名乗った id で querySelector している').not.toContain(
       "'iframe[data-pkc-html-render-id=\"'+d.id",
     );
-    // ⚠ origin を条件に足していない(sandbox の箱では "null" になり判定に使えない)
+    // ⚠ origin を条件に追加していない(sandbox の箱では "null" になり判定に使えない)
     expect(viewer, '閲覧側が origin を判定に使っている').not.toMatch(/ev\.origin\s*[!=]==/);
   });
 });

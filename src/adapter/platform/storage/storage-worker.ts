@@ -1175,7 +1175,7 @@ export function applySchema(database: Database): void {
      * ⚠ 順序を逆にすると、**既存 DB が開かなくなる**:
      *   `SCHEMA_DDL` には新しい列を使う索引
      *   (`CREATE INDEX … ON entries (cid, task_total)`)が入っているので、
-     *   列を足す前に走ると `no such column` で **tx ごと落ちる** ── つまり
+     *   列を追加する前に走ると `no such column` で **tx ごと落ちる** ── つまり
      *   **いま使っている user 全員のアプリが起動しなくなる**。
      * ⚠ 新規 DB には entries がまだ無いので、**表の実在を見てから** ALTER する
      *   (判定は user_version ではなく「あるべき状態の実在」── schema.ts の原則)。
@@ -1264,7 +1264,7 @@ export function applySchema(database: Database): void {
         database.exec(`DROP TRIGGER IF EXISTS ${t}`);
     }
     // 新規 DB は最新 DDL がそのまま最新形を作る(既存 DB では no-op)。
-    // ⚠ 索引はここで作られる ── 上で列を足した**後**であることが要。
+    // ⚠ 索引はここで作られる ── 上で列を追加した**後**であることが要。
     for (const ddl of SCHEMA_DDL) database.exec(ddl);
     // 索引の形の版を刻む(新しい DB も作り直した DB も、いまの形)。⚠ 移行に失敗した回は刻まない(次の起動でやり直す)
     if (!migrationFailed)
@@ -1297,7 +1297,7 @@ export function applySchema(database: Database): void {
      *   **1 つの tx** に入っているので、「列は在るが埋まっていない」半端な状態は
      *   作れない(落ちれば ALTER ごと巻き戻る)。
      * ⚠ 「本文を LIKE で走査して埋め忘れを探す」形は**採らない** ── 毎回の open で
-     *   全本文を読むことになり、絞るために列を足した意味が消える(#212 の穴)。
+     *   全本文を読むことになり、絞るために列を追加した意味が消える(#212 の穴)。
      * 🔑 本文は既に DB に在るので、**ここで数え直せる**(取り込み直しは要らない)。
      */
     /**
@@ -2182,7 +2182,7 @@ const BACKFILL_CHUNK = 200;
  * ⚠ 「回すか」を見る probe と「どの行を読むか」を見る塊取りは**必ず同じ条件**で
  *   なければならない ── 食い違うと、probe が「要る」と言い続けるのに塊が
  *   1 件も返らず、**open のたびに空回りする**(または逆に、埋まらない行が残る)。
- * ⚠ 列を足したらここに足す。⚠ **`OR` で並べる**(片方だけ NULL の行が実在する ──
+ * ⚠ 列を追加したらここに足す。⚠ **`OR` で並べる**(片方だけ NULL の行が実在する ──
  *   `task_total` は #277 で、`body_chars` は 2026-08-19 に足したので、
  *   その間に書かれた行は前者だけ埋まっている)。
  */
@@ -2544,7 +2544,7 @@ function restoreOneChain(
  * 🔴 **鎖の復元の本体**(台帳 #1852 束 F2 で `restoreOneChain` から切り出した)。`head` = 符号化の起点(生きたノートなら
  * `entries` の行、ゴミ箱のノートなら頭の行になる全文)。生きたノートの復元(`restoreOneChain`)とゴミ箱のノートの復元
  * (`restoreOneTrashNote`)が**この 1 本**を通る ── 2 か所に decode / 噛み合わせ検査 / 符号化を書かない。
- * @returns 積んだ古い版の行数(rev_order は 1..n。頭の行を足すなら n + 1)
+ * @returns 積んだ古い版の行数(rev_order は 1..n。頭の行を追加するなら n + 1)
  */
 function stageAndWriteChain(
   database: Database,
@@ -3348,7 +3348,7 @@ const USER_TABLE_NAMES_SQL =
 /**
  * 🔴 **DuckDB へ写す表の名前を引く 1 文**(#682 段④d の着地後レビュー)。
  *
- * ⚠ 客を開く口(`USER_TABLE_NAMES_SQL`)と**同じ判定**(`sqlite_` の内部の表を外す)に**もう 1 つ足す**:本文検索(FTS5)の
+ * ⚠ 客を開く口(`USER_TABLE_NAMES_SQL`)と**同じ判定**(`sqlite_` の内部の表を外す)に**もう 1 つ追加**:本文検索(FTS5)の
  *   **仮想表本体も**外す(客を開く口は影の表だけ外し、本体は残す ── 内蔵の sqlite は引ける)。
  *   直す前は影の表が全部 DuckDB へ写り、user の表と並んで出ていた(構造を採る側 `SCHEMA_COLUMNS_SQL` は #967 で外している)。
  * 🔑 判定は `NOT_FTS_BACKSTAGE` **1 本**(`schema-digest.ts`)── 「仮想表の影であること」で見る

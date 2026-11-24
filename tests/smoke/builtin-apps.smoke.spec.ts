@@ -630,7 +630,7 @@ test('🔴 別ウィンドウの予定表は一覧・情報・バーを畳んで
   const entry = popup.locator('[data-pkc-region="rail"] [data-pkc-field="message-entry"]');
   await expect(entry, '畳んだバーにメッセージの入口が無い').toBeVisible();
   await expect(popup.locator('[data-pkc-region="rail"] [data-pkc-action="show-trash"]'), '他のタイルまで出ている').toBeHidden();
-  // 注意を 1 件起こす: 日付を消して時刻だけ入れて「予定を足す」(理由がメッセージに出る)
+  // 注意を 1 件起こす: 日付を消して時刻だけ入れて「予定を追加」(理由がメッセージに出る)
   await popup.locator('[data-pkc-field="schedule-quick-date"]').fill('');
   await popup.locator('[data-pkc-field="schedule-quick-time"]').fill('09:00');
   await clickReal(popup, popup.locator('[data-pkc-action="schedule-quick-add"]'));

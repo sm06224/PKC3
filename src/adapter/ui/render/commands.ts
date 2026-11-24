@@ -352,7 +352,7 @@ function buildWorkspacePanel(): HTMLElement {
   name.setAttribute('aria-label', '新しいワークスペースの名前');
   name.placeholder = '新しいワークスペースの名前';
   const btn = iconButton('workspace-create', 'ワークスペースを作る');
-  btn.title = '空のワークスペースを足します(足しただけでは、いまの画面は変わりません)';
+  btn.title = '空のワークスペースを追加します(追加しただけでは、いまの画面は変わりません)';
   row.append(name, btn);
   box.append(row);
   return box;

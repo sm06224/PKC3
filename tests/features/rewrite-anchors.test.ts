@@ -3,7 +3,7 @@
  * 🔴 **行番号だけで指していた書換が、押した時点の行の中身で突き合わせる**(#1087)。
  *
  * 対象は `csv-shape`(表の行・列の足し引き)/ `table-format`(表の形変え)/ `move-lines` の落とし先
- * (`toBeforeLine`)/ `insert-lines` の `anchor`。どれも「別のタブが上へ行を足したあと、古い表示から押すと
+ * (`toBeforeLine`)/ `insert-lines` の `anchor`。どれも「別のタブが上へ行を追加したあと、古い表示から押すと
  * **1 行上の行 / 別の表 / 別の所**を書き換える」形だった。`task` / `csv-cell` の `openLine` と同じ作法で、
  * 突き合わせて合わなければ書かない(`null`)。
  *
@@ -40,7 +40,7 @@ describe('csv-shape ── 押した行の中身が違えば、別の行を足�
     expect(shape(PRESSED)).toBe('```csv\na,b\ne,f\n```');
   });
 
-  it('🔴 列を消す・行/列を足す、も同じ門を通る(4 通り全部)', () => {
+  it('🔴 列を消す・行/列を追加する、も同じ門を通る(4 通り全部)', () => {
     for (const what of ['row', 'col'] as const) {
       for (const mode of ['add', 'remove'] as const) {
         expect(shape(DISK, { what, mode }), `${what}/${mode} が古い行番号のまま書いた`).toBeNull();
@@ -106,7 +106,7 @@ describe('move-lines ── 落とし先の行も、落とした時点の字の�
   it('末尾(`toBeforeLine: null`)は、行数と等しい `toBefore` のときだけ', () => {
     const n = RAW.split('\n').length;
     expect(move(RAW, { toBefore: n, toBeforeLine: null })).not.toBeNull();
-    // 末尾のつもりなのに、その番号にはもう行が在る(別のタブが行を足した)
+    // 末尾のつもりなのに、その番号にはもう行が在る(別のタブが行を追加した)
     expect(move(`${RAW}\n追加された行`, { toBefore: n, toBeforeLine: null })).toBeNull();
     // 逆:行が在るつもりなのに、その番号がもう末尾
     expect(move(RAW, { toBefore: n, toBeforeLine: '段落 C' })).toBeNull();
@@ -142,7 +142,7 @@ describe('insert-lines ── 落とした所の目印(anchor)', () => {
     const rw = (body: string, text: string) =>
       applyBodyRewrite(body, { kind: 'insert-lines', toBefore: 2, lines: ['[相手](entry:n2)'], anchor: { line: 2, text } });
     expect(rw(DOC, '段落')).not.toBeNull();
-    expect(rw(`新しい行\n${DOC}`, '段落'), '別の窓が行を足したのに刺さった').toBeNull();
+    expect(rw(`新しい行\n${DOC}`, '段落'), '別の窓が行を追加したのに刺さった').toBeNull();
     expect(insertLines(DOC, 2, ['x'], { line: 2, text: '段落' })).not.toBeNull();
   });
 

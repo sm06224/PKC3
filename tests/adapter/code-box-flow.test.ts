@@ -241,7 +241,7 @@ describe('コード枠の ✎ を押し、打って保存する(#1044 段3)', ()
     await clickEditCodeBlock(root);
     codeInput(root)!.value = '打ちかけ';
     root.querySelector<HTMLElement>('[data-pkc-action="cancel-code-draft"]')!.click();
-    expect(dialogMessage()).toBe('打った内容を捨てますか');
+    expect(dialogMessage()).toBe('入力した内容を捨てますか');
     await answerDialog('ok');
     await tick();
     expect(d.getState().sectionDraft).toBeNull();

@@ -239,7 +239,7 @@ describe('関係の導線', () => {
     expect(d.getState().relations, '種類が違うのに断っている').toHaveLength(2);
   });
 
-  it('🔴 つながりを足す欄は「つながり」の行の中にあり、描き直しても同じ欄のまま(依頼 77-6 C)', () => {
+  it('🔴 つながりを追加する欄は「つながり」の行の中にあり、描き直しても同じ欄のまま(依頼 77-6 C)', () => {
     const { root, d } = mounted([meta('n1', 'あ'), meta('n2', 'い')]);
     const dd = root.querySelector<HTMLElement>('dd[data-pkc-field="inspector-relations"]')!;
     const bar = root.querySelector<HTMLElement>('[data-pkc-field="relation-add"]')!;

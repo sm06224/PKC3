@@ -295,7 +295,7 @@ type PendingOpen =
   | { kind: 'first' };
 
 /**
- * 🔴 **行を開き直して、打っていた場所へ caret を戻す依頼**(#582。左の探す欄の `>` から「打っている場所に入れる」操作を呼ぶ道)。
+ * 🔴 **行を開き直して、打っていた場所へ caret を戻す依頼**(#582。左の探す欄の `>` から「カーソルの位置に入れる」操作を呼ぶ道)。
  * ⚠ 探す欄を押すと行は確定して消える。binder が控えた「どの行の・どの字で・どこに caret が居たか」を持ち込み、
  *   **開いた行の原文が控えと同じときだけ**戻す(違えば別の行を開いたことになるので、閉じて `done(false)`)。
  */
@@ -1348,7 +1348,7 @@ export class RowSwap {
       }
       /**
        * 🔴 **表のセルの中の `Tab` / `Shift`+`Tab` は、次の / 前のセルへ進む**(台帳 #1852 / 依頼 200。Gemini 回答 = 全文の編集と揃える)。
-       *   ⚠ 表の最後のセルの `Tab`・最初のセルの `Shift`+`Tab`(行を足す・戻る先が無い)と、表の外は今までどおり「行の確定」
+       *   ⚠ 表の最後のセルの `Tab`・最初のセルの `Shift`+`Tab`(行を追加する・戻る先が無い)と、表の外は今までどおり「行の確定」
        *   (確定で出る道を残す。行の追加は全文の編集だけ ── ここで足すと `Tab` で抜けられなくなる)。
        *   判定は `tableOnTab` の 1 本(全文の編集と同じ)。割り当てを替えて `Tab` が確定でなくなっていれば触らない。
        */
@@ -1747,7 +1747,7 @@ export class RowSwap {
     if (normalizeEol(a.textarea.value) !== a.source) {
       if (this.cancelAsking) return;
       this.cancelAsking = true;
-      void confirmInApp(this.host, '打った内容を捨てますか', {
+      void confirmInApp(this.host, '入力した内容を捨てますか', {
         okLabel: '編集をやめる',
         cancelLabel: '編集を続ける',
       }).then((answer) => {

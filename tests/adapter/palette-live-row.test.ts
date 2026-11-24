@@ -1,16 +1,16 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **左の探す欄の `>` から「打っている場所に入れる」操作を呼ぶ**(#582 段③ 第 3 群の残り)。
+ * 🔴 **左の探す欄の `>` から「カーソルの位置に入れる」操作を呼ぶ**(#582 段③ 第 3 群の残り)。
  *
  * ## 何が起きていたか
- * 1 面のライブ編集で探す欄を押すと、焦点が外れて行が確定し `row-source` が DOM から消える。そのまま「日付を入れる」などを選んでも
+ * 1 面のライブ編集で探す欄を押すと、焦点が外れて行が確定し `row-source` が DOM から消える。そのまま「日付を挿入」などを選んでも
  * 書き込む欄が無く、何も起きなかった(2 列の編集は欄が残るので動く)。
  *
  * ## 守るもの
  *  ① 行が探す欄へ焦点を渡す瞬間に控えた行(行番号・原文・caret)で、**行を開き直してから**命令を実行する(開き直す前に押さない)。
  *  ② 開き直せなかった(控えと違う行・別のノート・面が無い)ときは**押さずに**「書き込む欄が変わった」で断る。
  *  ③ 控えは探す欄へ移ったときだけ(他へ移った blur では捨てる)・1 回使ったら捨てる・欄が既に在る(2 列)なら開き直さない。
- *  ④ 「打っている場所に入れる」でない命令(`CARET_INSERT_TOOLS` の外)は、控えがあっても開き直さない。
+ *  ④ 「カーソルの位置に入れる」でない命令(`CARET_INSERT_TOOLS` の外)は、控えがあっても開き直さない。
  * ⚠ 行そのものの開き直し(caret の復元・原文の突き合わせ・予約)は `row-swap.test.ts` が持つ。ここは binder の配線。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -240,7 +240,7 @@ describe('左の `>` から、1 面の行へ入れる操作を呼ぶ(#582)', () 
     expect(a.log).toEqual(['insert-date:no-row']);
   });
 
-  it('「打っている場所に入れる」でない命令(全文の道具)は、控えがあっても開き直さない', () => {
+  it('「カーソルの位置に入れる」でない命令(全文の道具)は、控えがあっても開き直さない', () => {
     const a = setup();
     a.leaveRowTo(a.filter);
     a.runRow('renumber-lists');
@@ -364,7 +364,7 @@ describe('本物の RowSwap と繋ぐ(#582)', () => {
     const pane = document.createElement('div');
     pane.setAttribute('data-pkc-region', 'editor-live');
     detail.append(pane);
-    // 「日付を入れる」の受け手の代わり: 押した瞬間の caret に字を挿す(本物のボタンと同じく caret を読む)
+    // 「日付を挿入」の受け手の代わり: 押した瞬間の caret に字を挿す(本物のボタンと同じく caret を読む)
     const inserted: string[] = [];
     const btn = document.createElement('button');
     btn.setAttribute('data-pkc-action', 'insert-date');
@@ -397,7 +397,7 @@ describe('本物の RowSwap と繋ぐ(#582)', () => {
     render(text);
     const filter = root.querySelector<HTMLInputElement>('[data-pkc-field="entry-filter"]')!;
     const rowTa = (): HTMLTextAreaElement | null => pane.querySelector('[data-pkc-field="row-source"]');
-    /** 行を開いて caret を置き、探す欄へ移り、一覧の「日付を入れる」を押す。 */
+    /** 行を開いて caret を置き、探す欄へ移り、一覧の「日付を挿入」を押す。 */
     const openThenCallFromLeft = (target: Element, at: number): void => {
       target.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0, ctrlKey: true }));
       const ta = rowTa()!;

@@ -1,11 +1,11 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **別のタブ・窓が編集中のノートへは、板(付箋)の書換と、表の行・列を足す口も断る**(#1087。追記と同じ門)。
+ * 🔴 **別のタブ・窓が編集中のノートへは、板(付箋)の書換と、表の行・列を追加する口も断る**(#1087。追記と同じ門)。
  *
  * 対象(binder.ts の受け手): 板を置く(`add-place`)/ 前へ出す(`raise-place`)/ 後ろへ送る(`lower-place`)/ 形(`place-shape-*`)/
  * 色を外す(`place-color-clear`)/ 線の太さ(`place-line-width`)/ 矢じり(`place-line-arrow`)/
  * 文字の大きさ(`place-size`)/ グループを解く(`place-ungroup`)/ 回す(`place-rotate`)/
- * 色を選ぶ(`place-color`。窓で選び終えた時点で確かめる)/ 表の行・列を足す(`shape-cell` の足す回)。
+ * 色を選ぶ(`place-color`。窓で選び終えた時点で確かめる)/ 表の行・列を追加する(`shape-cell` の足す回)。
  * 窓で選ぶ 3 つ(`place-rect` / `place-group` / `add-place-template`)は、選び終えて書く直前に同じ 1 本
  * (`placeEditedElsewhereGate`)を通す ── 受け手の全数は末尾の「全数」で数える。
  * ⚠ 通すと、編集中のタブの保存で上書きされ、書換は履歴にだけ残る。**断って理由を出し、何も撃たない**。
@@ -154,7 +154,7 @@ describe('板(付箋)の書換 ── 別のタブが編集中なら断る(#1087
   });
 });
 
-describe('表の行・列を足す(shape-cell の足す回)── 別のタブが編集中なら断る(#1087)', () => {
+describe('表の行・列を追加する(shape-cell の足す回)── 別のタブが編集中なら断る(#1087)', () => {
   const attrs = (mode: 'add' | 'remove'): Record<string, string> => ({
     'data-pkc-cell-line': '2',
     'data-pkc-cell-col': '0',

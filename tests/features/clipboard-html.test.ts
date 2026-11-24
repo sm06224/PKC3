@@ -116,7 +116,7 @@ describe('貼る用の掃除', () => {
     expect(el.querySelectorAll('td,th').length, `升が消えた(${before} → 0)`).toBe(before);
     expect(r.html, '升の字が消えた').toContain('名前');
     expect(r.html, '升の字が消えた').toContain('あ');
-    // ⚠ 押す器(行・列を足す ⌗)は落ちている
+    // ⚠ 押す器(行・列を追加する ⌗)は落ちている
     expect(r.html, '押せないボタンが貼られる').not.toContain('<button');
     // ⚠ 内部の印は残さない(④ が落とす)
     expect(r.html, '内部の印が貼られる').not.toContain('data-pkc-');

@@ -32,7 +32,7 @@
  *   ⑤⁗′ 付箋とペン(#275)── 「付箋」→ ページの余白を押す → 字を入れる(変換中の Enter では付かない)→ Enter → 印が出る → 重ねると字が出る → 印を押して
  *     「直す」→「外す」→「ペン」で色を選んでなぞる → 線 → 線を押して「外す」→ 保存 → できた PDF を開き直すと付箋も線も在る(付箋は直せる・戻せる)
  *
- *   ⑤⁘ 別の PDF を足す(#275 結合)── 読めない PDF・パスワード付きは断って何も変えない → 2 ページの PDF を足すと一覧の最後に並び
+ *   ⑤⁘ 別の PDF を追加(#275 結合)── 読めない PDF・パスワード付きは断って何も変えない → 2 ページの PDF を追加すると一覧の最後に並び
  *     (絵も出る)、保存ボタンが出る → 足したページを回して「別の PDF として保存」→ できた PDF は N+2 ページで、足した字が後ろに入り、向きも反映される
  *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
@@ -75,7 +75,7 @@ function buildPdf(
   for (let i = 0; i < pages; i += 1) {
     const pageObj = 4 + i * 2;
     kids.push(`${String(pageObj)} 0 R`);
-    // 🔑 3 頁目だけ、書体を変えて 2 つの塊(= 文字の層の span 2 つ)に分かれる 1 行を足す:「split」+「match」。
+    // 🔑 3 頁目だけ、書体を変えて 2 つの塊(= 文字の層の span 2 つ)に分かれる 1 行を追加する:「split」+「match」。
     //    pdf.js は書体が変わるところで文字を別の塊にするので、「litma」の一致は 2 つの span にまたがる
     const split = i === 2 ? ' /F1 24 Tf 0 -100 Td (split) Tj /F2 24 Tf (match) Tj' : '';
     // 🔑 2 頁目だけ、別々の行に 2 つの Tj を足す(1 行目の行末で pdf.js が `hasEOL` を立てる)── 行をまたぐ語「the lazy」の観測用
@@ -401,13 +401,13 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   }
   expect(win.isClosed(), '「ブラウザの表示で開く」で PDF のウィンドウが閉じた').toBe(false);
   await win.focus('#hit-next');
-  // 上のバーで押せるのは「PDF を足す」(#275 結合)と「注釈をページに書き込んで保存」(#1163 依頼 31。何も変えていなくても押せる)と「付箋」「ペン」(#275。字を選ばなくても押せる)だけ ── 次の Tab で一覧へ入る
+  // 上のバーで押せるのは「PDF を追加」(#275 結合)と「注釈をページに書き込んで保存」(#1163 依頼 31。何も変えていなくても押せる)と「付箋」「ペン」(#275。字を選ばなくても押せる)だけ ── 次の Tab で一覧へ入る
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「ブラウザの表示で開く」でない').toBe('open-native');
   await win.keyboard.press('Tab');
-  expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「PDF を足す」でない').toBe('append-pdf');
+  expect(await win.evaluate(() => document.activeElement?.id), '上のバーの次の止まり先が「PDF を追加」でない').toBe('append-pdf');
   await win.keyboard.press('Tab');
-  expect(await win.evaluate(() => document.activeElement?.id), '「PDF を足す」の次の止まり先が「注釈をページに書き込んで保存」でない').toBe('edit-flatten');
+  expect(await win.evaluate(() => document.activeElement?.id), '「PDF を追加」の次の止まり先が「注釈をページに書き込んで保存」でない').toBe('edit-flatten');
   await win.keyboard.press('Tab');
   expect(await win.evaluate(() => document.activeElement?.id), '「注釈をページに書き込んで保存」の次の止まり先が「付箋」でない').toBe('note-tool');
   await win.keyboard.press('Tab');
@@ -1238,7 +1238,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await enc.close();
   expect(edErrors, '編集の窓で例外が出た').toEqual([]);
 
-  // ── ⑤⁘ 別の PDF を足す(#275 結合)── 3 ページの PDF に、自作の 2 ページを足して保存 → 5 ページの新しい添付 ──
+  // ── ⑤⁘ 別の PDF を追加(#275 結合)── 3 ページの PDF に、自作の 2 ページを足して保存 → 5 ページの新しい添付 ──
   //    足す PDF の字は `extra<頁>`(元の `marker<頁>` と見分ける)。新しい起動は足さない(同じ起動の中で通す)。
   const MG_NAME = '結合.pdf';
   const MG_OUT = '結合 (編集).pdf';
@@ -1260,26 +1260,26 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   await expect(mg.locator('[data-pkc-field="pdf-page-thumb"]')).toHaveCount(3, { timeout: 20_000 });
   await expect(mg.locator('body')).toHaveAttribute('data-pkc-pdf-state', 'ready');
   const mgAdd = mg.locator('#append-pdf');
-  await expect(mgAdd).toHaveText('PDF を足す');
+  await expect(mgAdd).toHaveText('PDF を追加');
   await expect(mgAdd).toBeEnabled();
   await expect(mgAdd).toHaveAttribute(
     'title',
-    '別の PDF を選んで、そのページをこの PDF の後ろに足します(添付から、またはパソコンのファイルから選べます)。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)',
+    '別の PDF を選んで、そのページをこの PDF の後ろに追加します(添付から、またはパソコンのファイルから選べます)。「別の PDF として保存」で新しい添付になります(元の PDF は変わりません)',
   );
   // 外した(隠した)項目は数えない ── 見えている項目だけ
   const mgThumbs = mg.locator('.thumb-cell:not([hidden]) [data-pkc-field="pdf-page-thumb"]');
   // 読めない PDF / パスワード付きは断る ── 窓の下に理由が出て、一覧も保存ボタンも変わらない
   await mg.setInputFiles('#append-file', { name: '壊れ.pdf', mimeType: 'application/pdf', buffer: Buffer.from('not a pdf') });
-  await expect(mg.locator('#status')).toContainText('PDF として読めないため足せません。何も変えていません', { timeout: 15_000 });
+  await expect(mg.locator('#status')).toContainText('PDF として読めないため追加できません。何も変えていません', { timeout: 15_000 });
   await mg.setInputFiles('#append-file', {
     name: 'パスワード付き.pdf',
     mimeType: 'application/pdf',
     buffer: Buffer.from(ENCRYPTED_PDF_BASE64, 'base64'),
   });
-  await expect(mg.locator('#status')).toContainText('パスワードで守られた PDF は足せません。何も変えていません', { timeout: 15_000 });
+  await expect(mg.locator('#status')).toContainText('パスワードで守られた PDF は追加できません。何も変えていません', { timeout: 15_000 });
   await expect(mgThumbs, '断ったのに一覧が増えた').toHaveCount(3);
   await expect(mg.locator('#edit-save'), '断ったのに保存ボタンが出ている').toBeHidden();
-  // 足し方の選び(#275 結合・裁定 Q2): 「PDF を足す」は 2 つの選び方を出す。外を押す / Esc で閉じる
+  // 足し方の選び(#275 結合・裁定 Q2): 「PDF を追加」は 2 つの選び方を出す。外を押す / Esc で閉じる
   const mgMenu = mg.locator('#append-menu');
   const mgHeads = mg.locator('[data-pkc-field="pdf-source-heading"]');
   await expect(mgMenu, '押す前からメニューが出ている').toBeHidden();
@@ -1438,7 +1438,7 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   for (const [w, wraps] of [
     [1000, true],
     [1100, true],
-    [2200, false], // 「PDF を足す」(#275 結合)で 1 行に収まる幅が 1500 から 1550 前後へ、「付箋」「ペン」(#275)でさらに広がった(1600 で 2 行になるのを実測)。「注釈をページに書き込んで保存」(#1163 依頼 31)でさらに広がり、1800 で 2 行になった(帯の高さ 64 を実測)
+    [2200, false], // 「PDF を追加」(#275 結合)で 1 行に収まる幅が 1500 から 1550 前後へ、「付箋」「ペン」(#275)でさらに広がった(1600 で 2 行になるのを実測)。「注釈をページに書き込んで保存」(#1163 依頼 31)でさらに広がり、1800 で 2 行になった(帯の高さ 64 を実測)
   ] as const) {
     await hw.setViewportSize({ width: w, height: 900 });
     await expect

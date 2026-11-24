@@ -665,9 +665,9 @@ describe('検索語の記録に、操作の名前は入らない', () => {
 describe('探す欄が `>` を名乗る', () => {
   it('🔴 hover に「`>` を打つと操作を探せます」が出る', () => {
     const { root } = setup();
-    expect(field(root).title).toContain('先頭に > を打つと、操作を探せます');
+    expect(field(root).title).toContain('先頭に > を入力すると、操作を探せます');
     // ⚠ 既存の説明(Esc で消す)を押しのけていない
-    expect(field(root).title).toContain('Esc で、打った字を消します');
+    expect(field(root).title).toContain('Esc で、入力した字を消します');
   });
 
   it('🔴 既存のパレット(左下の「操作を探す」)はそのまま残る', () => {

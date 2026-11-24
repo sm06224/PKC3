@@ -111,7 +111,7 @@ describe('A-3 空の行の升を打てる(描いた印と書き戻しの升が�
   it('🔴 字面: tsv の `\\t\\t` の行の 2 つ目の升に打つと、他の升は 1 バイトも動かない', () => {
     const body = '```tsv\na\tb\tc\n\t\t\nd\te\tf\n```';
     expect(write(body, 2, 1, 'Z')).toBe('```tsv\na\tb\tc\n\tZ\t\nd\te\tf\n```');
-    // 行を足す(空の行から)/ 列を足す(その行の升も数える)
+    // 行を追加する(空の行から)/ 列を追加する(その行の升も数える)
     const shape = (line: number, col: number, what: 'row' | 'col', mode: 'add' | 'remove') =>
       applyStrict(body, { kind: 'csv-shape', line, openLine: body.split('\n')[line]!, col, what, mode });
     expect(shape(2, 0, 'row', 'add')).toBe('```tsv\na\tb\tc\n\t\t\n\t\t\nd\te\tf\n```');

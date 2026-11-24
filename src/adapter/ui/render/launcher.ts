@@ -134,8 +134,8 @@ export class LauncherRenderer {
     go.setAttribute('data-pkc-action', 'add-url-tile');
     go.setAttribute('data-pkc-field', 'launcher-add-go');
     // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
-    go.title = 'この一覧にリンクを 1 つ足します(足したリンクは、システムの「アプリの開き方」で選んだ先に開きます)';
-    go.textContent = 'リンクを足す';
+    go.title = 'この一覧にリンクを 1 つ追加します(追加したリンクは、システムの「アプリの開き方」で選んだ先に開きます)';
+    go.textContent = 'リンクを追加';
     add.append(name, url, go);
 
     const list = document.createElement('div');
@@ -494,7 +494,7 @@ export class LauncherRenderer {
       const none = document.createElement('p');
       none.setAttribute('data-pkc-field', 'launcher-no-own');
       none.textContent =
-        '自分のアプリはまだありません。HTML ファイルをノートに添付し、その添付の画面で「アプリとして登録」にチェックを入れると、ここに並びます。よく開くサイトは、上の欄に名前とアドレスを入れて「リンクを足す」を押してください';
+        '自分のアプリはまだありません。HTML ファイルをノートに添付し、その添付の画面で「アプリとして登録」にチェックを入れると、ここに並びます。よく開くサイトは、上の欄に名前とアドレスを入れて「リンクを追加」を押してください';
       list.append(none);
     }
 

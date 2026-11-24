@@ -618,9 +618,9 @@ export class FilerRenderer {
     input.setAttribute('list', 'pkc-tag-candidates');
     input.placeholder = 'タグ';
     input.setAttribute('aria-label', '集める条件にするタグ');
-    const add = iconButton('smart-cond-add', '条件に足す');
+    const add = iconButton('smart-cond-add', '条件に追加');
     add.title =
-      '打ったタグが付いたノートを集めます(複数の条件は「全部付いている」で絞ります)。井桁を付けて空白で並べると、まとめて足せます';
+      '入力したタグが付いたノートを集めます(複数の条件は「全部付いている」で絞ります)。井桁を付けて空白で並べると、まとめて追加できます';
     bar.append(input, add);
 
     /**
@@ -801,9 +801,9 @@ export class FilerRenderer {
       tag.placeholder = 'タグ';
       tag.setAttribute('aria-label', 'まとめて付け外しするタグ');
       const add = iconButton('bulk-tag-add', '付ける');
-      add.title = `選んでいる ${marks.length} 件の本文に、打ったタグを足します(井桁を付けて空白で並べると、まとめて足せます)`;
+      add.title = `選んでいる ${marks.length} 件の本文に、入力したタグを追加します(井桁を付けて空白で並べると、まとめて追加できます)`;
       const off = iconButton('bulk-tag-remove', '外す');
-      off.title = `選んでいる ${marks.length} 件の本文から、打ったタグを消します(井桁を付けて空白で並べると、まとめて外せます)`;
+      off.title = `選んでいる ${marks.length} 件の本文から、入力したタグを消します(井桁を付けて空白で並べると、まとめて外せます)`;
       const tagToggle = document.createElement('button');
       tagToggle.type = 'button';
       tagToggle.setAttribute('data-pkc-action', 'toggle-bulk-tag');
@@ -1716,7 +1716,7 @@ export class FilerRenderer {
     path.setAttribute('data-pkc-field', 'crumb-path');
     // 🔴 枠の何も無い所を押す(または焦点を当てて Enter / Space)と、パスを直接打つ入力になる(#1982 A4。binder が受ける)
     path.tabIndex = 0;
-    path.title = '何も無い所を押すと、パスを打って移動できます';
+    path.title = '何も無い所を押すと、パスを入力して移動できます';
     path.setAttribute('role', 'group');
     path.setAttribute('aria-label', 'パンくず。押すとパスを入力できます');
     crumb.append(path);
@@ -1989,14 +1989,14 @@ export class FilerRenderer {
         smartHit === null || smartHit.failed
           ? null
           : isSmartEmpty(smartHit.spec)
-            ? 'まだ条件がありません。上の「タグ」に入れて「条件に足す」を押してください'
+            ? 'まだ条件がありません。上の「タグ」に入れて「条件に追加」を押してください'
             : '条件に合うノートがありません(条件を外すか、別のタグにしてみてください)';
       const bodyPending =
         q !== '' && commandQueryOf(state.filterQuery) === null && state.searchHitsQuery !== state.filterQuery;
       empty.textContent =
         filtering
           ? q !== '' && state.searchHitsFailed
-            ? '題名に一致するものはありません(本文は探せませんでした。語を打ち直すと、もう一度探します)'
+            ? '題名に一致するものはありません(本文は探せませんでした。語を入力し直すと、もう一度探します)'
             : bodyPending
               ? '本文を探しています…'
               : q !== '' && scope !== null && !smartInside

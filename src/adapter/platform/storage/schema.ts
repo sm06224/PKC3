@@ -47,7 +47,7 @@ export const DB_SCHEMA_VERSION = 3;
  * ⚠ 適用の判定は `REVISION_ADDED_COLUMNS` と**同じ原則**(user_version ではなく
  * `pragma_table_info` で列の実在を見る)── 半端な DB も次回 open で自己修復する。
  *
- * 🔴 ⚠ **列を足すだけでは足りない。既存行を埋めること。**
+ * 🔴 ⚠ **列を追加するだけでは足りない。既存行を埋めること。**
  * ALTER で足した列は既存行が **NULL** になるので、埋めないと
  * **いま在るノートが 1 件もカンバンに出ない**まま緑になる ── 全文検索(#181)で
  * 索引を足したときに実際に踏んだ型(§1「材料が届いていない」)。
@@ -357,7 +357,7 @@ export const SCHEMA_DDL: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_entries_date ON entries (cid, date)`,
   /**
    * 🔴 **チェック項目を持つノートだけを引く索引**(#277 段②)。
-   * ⚠ 索引が無いと、カンバンを開くたびに entries の全走査になる ── 列を足した
+   * ⚠ 索引が無いと、カンバンを開くたびに entries の全走査になる ── 列を追加した
    * 意味が半分消える(`idx_entries_status` / `idx_entries_date` と同じ理由)。
    */
   `CREATE INDEX IF NOT EXISTS idx_entries_task ON entries (cid, task_total)`,

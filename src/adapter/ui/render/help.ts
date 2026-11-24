@@ -535,7 +535,7 @@ export class HelpRenderer {
     find.type = 'search';
     find.setAttribute('data-pkc-field', 'help-find');
     find.placeholder = 'マニュアルの中を探す';
-    find.title = 'マニュアルの中を探します(Esc で、打った字を消します)';
+    find.title = 'マニュアルの中を探します(Esc で、入力した字を消します)';
     // ⚠ placeholder を名前代わりにしない(消えると読み上げが黙る)
     find.setAttribute('aria-label', 'マニュアルの中を探す');
     this.findCount = document.createElement('span');

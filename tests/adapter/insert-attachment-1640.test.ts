@@ -1,7 +1,7 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **書式の帯の「添付を入れる」**(#1640 ④。🟣 Gemini 依頼 37 の答え = A)。
- * 題名で探して選ぶと、画像は画像の行・ほかのファイルはリンクの行が、打っている場所に入る。
+ * 🔴 **書式の帯の「添付を挿入」**(#1640 ④。🟣 Gemini 依頼 37 の答え = A)。
+ * 題名で探して選ぶと、画像は画像の行・ほかのファイルはリンクの行が、カーソルの位置に入る。
  */
 import { describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -67,11 +67,11 @@ function boot(bodies: Record<string, string>) {
   return { root, d, ta };
 }
 
-describe('添付を入れる(書式の帯)', () => {
-  it('🔴 帯にボタンが在り、字は「添付を入れる」', () => {
+describe('添付を挿入(書式の帯)', () => {
+  it('🔴 帯にボタンが在り、字は「添付を挿入」', () => {
     const { root } = boot({});
     const b = root.querySelector('[data-pkc-action="insert-attachment"] [data-pkc-field="label"]');
-    expect(b?.textContent).toBe('添付を入れる');
+    expect(b?.textContent).toBe('添付を挿入');
   });
 
   it('🔴 候補は添付のノートだけ(同じ語を題名に持つふつうのノートは出ない)', async () => {

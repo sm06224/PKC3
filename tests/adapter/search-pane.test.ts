@@ -225,7 +225,7 @@ describe('探す面(#680)', () => {
     const { type, note } = setup(() => ({ rows: [], truncated: false }));
     type('-メモ');
     await settle();
-    expect(note()).toBe('除く語だけでは探せません。探す語も打ってください');
+    expect(note()).toBe('除く語だけでは探せません。探す語も入力してください');
     expect(note(), 'ノートが無いように読める字を出している').not.toContain('一致するノートはありません');
     // 対照群: 探す語が 1 つでもあれば従来どおり
     type('かい -メモ');
@@ -274,7 +274,7 @@ describe('探す面(#680)', () => {
     await settle();
     expect(searchDetail).toHaveBeenCalledTimes(1);
     expect(rows()).toHaveLength(0);
-    expect(note()).toContain('語を打つと');
+    expect(note()).toContain('語を入力すると');
   });
 
   it('🔴 200 件で切れたら、そう言う', async () => {

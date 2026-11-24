@@ -125,7 +125,7 @@ export function buildHtmlSandboxIframe(
   sourceLineAttrs: string = '',
   /**
    * **同じ中身の fence の中で何番目か**(0 始まり)。同じ中身を区別するために要る。
-   * ⚠ **token 添字を渡してはいけない**(2026-08-05)── 前に行を足すだけで id が
+   * ⚠ **token 添字を渡してはいけない**(2026-08-05)── 前に行を追加するだけで id が
    * 変わり、差分反映がこの塊を作り直して **iframe が読み直され中身が一度消える**。
    * 数えるのは `markdown-render.ts` の `nextFenceOccurrence`。
    */

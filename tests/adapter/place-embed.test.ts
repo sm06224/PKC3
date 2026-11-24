@@ -1374,7 +1374,7 @@ describe('描画: 近づいた枠から中身を出す(W3-③)', () => {
     await settle();
     expect(slotOf(r, 'p1')).not.toBeNull();
     const old = block(r, 'p1');
-    // 先頭に空行を足す = 全部の塊の行番号が動き、塊そのものが作り直される
+    // 先頭に空行を追加する = 全部の塊の行番号が動き、塊そのものが作り直される
     await r.apply({ type: 'BODY_LOADED', lid: 'b', body: `\n\n${BODIES.b!}` });
     expect(block(r, 'p1'), '台の前提:塊が作り直されていない').not.toBe(old);
     expect(slotOf(r, 'p1'), '作り直された塊が空になっている').not.toBeNull();

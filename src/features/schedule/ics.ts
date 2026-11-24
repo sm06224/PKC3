@@ -266,7 +266,7 @@ export interface IcsResult {
 
 /**
  * UID。🔑 `lid` と行の位置(ノート丸ごとの予定は `note`)── 日付を直しても変わらない。
- * ⚠ 同じ本文なら同じ UID。上に行を足すなどして**行がずれると変わる**(外の予定表では別の予定として入り直す)。
+ * ⚠ 同じ本文なら同じ UID。上に行を追加するなどして**行がずれると変わる**(外の予定表では別の予定として入り直す)。
  */
 export function icsUid(item: Pick<AgendaItem, 'lid' | 'line'>): string {
   const safe = item.lid.replace(/[^A-Za-z0-9_-]/g, '_');

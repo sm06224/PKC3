@@ -26,7 +26,7 @@ export type SnapConfirmVariant = 'interim' | 'ruled';
 
 /** 確認の文面の切り替え(1 か所)。 */
 export const SNAP_CONFIRM_VARIANT: SnapConfirmVariant = 'ruled';
-/** `ruled` の文面に「約 N 秒早くなります」の行を足すか。 */
+/** `ruled` の文面に「約 N 秒早くなります」の行を追加するか。 */
 export const SNAP_SECONDS_IN_RULED = true;
 
 /** 裁定の文言(`ruled`)。 */

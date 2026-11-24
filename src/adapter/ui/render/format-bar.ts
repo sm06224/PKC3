@@ -73,18 +73,18 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   /** ⚠ 「先に聞く」道具は `FORMAT_OPS` に入れない(あちらは**その場で字を変える**表)。 */
   {
     action: 'insert-entry-link',
-    label: 'ノートリンクを入れる',
-    hint: '別のノートを題名で探して、そこへのリンクを打っている場所に入れます',
+    label: 'ノートリンクを挿入',
+    hint: '別のノートを題名で探して、そこへのリンクをカーソルの位置に入れます',
     command: 'insert-entry-link',
   },
   {
     action: 'insert-attachment',
-    label: '添付を入れる',
-    hint: '添付を題名で探して、打っている場所に入れます。画像は画像として、ほかのファイルはリンクとして入ります',
+    label: '添付を挿入',
+    hint: '添付を題名で探して、カーソルの位置に入れます。画像は画像として、ほかのファイルはリンクとして入ります',
   },
   {
     action: 'insert-diagram',
-    label: '図を入れる',
+    label: '図を挿入',
     // 🔴 #950 着地前レビュー ④: 選んでいるときは一覧を出さず囲む ── 両方の場合を書く
     hint:
       '選んでいれば、選んだ範囲を ```mermaid で囲みます。' +
@@ -100,20 +100,20 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   },
   {
     action: 'insert-date',
-    label: '日付を入れる',
-    hint: '日付を選んで、打っている場所に入れます',
+    label: '日付を挿入',
+    hint: '日付を選んで、カーソルの位置に入れます',
     command: 'insert-date',
   },
   {
     action: 'insert-snippet',
-    label: 'テンプレートを入れる',
-    hint: 'テンプレートを一覧から選んで、打っている場所に入れます',
+    label: 'テンプレートを挿入',
+    hint: 'テンプレートを一覧から選んで、カーソルの位置に入れます',
     command: 'insert-snippet',
   },
   {
     action: 'insert-icon',
-    label: 'アイコンを入れる',
-    hint: 'アイコンを入れます。押すとアイコンの一覧が出て、選ぶと打っている場所に入ります',
+    label: 'アイコンを挿入',
+    hint: 'アイコンを入れます。押すとアイコンの一覧が出て、選ぶとカーソルの位置に入ります',
   },
   /**
    * 🔴 字は「番号を振り直す」(#717)。⚠ 「番号」(番号付きリストにする)と同じ字を並べない。
@@ -122,7 +122,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   { action: 'renumber-lists', label: '番号を振り直す', hint: RENUMBER_TITLE },
   { action: 'sort-tasks', label: '完了項目を末尾へ', hint: SORT_TASKS_TITLE },
   // 🔴 #766 D-3 ── 押すと本文の欄へ当てる命令(`inline-calc`)をそのまま呼ぶ
-  { action: 'calc-line', label: 'この行を計算する', hint: '打っている行の式(2+3= など)を計算して、行の終わりに答えを入れます' },
+  { action: 'calc-line', label: 'この行を計算する', hint: 'カーソルのある行の式(2+3= など)を計算して、行の終わりに答えを入れます' },
   // 🔴 読む面の帯の「探す」と同じ口(`find-in-note`)。編集中は 2 ペインのプレビュー / ライブエディタの描かれた本文を探す
   {
     action: 'find-in-note',
