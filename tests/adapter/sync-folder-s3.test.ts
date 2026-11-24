@@ -35,7 +35,7 @@ import { spawnDevice, type SyncDevice } from '../helpers/sync-device';
 const KEY_ID = 'AKIA-CANARY-ID-77';
 const SECRET_KEY = 'canary/SECRET+key=Qz19';
 const SECRET = { accessKeyId: KEY_ID, secretAccessKey: SECRET_KEY };
-const FORM: SyncRemoteForm = { endpoint: 'https://s3.example.test/', bucket: ' my notes ', region: '', prefix: 'pkc3', accessKeyId: KEY_ID, secretAccessKey: SECRET_KEY };
+const FORM: SyncRemoteForm = { endpoint: 'https://s3.example.test/', bucket: ' my notes ', region: '', prefix: 'pkc3', accessKeyId: KEY_ID, secretAccessKey: SECRET_KEY, encrypt: false };
 
 class MemStore implements SyncFolderStore {
   map = new Map<string, SyncFolderSaved>();
@@ -181,7 +181,7 @@ describe('S3 互換の保管先(段 4a-4)', () => {
     expect(saved.kind).toBe('s3');
     expect(saved.handle).toBeNull();
     noSecret([JSON.stringify(saved)]);
-    expect(await A.remote.ks.config(A.d.cid)).toEqual({ kind: 's3', endpoint: 'https://s3.example.test', bucket: 'my notes', region: 'auto', prefix: 'pkc3/' });
+    expect(await A.remote.ks.config(A.d.cid)).toEqual({ kind: 's3', endpoint: 'https://s3.example.test', bucket: 'my notes', region: 'auto', prefix: 'pkc3/', encrypt: false });
     expect(A.sf.view()).toMatchObject({ kind: 's3', folderName: 'my notes/pkc3', phase: 'idle' });
     noSecret([...A.says, ...A.fails, ...B.says, ...B.fails, JSON.stringify(A.sf.view())]);
   });

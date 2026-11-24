@@ -250,6 +250,19 @@ const MAX_MESSAGE_TEXT_LENGTH = 80;
  */
 const LINE_BREAKS_RE = /\r\n|[\r\n\u2028\u2029]/g;
 
+/**
+ * 🔴 **括弧の中身がアプリの画面の名前だけなら、文全体を固定の文として通す**(段 4b)。
+ * ⚠ 1 つでも知らない名前(user の題名など)や名前の目印があれば `''`(= 今までどおり伏せる)。
+ */
+export function fixedHeadForLabels(text: string, labels: readonly string[]): string {
+  if (/[\u2060\u2061『』]/.test(text)) return '';
+  const names = [...text.matchAll(/「([^「」]*)」/g)].map((m) => m[1]!);
+  if (names.length === 0) return '';
+  // 括弧が釣り合っていない(入れ子・閉じ忘れ)ときは通さない
+  if ((text.match(/「/g) ?? []).length !== names.length || (text.match(/」/g) ?? []).length !== names.length) return '';
+  return names.every((n) => labels.includes(n)) ? text : '';
+}
+
 export function sanitizeMessageText(text: string, fixedHead = ''): string {
   /**
    * 🔴 **アプリが書いた固定の文は、そのまま通す**(#1087)。⚠ 括弧で潰すと、案内に出てくるボタンの名前

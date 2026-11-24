@@ -13,6 +13,7 @@ import type { SyncFolderViewSource } from '../sync-folder-view';
 import type { SyncEnabledStore } from '../sync-enabled';
 import type { SettingsSection } from './section';
 import { buildSettingsNote } from './note';
+import { buildE2EPanel, syncE2EPanel } from './sync-e2e';
 
 export const SYNC_S3_LABEL = 'S3 互換の保管先';
 export const SYNC_S3_DISCONNECT_LABEL = '接続を外す(認証情報を消す)';
@@ -108,9 +109,11 @@ export function createSyncS3Section(region: HTMLElement, source: SyncFolderViewS
       for (const t of [
         '端末ごとのファイルを保管先に置き、ほかの端末のファイルを取り込みます(同期フォルダと同じ仕組み)。',
         '認証情報は、この端末にだけ暗号化して保存します。バックアップや設定ファイルには入りません。',
+        '中身は、この端末で暗号化してから置きます(初期でオン)。同じ保管先を使う全部の端末でオンにしてください。',
         '条件付き書き込みに対応した保管先(AWS S3・Cloudflare R2・MinIO など)で使えます。',
       ]) notes.push(buildSettingsNote(t));
-      dd.append(grid, bar, result, corsHead, cors, copy, ...notes);
+      // 🔴 中身の暗号化(#2000 段 4b-B。S3 は既定オン)── 接続の前に選べる(欄は接続のボタンが読む)
+      dd.append(grid, buildE2EPanel('s3'), bar, result, corsHead, cors, copy, ...notes);
       return [dt, dd];
     },
     sync(): void {
@@ -160,6 +163,8 @@ export function createSyncS3Section(region: HTMLElement, source: SyncFolderViewS
       if (disconnect !== null) disconnect.hidden = !connected;
       const copy = q('copy-sync-s3-cors');
       if (copy !== null) copy.disabled = unavailable !== null;
+      const e2e = dd.querySelector<HTMLElement>('[data-pkc-region="sync-e2e"]');
+      if (e2e !== null) syncE2EPanel(e2e, v, { connected, enabled: usable });
     },
   };
 }

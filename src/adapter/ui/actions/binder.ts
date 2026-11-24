@@ -166,6 +166,16 @@ import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
 import type { FolderSync } from '@adapter/platform/folder-sync';
 import type { SyncRemoteForm } from '@adapter/platform/sync-folder';
+import {
+  runAcceptPeer,
+  runChange,
+  runSetEncrypt,
+  runSetRemember,
+  runSetup,
+  runSetVia,
+  runUnlock,
+  type SyncE2EServices,
+} from './sync-e2e-actions';
 import type { LinkedFileTooLarge } from '@adapter/platform/launched-files';
 import { appSearchHistory } from '@adapter/platform/search-history-store';
 import { appSavedSearches } from '@adapter/platform/saved-search-store';
@@ -2315,6 +2325,8 @@ export interface BinderServices {
     testRemote?(form: SyncRemoteForm): Promise<{ ok: boolean; text: string }>;
     /** 🔴 確かめて認証情報を保存し、保管先と同期し始める(接続を外すのは `stop`)。 */
     connectRemote?(form: SyncRemoteForm): Promise<boolean>;
+    /** 🔴 端末間の同期の暗号化(#2000 段 4b-B)。 */
+    e2e?: SyncE2EServices;
   };
   /**
    * 🔴 **聞くときだけ音を整えるか**(#772 段① B)。⚠ **省略可**。
@@ -19510,6 +19522,31 @@ const ACTIONS: Record<string, ActionHandler> = {
   'disconnect-sync-s3': (_dispatcher, _target, services) => {
     void services.syncFolder?.stop();
   },
+  // 🔴 端末間の同期の暗号化(#2000 段 4b-B)── 欄の読み・字の出し方は `sync-e2e-actions.ts`(パスフレーズ・回復キーの欄は読んだらすぐ空にする)
+  'set-sync-e2e': (_dispatcher, target, services) => {
+    if (services.syncFolder?.e2e !== undefined) void runSetEncrypt(target, services.syncFolder.e2e);
+  },
+  'start-sync-e2e-setup': (_dispatcher, target, services) => {
+    if (services.syncFolder?.e2e !== undefined) void runSetup(target, services.syncFolder.e2e);
+  },
+  'unlock-sync-e2e': (_dispatcher, target, services) => {
+    if (services.syncFolder?.e2e !== undefined) void runUnlock(target, services.syncFolder.e2e);
+  },
+  'set-sync-e2e-remember': (_dispatcher, target, services) => {
+    if (services.syncFolder?.e2e !== undefined) void runSetRemember(target, services.syncFolder.e2e);
+  },
+  'set-sync-e2e-via': (_dispatcher, target) => runSetVia(target),
+  'change-sync-e2e-passphrase': (_dispatcher, target, services) => {
+    if (services.syncFolder?.e2e !== undefined) void runChange(target, services.syncFolder.e2e);
+  },
+  'accept-sync-e2e-peer': (_dispatcher, target, services) => {
+    if (services.syncFolder?.e2e !== undefined) void runAcceptPeer(target, services.syncFolder.e2e);
+  },
+  /** 🔴 メッセージの「いまの状態」の「パスフレーズを入れる」から、設定の暗号化の欄へ(新しい仕組みを作らない ── `open-storage-check` と同じ形)。 */
+  'open-sync-e2e-settings': (dispatcher, _target, _services, root) => {
+    openView(dispatcher, 'settings');
+    root.querySelector<HTMLElement>('[data-pkc-region="sync-e2e"]:not([data-pkc-state="off"]):not([data-pkc-state="hidden"])')?.scrollIntoView({ block: 'center' });
+  },
   'copy-sync-s3-cors': (_dispatcher, target, services) => {
     const text = target.closest('[data-pkc-region="settings-sync-s3"]')?.querySelector('[data-pkc-field="sync-s3-cors"]')?.textContent ?? '';
     if (text !== '') services.copyText?.(text, 'CORS の設定をコピーしました');
@@ -27304,7 +27341,16 @@ function readSyncS3Form(target: HTMLElement): { form: SyncRemoteForm; secrets: H
   const input = (f: string): HTMLInputElement | null => region.querySelector<HTMLInputElement>(`[data-pkc-field="sync-s3-${f}"]`);
   const v = (f: string): string => input(f)?.value ?? '';
   return {
-    form: { endpoint: v('endpoint'), bucket: v('bucket'), region: v('region'), prefix: v('prefix'), accessKeyId: v('access-key-id'), secretAccessKey: v('secret') },
+    form: {
+      endpoint: v('endpoint'),
+      bucket: v('bucket'),
+      region: v('region'),
+      prefix: v('prefix'),
+      accessKeyId: v('access-key-id'),
+      secretAccessKey: v('secret'),
+      // 🔴 中身の暗号化(段 4b。S3 は既定オン)── 接続の前の選び方を運ぶ
+      encrypt: region.querySelector<HTMLInputElement>('[data-pkc-field="sync-e2e-on"]')?.checked ?? true,
+    },
     secrets: [input('access-key-id'), input('secret')].filter((x): x is HTMLInputElement => x !== null),
   };
 }

@@ -31,6 +31,7 @@ const view = (over: Partial<SyncFolderView>): SyncFolderView => ({
   message: null,
   pending: 0,
   persist: true,
+  e2e: { available: true, on: false, open: false, stored: false, ask: false, keyring: 'unknown', refused: [] },
   ...over,
 });
 
@@ -132,7 +133,7 @@ describe('設定: S3 互換の保管先', () => {
     s.field('secret').value = 'SEC-1';
     s.btn('test-sync-s3').click();
     await Promise.resolve();
-    const want: SyncRemoteForm = { endpoint: 'https://r2.example', bucket: 'my-notes', region: '', prefix: 'pkc3/', accessKeyId: 'ID-1', secretAccessKey: 'SEC-1' };
+    const want: SyncRemoteForm = { endpoint: 'https://r2.example', bucket: 'my-notes', region: '', prefix: 'pkc3/', accessKeyId: 'ID-1', secretAccessKey: 'SEC-1', encrypt: true };
     expect(testRemote).toHaveBeenCalledWith(want);
     await new Promise((r) => setTimeout(r, 0));
     expect(s.q('[data-pkc-field="sync-s3-result"]')!.textContent).toBe('保管先に接続できました');

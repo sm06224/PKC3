@@ -143,6 +143,19 @@ export function paintStatusCaptureRecovery(btn: HTMLElement, count: number): voi
   if (btn.textContent !== label) btn.textContent = label;
 }
 
+/**
+ * 🔴 **端末間の同期が「パスフレーズを入れる」で止まっているときの入口を出し入れする**(#2000 段 4b-B)。
+ * 止まっている間だけ出す(止まっていなければ字も空にする ── 畳んだ物の字が状態の行を見る検査に拾われない)。
+ * 🔑 押した先は `open-sync-e2e-settings` の受け手(`binder.ts`)。ここが書くのは `hidden` と字だけ。
+ * @param label `null` = 出さない / それ以外 = ボタンの字(暗号化キーが未作成なら「暗号化を設定する」、開くだけなら「パスフレーズを入れる」)
+ */
+export function paintStatusSyncUnlock(btn: HTMLElement, label: string | null): void {
+  const hide = label === null;
+  if (btn.hidden !== hide) btn.hidden = hide;
+  const text = label ?? '';
+  if (btn.textContent !== text) btn.textContent = text;
+}
+
 export interface StatusUndoState {
   /** 直前の塊の移動を戻す材料(`lastMove`)。`null` = 戻す物が無い。 */
   readonly lastMove: object | null;
