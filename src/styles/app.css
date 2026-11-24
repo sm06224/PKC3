@@ -2627,8 +2627,9 @@ button[data-pkc-variant='primary'] [data-pkc-icon] {
  *   ▼ は編集中も押せる(添付・録音などの道具が並ぶ)ので `disabled` にはせず、**見た目だけ**本体の「薄い標準」に揃える
  *   (地・字・枠・減光 .45 を本体と同じ値にする。区別は形 = 内側の区切り線で足りる)。
  *   ⚠ 判定は本体の主の印(`data-pkc-variant="primary"`)── `browse.ts` の `setPrimary` と 1 か所で連動する。
- *   ⚠ 上の主の規則・hover より詳細度が同じで後ろに置いてあるので勝つ。
- *   守り: `ui-breakage.smoke` の分割ボタン(編集中)が、本体と ▼ の地・減光が同じであることを見る。
+ *   ⚠ 勝つ理由は詳細度: `:has()` は引数の詳細度を持つので、この規則は (0,4,1)。上の ▼ の基本の規則 (0,2,1)・開いている状態 (0,3,1) より高く、
+ *     hover (0,4,1) とは同じ詳細度で**後ろにある**ので勝つ(順序を入れ替えると hover だけ緑へ戻る)。
+ *   守り: `stage2-pr3.smoke.spec.ts`(編集中の本体と ▼ の地・減光・字が同じ)と `stage2-pr3-css.test.ts`(規則が hover / 開いている / 焦点まで束ねている)。
  */
 [data-pkc-region='create-bar']:has([data-pkc-field='create-run']:not([data-pkc-variant='primary'])) button[data-pkc-field='create-pick'],
 [data-pkc-region='create-bar']:has([data-pkc-field='create-run']:not([data-pkc-variant='primary'])) button[data-pkc-field='create-pick']:hover:not(:disabled),
@@ -7960,14 +7961,14 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   resize: vertical;
   /* 🔴 **初めは ER の欄の残りの高さをぜんぶ使う**(Stage 2 PR-3。直す前は `height: 30vh` の固定で、広い画面では下が大きく余り、
    *   余白のぶん下の「いま書かれている SQL」の 1 行が画面の下端へ追いやられていた)。⚠ 掴んで変える / 「高さ」ボタンで段を選ぶと
-   *   インラインの `height` が入る ── そのときは下の規則が伸び縮みを止めて、選んだ高さのままにする */
+   *   インラインの `height` が入り、`sql-er.ts` が `data-pkc-height-fixed` を立てる ── そのときは下の規則が伸び縮みを止めて、選んだ高さのままにする */
   flex: 1 1 auto;
   min-height: 80px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--s2);
 }
-[data-pkc-field='sql-er-scroll'][style*='height'] {
+[data-pkc-field='sql-er-scroll'][data-pkc-height-fixed] {
   flex: none;
 }
 /* 「高さ」ボタン(#918 Q2)。図の右下。 */
@@ -11518,8 +11519,10 @@ h3[data-pkc-section] {
   margin: 0 0 var(--s2);
   /* 🔴 外側が唯一のスクロールの箱になったので、読み進めても帰り道が画面の上に残る(Stage 2 PR-3) */
   position: sticky;
-  top: 0;
-  z-index: 3;
+  /* 🔴 上の閉じる帯(`pane-bar`: sticky・top 0・z-index 2。高さ = 標準の行 + 上下の余白 + 下の線)の**真下**に貼り付く。
+   *   top: 0 だと帯が閉じるボタンに重なって覆う(Stage 2 PR-3 レビュー)。守り: `stage2-pr3.smoke` が両方の中心点を `elementFromPoint` で見る */
+  top: calc(var(--row-h) + var(--s2) * 2 + 1px);
+  z-index: 1;
   padding: var(--s1) 0;
   background: var(--bg);
 }
@@ -11705,7 +11708,8 @@ h3[data-pkc-section] {
 [data-pkc-region='help-manual'] h4,
 [data-pkc-region='help-manual'] h5,
 [data-pkc-region='help-manual'] h6 {
-  scroll-margin-top: calc(var(--row-h) + var(--s3));
+  /* 閉じる帯 + 貼り付く帰り道の帯の 2 段ぶん */
+  scroll-margin-top: calc((var(--row-h) + var(--s3)) * 2 + var(--s2));
 }
 /* 🔴 着いた見出しを一時的に光らせる(`help.ts` の `flash`。1.8 秒で外れる。動きは使わず地の色だけ ── 動きを減らす設定でも同じ) */
 [data-pkc-region='help-manual'] [data-pkc-jump-flash] {

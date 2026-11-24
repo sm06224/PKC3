@@ -453,6 +453,28 @@ describe('ヘルプの面', () => {
       expect(host.scrollTop, '飛ぶ前の位置へ戻っていない').toBe(321);
     });
 
+    it('🔴 続けて 2 度飛んでから戻ると、最初の位置へ帰る(上書きしない。Stage 2 PR-3 レビュー)', async () => {
+      const host = await mount();
+      const back = region.querySelector<HTMLElement>('[data-pkc-region="help-jump-back"]')!;
+      const outer = document.createElement('div');
+      outer.setAttribute('data-pkc-region', 'detail');
+      region.replaceWith(outer);
+      outer.append(region);
+      const rows = [...region.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')];
+      expect(rows.length).toBeGreaterThan(1);
+      outer.scrollTop = 111; // A
+      rows[0]!.click();
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+      outer.scrollTop = 222; // B(1 度目の飛び先)
+      rows[1]!.click();
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+      outer.scrollTop = 333; // C
+      expect(back.hidden).toBe(false);
+      back.querySelector<HTMLElement>('[data-pkc-field="manual-jump-back"]')!.click();
+      expect(outer.scrollTop, '戻る先が 2 度目の飛びで上書きされ、最初の位置 A へ帰れない').toBe(111);
+      expect(host).not.toBeNull();
+    });
+
     it('🔴 目次から飛んでも帰り道を出す(外側が唯一のスクロールの箱 ── 目次は画面の外へ流れる。Stage 2 PR-3)', async () => {
       const host = await mount();
       const back = region.querySelector<HTMLElement>('[data-pkc-region="help-jump-back"]')!;

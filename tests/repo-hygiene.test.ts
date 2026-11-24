@@ -1661,7 +1661,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-11-24(Stage 2 PR-1): `neon-perf.smoke.spec.ts`(600 コマ計測の対照群・1 本)と `visual-audit.smoke.spec.ts`(12 画面の撮影台帳・2 本)を新設。624 → 627(file 131 → 133)。
     // ⚠ 2026-11-24(Stage 2 PR-2): `neon-glow.smoke.spec.ts` に 2 本(本文のブロック・入力欄の縁の画素 / キーボードのフォーカスの静止線)。627 → 629。
     // ⚠ 2026-11-24(Stage 2 PR-3): `stage2-pr3.smoke.spec.ts` を新設(8 本)と `manual-window.smoke.spec.ts` に別ウィンドウのマニュアルの検索 1 本。629 → 636(幅違いの繰り返しの 2 本は表に数える)。
-    ).toBe(636);
+    // ⚠ 2026-11-24(Stage 2 PR-3 レビュー): `stage2-pr3.smoke.spec.ts` に 2 本(スマホ幅の ER 図 / ヘルプの塗りの後始末)。636 → 638。
+    ).toBe(638);
   });
 });
 

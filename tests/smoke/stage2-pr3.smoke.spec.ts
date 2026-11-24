@@ -29,6 +29,20 @@ async function commitNew(page: Page, archetype: string, title: string, body: str
   await page.waitForSelector('[data-pkc-action="start-edit"]');
 }
 
+/** 「高さ」ボタンが図の上にあり、中心点で自分に当たる(下端の浮き札・SQL の 1 行に覆われない)。 */
+async function expectHeightButtonReachable(page: Page): Promise<void> {
+  const r = await page.evaluate(() => {
+    const btn = document.querySelector('[data-pkc-field="sql-er-height"]') as HTMLElement;
+    const scroll = document.querySelector('[data-pkc-field="sql-er-scroll"]') as HTMLElement;
+    const b = btn.getBoundingClientRect();
+    const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+    return { above: b.bottom <= scroll.getBoundingClientRect().top + 1, ok: hit !== null && btn.contains(hit), what: hit?.tagName ?? 'null', inView: b.top >= 0 && b.bottom <= window.innerHeight };
+  });
+  expect(r.above, '「高さ」ボタンが図の下にある(画面の下端は浮き札が出る場所)').toBe(true);
+  expect(r.ok, `「高さ」ボタンの中心が別の物に覆われている(${r.what})`).toBe(true);
+  expect(r.inView, '「高さ」ボタンが画面の外にある').toBe(true);
+}
+
 const setTheme = (page: Page, theme: string, dark: boolean): Promise<void> =>
   page.evaluate(
     ([t, d]) => {
@@ -192,6 +206,18 @@ test('🔴 4: SQL の「ER 図」タブは、SQL の欄が見えず、図が残�
   // 読み取り専用の SQL の 1 行が面の中に収まる
   if (m.sqlLine !== null && m.sqlLine.height > 0) expect(m.sqlLine.bottom, 'SQL の 1 行が面の下へはみ出している').toBeLessThanOrEqual(m.paneBottom + 1);
   expect(m.docOverflow, '画面全体が縦にあふれている').toBeLessThanOrEqual(1);
+  await expectHeightButtonReachable(page);
+  // 🔴 「高さ」ボタンで人が高さを決めたら、図は伸び縮みを止める(印 data-pkc-height-fixed)。インラインの min-height 等では止めない
+  const grow = (): Promise<{ fixed: boolean; grow: string }> =>
+    page.evaluate(() => {
+      const el = document.querySelector('[data-pkc-field="sql-er-scroll"]') as HTMLElement;
+      return { fixed: el.hasAttribute('data-pkc-height-fixed'), grow: getComputedStyle(el).flexGrow };
+    });
+  expect(await grow(), '初めから固定になっている').toEqual({ fixed: false, grow: '1' });
+  await page.evaluate(() => ((document.querySelector('[data-pkc-field="sql-er-scroll"]') as HTMLElement).style.minHeight = '90px'));
+  expect(await grow(), 'min-height のインラインで固定扱いになった').toEqual({ fixed: false, grow: '1' });
+  await clickReal(page, sql.locator('[data-pkc-field="sql-er-height"]'));
+  expect(await grow(), '「高さ」を押しても固定にならない').toEqual({ fixed: true, grow: '0' });
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -301,10 +327,11 @@ for (const vp of [
     const painted = await page.evaluate(() => (window.CSS as unknown as { highlights?: Map<string, unknown> }).highlights?.has('pkc-search-hit') ?? null);
     if (painted !== null) expect(painted, '探した語が本文で塗られていない').toBe(true);
     await expect(page.locator('[data-pkc-field="manual-jump-back"]')).toBeInViewport();
+    // 🔴 画面全体(document)は動かない ── スクロールの箱は外側の 1 つだけ(Stage 2 PR-3 レビュー ⚠7)
+    expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0), '検索結果を押したら画面全体が動いた').toBe(0);
 
-    // ③ 目次を押す → 該当の見出しが画面の中
+    // ③ 目次を押す(= 2 度目の飛び)→ 該当の見出しが画面の中で、貼り付く帯の下に来る
     await find.fill('');
-    await page.locator('[data-pkc-field="manual-jump-back"]').click().catch(() => undefined);
     const row = page.locator('[data-pkc-field="help-toc-row"]').nth(30);
     await row.scrollIntoViewIfNeeded();
     await row.click();
@@ -313,10 +340,32 @@ for (const vp of [
         const el = document.querySelector('[data-pkc-region="help-manual"] [data-pkc-jump-flash]') as HTMLElement | null;
         if (el === null) return null;
         const r = el.getBoundingClientRect();
-        return { top: r.top, bottom: r.bottom, vh: window.innerHeight };
+        const band = (document.querySelector('[data-pkc-region="help-jump-back"]') as HTMLElement).getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, vh: window.innerHeight, bandBottom: band.bottom };
       });
-      return h !== null && h.top >= 0 && h.bottom <= h.vh;
-    }, { message: '目次を押しても、該当の見出しが画面の中へ来ない' }).toBe(true);
+      return h !== null && h.top >= h.bandBottom - 1 && h.bottom <= h.vh;
+    }, { message: '目次を押しても、該当の見出しが貼り付く帯の下の画面の中へ来ない' }).toBe(true);
+    expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0), '目次を押したら画面全体が動いた').toBe(0);
+
+    // 🔴 貼り付く帰り道の帯と閉じる帯(pane-bar)の両方が、中心点で自分(または子孫)に当たる(= 覆っていない)
+    const covered = await page.evaluate(() => {
+      const probe = (sel: string): { ok: boolean; what: string } => {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (el === null) return { ok: false, what: 'なし' };
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return { ok: hit !== null && el.contains(hit), what: hit === null ? 'null' : `${hit.tagName}[${hit.getAttribute('data-pkc-region') ?? hit.getAttribute('data-pkc-field') ?? ''}]` };
+      };
+      return { back: probe('[data-pkc-field="manual-jump-back"]'), close: probe('[data-pkc-region="pane-bar"] [data-pkc-action="close-pane"]') };
+    });
+    expect(covered.back.ok, `帰り道のボタンの中心が別の物に覆われている(${covered.back.what})`).toBe(true);
+    expect(covered.close.ok, `閉じるボタンの中心が別の物に覆われている(${covered.close.what})`).toBe(true);
+
+    // 🔴 2 度飛んでから戻ると、最初の位置(開いた直後 = 0)へ帰る(2 度目の飛びで戻り先を上書きしない)
+    await page.locator('[data-pkc-field="manual-jump-back"]').click();
+    await expect
+      .poll(async () => page.locator('[data-pkc-region="detail"]').evaluate((el) => el.scrollTop), { message: '戻っても最初の位置へ帰らない(戻り先が上書きされている)' })
+      .toBe(0);
 
     // ④ Ctrl+F 相当(window.find): 末尾の WebMCP まで当たり、描画済みで、画面の中に出る
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
@@ -346,3 +395,67 @@ for (const vp of [
     expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
   });
 }
+
+test('🔴 4b: スマホ幅 390×844 でも ER 図のタブは図が残りの高さを使い、SQL の欄・面がはみ出さない (Stage 2 PR-3 レビュー)', async ({ page }) => {
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=sql';
+  });
+  const sql = page.locator('[data-pkc-view-pane="sql"]');
+  await expect(sql).toBeVisible({ timeout: 15_000 });
+  await expect(sql.locator('[data-pkc-field="sql-tree-table"][data-pkc-name="entries"]')).toHaveCount(1, { timeout: 15_000 });
+  await clickReal(page, sql.locator('[data-pkc-field="sql-er-toggle"]'));
+  await expect(sql.locator('[data-pkc-field="sql-er-box"]').first()).toBeVisible({ timeout: 15_000 });
+  const m = await page.evaluate(() => {
+    const pane = document.querySelector('[data-pkc-view-pane="sql"]') as HTMLElement;
+    const main = pane.querySelector('[data-pkc-field="sql-main"]') as HTMLElement;
+    const r = (sel: string) => (pane.querySelector(sel) as HTMLElement | null)?.getBoundingClientRect() ?? null;
+    const ed = pane.querySelector('[data-pkc-field="sql-editor"]') as HTMLElement | null;
+    return {
+      editorShown: ed !== null && ed.getBoundingClientRect().height > 0,
+      mainOverflow: main.scrollHeight - main.clientHeight,
+      paneBottom: pane.getBoundingClientRect().bottom,
+      scroll: r('[data-pkc-field="sql-er-scroll"]'),
+      panel: r('[data-pkc-field="sql-er-panel"]'),
+      docOverflow: document.documentElement.scrollHeight - window.innerHeight,
+      vw: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  expect(m.editorShown, 'スマホ幅の ER 図のタブで SQL の欄が見えている').toBe(false);
+  expect(m.mainOverflow, 'スマホ幅で SQL の面が縦にあふれている').toBeLessThanOrEqual(1);
+  expect(m.scroll!.bottom, 'スマホ幅で図が面の下へはみ出している').toBeLessThanOrEqual(m.paneBottom + 1);
+  expect(m.scroll!.height / m.panel!.height, 'スマホ幅で図が残りの高さを使っていない').toBeGreaterThan(0.5);
+  expect(m.docOverflow, '画面全体が縦にあふれている').toBeLessThanOrEqual(1);
+  expect(m.vw, '横にあふれている').toBeLessThanOrEqual(1);
+  await expectHeightButtonReachable(page);
+  expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
+});
+
+test('🔴 8-1b: ヘルプで塗った探した語は、ヘルプを離れて別の画面へ移っても残らない (Stage 2 PR-3 レビュー)', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=help';
+  });
+  await expect(page.locator('[data-pkc-region="help-manual"] h1,[data-pkc-region="help-manual"] h2').first()).toBeVisible({ timeout: 20_000 });
+  const has = (): Promise<boolean | null> => page.evaluate(() => (window.CSS as unknown as { highlights?: Map<string, unknown> }).highlights?.has('pkc-search-hit') ?? null);
+  await page.locator('[data-pkc-field="help-find"]').fill('WebMCP');
+  const hit = page.locator('[data-pkc-region="help-find-hits"] button').first();
+  await hit.scrollIntoViewIfNeeded();
+  await hit.click();
+  const painted = await has();
+  test.skip(painted === null, 'このブラウザは CSS Custom Highlight が無い');
+  expect(painted, '前提: ヘルプで探した語が塗られていない(空振り)').toBe(true);
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=sql';
+  });
+  await expect(page.locator('[data-pkc-view-pane="sql"]')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(has, { message: 'ヘルプを離れたのに、探した語の塗りが別の画面へ残っている' }).toBe(false);
+  expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
+});

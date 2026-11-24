@@ -161,7 +161,8 @@ import { join } from 'node:path';
  * - 2026-11-23(#1442 段① レビュー): **624**(そのときの実数 624)。`builtin-apps.smoke.spec.ts` の別ウィンドウの 1 本に、写した `#pkc?view=` のタブを開く確認で起動 1 つ足した。
  *   ⚠ 既存の道中には載せられない ── 見る相手は「PKC が開いた窓ではない」まっさらなタブ(`w=` の合図と sessionStorage の印が無い)で、開いた窓の続きでは作れない。
  */
-export const BOOT_BUDGET = 639;
+export const BOOT_BUDGET = 641;
+// 2026-11-24(Stage 2 PR-3 レビュー): **641**(実数 641。スマホ幅の ER 図 1 本と、ヘルプの塗りの後始末 1 本を足した)。以下は 639 のときの記録。
 // 2026-11-24(Stage 2 PR-3): **639**(実数 639。PR-2 の 632 の上に 7 本)。`stage2-pr3.smoke.spec.ts` を新設(7 起動 = 色・幾何・画素を見る 8 件のうち幅違いの 2 件は 1 起動の繰り返しでなく別起動)と、`manual-window.smoke.spec.ts` に別ウィンドウのマニュアルの検索 1 本。
 //   ⚠ 既存の道中には載せられない ── 見る相手は、編集中の分割ボタン・1 行コード・SQL の ER 図・スマホ幅の帯・ログ・ヘルプの検索という別々の画面で、既存の spec の道中に同居する画面が無い。
 // 2026-11-24(Stage 2 PR-2): **632**(実数 632。PR-1 の 630 の上に 2 本)。`neon-glow.smoke.spec.ts` に 2 本足した(起動 2 つ。本文のブロック・入力欄の縁の画素 / キーボードのフォーカスの静止線)。
@@ -205,7 +206,7 @@ export const BOOT_BUDGET = 639;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 320;
+export const BOOT_FLOOR = 321;
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {

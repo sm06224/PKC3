@@ -368,6 +368,10 @@ export function paintSqlEr(
    * ⚠ 本物の `<button>`(Tab + Enter / Space)。書く先は掴んだ高さと同じ `memory.height` で、
    *   描き直しをまたいで残る。⚠ ここは binder を通さず直に結ぶ(図の DOM の中で閉じる操作で、state を動かさない)。
    */
+  /** 高さを人が決めたか(インラインの `height` があるか)を、CSS が読む印にする。 */
+  const markFixed = (): void => {
+    scroll.toggleAttribute('data-pkc-height-fixed', scroll.style.height !== '');
+  };
   const heightBtn = doc.createElement('button');
   heightBtn.type = 'button';
   heightBtn.setAttribute('data-pkc-field', 'sql-er-height');
@@ -383,14 +387,32 @@ export function paintSqlEr(
     const h = `${String(ER_HEIGHT_STEPS[next]!.px)}px`;
     scroll.style.height = h;
     memory.height = h;
+    markFixed();
     paintHeightTitle();
   });
-  host.append(heightBtn);
+  // 🔴 **図の上**(「列をつなぐ」の直後)に置く(Stage 2 PR-3 レビュー)。図が残りの高さを使うようになり、図の下(= 画面の下端・右)は
+  //   右下の浮き札(「添付にしました」など)が出る場所になる ── 下に置くとボタンが浮き札に覆われて押せなかった(attach.smoke で実測)。
+  connectBtn.after(heightBtn);
   /**
    * 🔴 持ち越す(上の `ErFocusKey` の注釈)。⚠ 高さは**掴んで変えたときだけ**インラインに入る
    *   (`resize` が書く)── 空なら CSS の初期値のまま。
    */
   if (memory.height !== '') scroll.style.height = memory.height;
+  markFixed();
+  // 🔴 掴んで変えた高さ(ブラウザの `resize` がインラインの `height` を書く)も、大きさが変わった時点で印にする
+  //   (CSS はこの印を見て図の伸び縮みを止める。`style*='height'` では min-height / max-height のインラインにも当たってしまう)
+  if (typeof ResizeObserver === 'function') new ResizeObserver(markFixed).observe(scroll);
+  /**
+   * 🔴 掴み始めた瞬間に、いまの高さをインラインへ固定する(Stage 2 PR-3。smoke の「掴んで高さを変える」が捕まえた退行)。
+   *   図は残りの高さいっぱいに伸びているので、固定しないまま引くと、書かれた `height` を flex が元の高さへ押し戻し、
+   *   **大きくできない**(縮めることしかできない)。右下の掴み所(`resize` の角)に触れたときだけ固定する。
+   */
+  scroll.addEventListener('pointerdown', (ev) => {
+    const r = scroll.getBoundingClientRect();
+    if (ev.clientX < r.right - 20 || ev.clientY < r.bottom - 20) return;
+    scroll.style.height = `${String(Math.round(r.height))}px`;
+    markFixed();
+  });
   paintHeightTitle();
   scroll.scrollLeft = memory.left;
   scroll.scrollTop = memory.top;

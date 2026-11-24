@@ -105,7 +105,6 @@ export const MANUAL_FIND_SCRIPT: string = [
   'if(!found.length){count.textContent="見つかりませんでした。別の言い方でも試せます";return}',
   'count.textContent=total+" か所("+found.length+" 節)"+(found.length>MAX?"。下に出すのは "+MAX+" 節、あと "+(found.length-MAX)+" 節":"");',
   'found.slice(0,MAX).forEach(function(f){var b=document.createElement("button");b.type="button";',
-  'b.setAttribute("data-pkc-find-index",String(secs.indexOf(f.s)));',
   'var t=document.createElement("span");t.textContent=f.s.head.textContent.replace(/[*`_]/g,"")+"("+f.c+")";b.appendChild(t);',
   'if(f.i>=0){var x=document.createElement("span");x.setAttribute("data-pkc-field","manual-window-find-excerpt");',
   'var src=f.s.ok?f.s.text:f.s.n;var from=Math.max(0,f.i-14);',

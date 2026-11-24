@@ -622,6 +622,15 @@ test('🔴 マニュアルの窓: 目次の上の検索で WebMCP が見つか�
   const mainTop = await win.locator(MAIN).evaluate((el) => el.scrollTop);
   expect(mainTop, '本文の箱が動いていない').toBeGreaterThan(0);
 
+  // 🔴 一致した語が塗られ(CSS Custom Highlight)、Esc で字を消すと塗りも消える(使えるブラウザのとき)
+  const paintedNow = (): Promise<boolean | null> => win.evaluate(() => (window.CSS as unknown as { highlights?: Map<string, unknown> }).highlights?.has('pkc-manual-hit') ?? null);
+  const painted = await paintedNow();
+  if (painted !== null) {
+    expect(painted, 'ヒットを押しても一致した語が塗られていない').toBe(true);
+    await find.press('Escape');
+    await expect.poll(paintedNow, { message: 'Esc で字を消しても塗りが残っている' }).toBe(false);
+    await expect(hits, 'Esc でヒット一覧が消えない').toHaveCount(0);
+  }
   // 🔴 本文は全部 DOM に描画済み: window.find で末尾の WebMCP まで当たり、矩形があり、窓の中に出る
   await find.fill('');
   const found = await win.evaluate(() => {

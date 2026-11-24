@@ -80,15 +80,47 @@ describe('別ウィンドウのマニュアルの検索', () => {
     expect($('#b').hasAttribute('data-pkc-jump-flash'), '別の節を光らせた').toBe(false);
   });
 
-  it('🔴 Esc で消える / 検索欄は目次の上(nav より前)に在る', async () => {
+  it('🔴 Esc で消える(値・ヒット・目次の絞り込み・件数まで)/ 検索欄は目次の上(nav より前)に在る', async () => {
     mount();
     await type('保存');
+    expect(document.querySelectorAll('[data-pkc-region="manual-window-find-hits"] button').length, '前提: ヒットが出ている').toBeGreaterThan(0);
+    expect([...document.querySelectorAll<HTMLElement>('nav a')].some((a) => a.hidden), '前提: 目次が絞られている').toBe(true);
     const inp = $<HTMLInputElement>('[data-pkc-field="manual-window-find"]');
     inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(inp.value).toBe('');
+    expect(document.querySelectorAll('[data-pkc-region="manual-window-find-hits"] button').length, 'Esc 後もヒットが残っている').toBe(0);
+    expect([...document.querySelectorAll<HTMLElement>('nav a')].filter((a) => a.hidden).length, 'Esc 後も目次が絞られたまま').toBe(0);
+    expect($('[data-pkc-field="manual-window-find-count"]').textContent, 'Esc 後も件数が残っている').toBe('');
     expect(
       inp.compareDocumentPosition($('nav')) & Node.DOCUMENT_POSITION_FOLLOWING,
       '検索欄が目次より後ろにある',
     ).toBeTruthy();
+  });
+
+  it('🔴 Enter で先頭のヒットへ送る / 変換中(isComposing)の Enter・Esc は IME のもの', async () => {
+    mount();
+    const main = $('[data-pkc-region="manual-window-main"]');
+    for (const h of main.querySelectorAll<HTMLElement>('h1,h2')) h.getBoundingClientRect = () => ({ top: 500 }) as DOMRect;
+    await type('保存');
+    const inp = $<HTMLInputElement>('[data-pkc-field="manual-window-find"]');
+    // 変換中は何もしない(値も消さず、送りもしない)
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }));
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true }));
+    expect(inp.value, '変換中の Esc で消えた').toBe('保存');
+    expect(document.querySelector('[data-pkc-jump-flash]'), '変換中の Enter で送った').toBeNull();
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect($('[data-pkc-jump-flash]').id, 'Enter が先頭のヒット(保存のしかた)へ送っていない').toBe('b');
+  });
+
+  it('🔴 NFKC で字数が変わる字を含む節(s.ok=false)でも、件数と送りは出る(塗りだけ諦める)', async () => {
+    document.body.innerHTML = BODY.replace('保存は自動です。', '保存は自動です。㌔ の話。');
+    new Function(MANUAL_FIND_SCRIPT)();
+    await type('保存');
+    const hits = [...document.querySelectorAll<HTMLElement>('[data-pkc-region="manual-window-find-hits"] button')];
+    expect(hits.length, '字数が変わる節がヒットから落ちた').toBe(1);
+    const main = $('[data-pkc-region="manual-window-main"]');
+    for (const h of main.querySelectorAll<HTMLElement>('h1,h2')) h.getBoundingClientRect = () => ({ top: 500 }) as DOMRect;
+    hits[0]!.click();
+    expect($('#b').hasAttribute('data-pkc-jump-flash'), '塗れない節で送りまで止まった').toBe(true);
   });
 });

@@ -180,6 +180,8 @@ describe('ヘルプのマニュアルは箱を持たない(スクロールは外
   it('🔴 帰り道の帯は貼り付く(外側が箱なので、読み進めても上に残る)', () => {
     const joined = blocksFor(css(), "[data-pkc-region='help-jump-back']").join('\n');
     expect(joined).toMatch(decl('position', 'sticky'));
-    expect(joined).toMatch(decl('top', '0'));
+    // 閉じる帯(pane-bar: sticky・top 0)の真下 ── top: 0 だと閉じるボタンを覆う
+    expect(joined).toMatch(decl('top', 'calc\\(var\\(--row-h\\) \\+ var\\(--s2\\) \\* 2 \\+ 1px\\)'));
+    expect(joined, '閉じる帯(z-index 2)より前に出ている').toMatch(decl('z-index', '1'));
   });
 });

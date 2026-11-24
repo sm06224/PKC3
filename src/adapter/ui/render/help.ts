@@ -279,6 +279,8 @@ export class HelpRenderer {
    *   **6,385 節点(92.8%)**が返る)。
    */
   onHidden(): void {
+    // 🔴 探した語の塗りは表示の寿命と同じ(`pkc-search-hit` はノートの「探す」と共有 ── 別画面へ残さない)
+    clearHitHighlights();
     // ⚠ 描いていないなら予約しない(空の器をもう一度空にしても何も返らない)
     if (!this.manualDrawn || this.idleTimer !== null) return;
     this.idleTimer = this.timers.set(() => {
@@ -1054,8 +1056,10 @@ export class HelpRenderer {
   private showBack(chain: readonly { el: HTMLElement; top: number }[]): void {
     const bar = this.backHost;
     if (bar === null) return;
+    // 🔴 戻り先は**最初に飛んだ位置**を守る(Stage 2 PR-3 レビュー)── 帯が出ている間に 2 度目・3 度目の飛びで上書きすると、
+    //   A → B → C と飛んだ後の「戻る」が B になり、A(読んでいた最初の場所)へ帰れない。帰る(`goBack`)まで取り直さない。
+    if (bar.hidden || this.backTo === null) this.backTo = chain;
     bar.hidden = false;
-    this.backTo = chain;
   }
 
   /** 控えた位置へ戻して、帰り道を畳む。 */
