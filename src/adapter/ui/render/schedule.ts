@@ -572,9 +572,8 @@ export class ScheduleRenderer {
     const month = state.calendarMonth?.month ?? at.getMonth() + 1;
     frame.month.textContent = `${year}年${month}月`;
     frame.month.setAttribute('data-pkc-month', `${year}-${month < 10 ? '0' : ''}${month}`);
-    for (const btn of frame.grid.parentElement?.querySelectorAll<HTMLElement>(
-      '[data-pkc-action="schedule-nav"]',
-    ) ?? []) {
+    // ⚠ 検索の範囲は**面ぜんたい**(`this.region`)── 広い面は操作の列と見る所が別の箱なので、小さな月の親だけだと「月」の見る所の ‹ › に遷移先が焼かれない
+    for (const btn of this.region.querySelectorAll<HTMLElement>('[data-pkc-action="schedule-nav"]')) {
       const to = btn.getAttribute('data-pkc-nav-step') === '-1' ? month - 1 : month + 1;
       btn.setAttribute('data-pkc-nav-year', String(year));
       btn.setAttribute('data-pkc-nav-month', String(to));
@@ -1267,7 +1266,24 @@ export class ScheduleRenderer {
     this.week.el.hidden = true;
     this.monthView.el.hidden = true;
     this.board.el.hidden = true;
-    this.region.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, this.board.el, groups);
+    /**
+     * 🔴 **広い面(別のウィンドウ / 中央)は「操作の列」と「見る所」の 2 つの箱に分ける**(#1442 S3-1)。
+     * ⚠ 直す前は 14 個の部品が 1 列に積まれ、1100×800 の窓では操作(月の送り・見せ方・追加欄・小さな月・出すもの)が上の 4 割を占め、
+     *   肝心の一覧 / 月 / 週が**下へ押し下げられて**見えていた。いまは幅があれば**左に操作・右に見る所**(CSS の container query が
+     *   決める)── 幅が足りなければ今までどおり 1 列に積む(箱は積む順をそのまま保つ)。
+     * ⚠ 狭い面(左の列のタブ)は**箱を作らない**(見え方は変えない)。部品の並びは両方とも元の順のまま。
+     */
+    if (this.region.hasAttribute('data-pkc-browse-pane')) {
+      this.region.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify, this.day.el, this.week.el, this.monthView.el, this.board.el, groups);
+    } else {
+      const rail = document.createElement('div');
+      rail.setAttribute('data-pkc-field', 'schedule-rail');
+      rail.append(bar, modeRow, quick, grid, note, clearFilter, toggles, exportIcs, notify);
+      const main = document.createElement('div');
+      main.setAttribute('data-pkc-field', 'schedule-main');
+      main.append(this.day.el, this.week.el, this.monthView.el, this.board.el, groups);
+      this.region.append(rail, main);
+    }
     this.frame = { month, grid, note, clearFilter, undated, done, archived, fold, foldNote, foldButton: summary, notes, notesList, notesSignature: '', lead, missed, alarm, toggles, groups, modes, quickDate: qDate, weekStart: weekStartSel, owner: ownerSel };
     return this.frame;
   }

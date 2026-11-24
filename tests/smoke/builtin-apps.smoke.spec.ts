@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool, openMessagePopover } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool, openMessagePopover, writesLanded } from './helpers';
 
 /**
  * 🔴 **組み込みアプリ 3 つを、実ブラウザで押す**(#281 ① 関係グラフ / #277 カンバン / #683 ① 計った時間)。
@@ -693,5 +693,335 @@ test('🔴 別ウィンドウの予定表は一覧・情報・バーを畳んで
     const w = window as unknown as { __pkcRealOpen?: typeof window.open };
     if (w.__pkcRealOpen) window.open = w.__pkcRealOpen;
   });
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **広い別ウィンドウ(1100×800)で、連絡先・時間・録ったもの・予定表が幅と高さを使う**(#1442 S3-1。Stage 3 PR-1)。
+ *
+ * ⚠ 直す前は、どの面も左の列(242px)の縦 1 列をそのまま広げただけだった ── 連絡先は左 1/3 だけに積まれて右が空く /
+ *   時間は 1 件 4 行 / 録ったものは行いっぱいのボタン / 予定表は操作が上の 4 割を占めて一覧が下へ押し下げられていた。
+ * 🔑 観測点は**実座標**(`boundingBox`)。unit(happy-dom)は寸法を持たないので、横に並ぶ・高さを使うはここでしか見えない。
+ *   対照群 = **左の列(狭い面)では従来どおり縦 1 列**(退行防止。同じ描画器・同じ規則の別の幅)。
+ *   窓の幅(1100)・スマホ幅(390)・明暗の 3 通りで見る。
+ */
+async function seedWideWindowData(page: import('@playwright/test').Page): Promise<void> {
+  const iso = (d: number): string => {
+    const t = new Date();
+    t.setDate(t.getDate() + d);
+    return `${String(t.getFullYear())}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  };
+  const people = [
+    ['090-1234-5678', 'taro@example.com', '例の会社'],
+    ['03-1111-2222', 'hanako@example.com', '北の商店'],
+    ['080-9999-0000', 'ichiro@example.com', '南の工房'],
+  ];
+  for (const [t, m, o] of people) {
+    await createEntry(page, 'text');
+    await writeBody(page, `---\ntel: ${t}\nemail: ${m}\norg: ${o}\n---\n\n# 連絡先メモ`);
+  }
+  const work = [0, -1].flatMap((k) => [
+    `- 作業 ${iso(k)} 09:00–09:45(0:45) 見積の作成`,
+    `- 作業 ${iso(k)} 14:00–15:30(1:30) 資料づくり`,
+  ]);
+  await createEntry(page, 'text');
+  await writeBody(page, `---\ndate: ${iso(0)} 10:00\n---\n\n# 朝会\n\n${work.join('\n')}\n\n- [ ] 資料を送る @${iso(1)}`);
+  // 音の添付 2 本(最小の WAV)── 録ったものの面に並ぶ
+  const wav = (ms: number): Buffer => {
+    const rate = 8000;
+    const n = Math.floor((rate * ms) / 1000);
+    const b = Buffer.alloc(44 + n * 2);
+    b.write('RIFF', 0);
+    b.writeUInt32LE(36 + n * 2, 4);
+    b.write('WAVEfmt ', 8);
+    b.writeUInt32LE(16, 16);
+    b.writeUInt16LE(1, 20);
+    b.writeUInt16LE(1, 22);
+    b.writeUInt32LE(rate, 24);
+    b.writeUInt32LE(rate * 2, 28);
+    b.writeUInt16LE(2, 32);
+    b.writeUInt16LE(16, 34);
+    b.write('data', 36);
+    b.writeUInt32LE(n * 2, 40);
+    return b;
+  };
+  for (const [i, ms] of [1200, 2200, 900].entries()) {
+    await page.setInputFiles('[data-pkc-field="attach-input"]', { name: `録音${String(i + 1)}.wav`, mimeType: 'audio/wav', buffer: wav(ms) });
+    // ⚠ 入るのを待ってから次を渡す(続けて渡すと、取り込みの途中で渡した分が落ちる ── 実測: 5 回に 1 回、2 件目が並ばなかった)
+    await expect(page.locator('[data-pkc-region="detail"]'), `録音${String(i + 1)}.wav が本文に入らない`).toContainText(`録音${String(i + 1)}.wav`, { timeout: 15_000 });
+    await writesLanded(page);
+  }
+}
+
+/** 面の窓をタイルから開く(user と同じ手 ── 2 回押す)。 */
+async function openAppWindow(
+  page: import('@playwright/test').Page,
+  tile: string,
+  pane: string,
+  size: { width: number; height: number },
+): Promise<import('@playwright/test').Page> {
+  await openBrowse(page, 'launcher');
+  const opened = page.context().waitForEvent('page', { timeout: 20_000 });
+  await openTile(page, `[data-pkc-action="open-tile"][data-pkc-tile="builtin:${tile}"]`);
+  const win = await opened;
+  await win.setViewportSize(size);
+  await expect(win.locator(`[data-pkc-view-pane="${pane}"]`), `${tile} の窓が出ない`).toBeVisible({ timeout: 30_000 });
+  return win;
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+/**
+ * 寸法を読む。⚠ 配色を替えた直後は面が描き直されて一瞬 null になる(実測: 1 回だけ落ちた)── 見えるまで待ってから読む。
+ * 待つのは「見えること」であって時間ではない(`toBeVisible` が再描画を跨いで待つ)。
+ */
+const boxOf = async (l: import('@playwright/test').Locator): Promise<Box> => {
+  let b: Box | null = null;
+  await expect
+    .poll(async () => {
+      b = await l.first().boundingBox();
+      return b !== null;
+    }, { message: 'boundingBox が取れない(見えていない)' })
+    .toBe(true);
+  return b as unknown as Box;
+};
+/** 文書が横にはみ出していない(窓の横スクロールが無い)。 */
+async function expectNoHorizontalScroll(win: import('@playwright/test').Page, label: string): Promise<void> {
+  const over = await win.evaluate(() => {
+    const e = document.scrollingElement;
+    return e === null ? 0 : e.scrollWidth - e.clientWidth;
+  });
+  expect(over, `${label}: 文書が横にはみ出している(${String(over)}px)`).toBeLessThanOrEqual(0);
+}
+
+test('🔴 広い別ウィンドウ: 連絡先・時間・録ったもの・予定表が幅と高さを使い、左の列は縦 1 列のまま、スマホ幅でも崩れない (#1442 S3-1)', async ({ page }) => {
+  test.setTimeout(180_000);
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await seedWideWindowData(page);
+
+  /**
+   * ① 対照群: 左の列(狭い面)は従来どおり縦 1 列。⚠ 広い面の規則(`[data-pkc-view-pane]`)が左の列へ漏れていないこと。
+   */
+  await openBrowseTab(page, 'contacts');
+  const leftCards = page.locator('[data-pkc-browse-pane="contacts"] [data-pkc-field="contacts-list"] > li');
+  await expect(leftCards, '連絡先が左の列に並ばない').toHaveCount(3, { timeout: 15_000 });
+  const l0 = await boxOf(leftCards.nth(0));
+  const l1 = await boxOf(leftCards.nth(1));
+  expect(Math.abs(l0.x - l1.x), '左の列の連絡先が複数列になった(縦 1 列のはず)').toBeLessThan(2);
+  expect(l1.y, '左の列の連絡先が縦に積まれていない').toBeGreaterThan(l0.y + l0.height - 2);
+  await openBrowseTab(page, 'schedule');
+  await expect(page.locator('[data-pkc-browse-pane="schedule"] [data-pkc-field="schedule-rail"]'), '左の列の予定に、広い面だけの箱ができた').toHaveCount(0);
+  await openBrowseTab(page, 'timers');
+  const tRow = page.locator('[data-pkc-browse-pane="timers"] [data-pkc-field="timers-list"] > li').first();
+  await expect(tRow, '時間が左の列に並ばない').toBeVisible({ timeout: 15_000 });
+  const tWhen = await boxOf(tRow.locator('[data-pkc-field="timers-when"]'));
+  const tNote = await boxOf(tRow.locator('[data-pkc-field="timers-note-open"]'));
+  expect(tNote.y, '左の列の時間が表になった(縦に積むはず)').toBeGreaterThan(tWhen.y + tWhen.height - 2);
+  await openBrowseTab(page, 'captures');
+  const leftCaps = page.locator('[data-pkc-browse-pane="captures"] [data-pkc-field="captures-list"] > li');
+  await expect(leftCaps.first(), '録ったものが左の列に並ばない').toBeVisible({ timeout: 15_000 });
+  const lc0 = await boxOf(leftCaps.nth(0));
+  const lc1 = await boxOf(leftCaps.nth(1));
+  expect(Math.abs(lc0.x - lc1.x), '左の列の録ったものが複数列になった').toBeLessThan(2);
+
+  const wide = { width: 1100, height: 800 };
+  const phone = { width: 390, height: 844 };
+
+  /** ② 連絡先: カードが 2 列以上に並び(同じ行は top が揃う)、右の余白を使う。 */
+  {
+    const win = await openAppWindow(page, 'contacts', 'contacts', wide);
+    const cards = win.locator('[data-pkc-view-pane="contacts"] [data-pkc-field="contacts-list"] > li');
+    await expect(cards, '窓に連絡先が並ばない').toHaveCount(3, { timeout: 15_000 });
+    for (const scheme of ['light', 'dark'] as const) {
+      await win.emulateMedia({ colorScheme: scheme });
+      const a = await boxOf(cards.nth(0));
+      const b = await boxOf(cards.nth(1));
+      expect(b.x, `[${scheme}] 連絡先が横に並んでいない(縦 1 列のまま)`).toBeGreaterThan(a.x + a.width - 2);
+      expect(Math.abs(a.y - b.y), `[${scheme}] 同じ行のカードの top が揃っていない`).toBeLessThan(2);
+      const right = Math.max(...(await Promise.all([0, 1, 2].map(async (i) => { const c = await boxOf(cards.nth(i)); return c.x + c.width; }))));
+      expect(right, `[${scheme}] 連絡先が窓の幅を使い切っていない(右が空く)`).toBeGreaterThan(wide.width - 80);
+      await expectNoHorizontalScroll(win, `[${scheme}] 連絡先`);
+    }
+    await win.setViewportSize(phone);
+    const a = await boxOf(cards.nth(0));
+    const b = await boxOf(cards.nth(1));
+    expect(Math.abs(a.x - b.x), '[スマホ幅] 連絡先が 1 列に戻らない').toBeLessThan(2);
+    expect(a.x + a.width, '[スマホ幅] 連絡先が画面の右へはみ出す').toBeLessThanOrEqual(phone.width + 1);
+    await expectNoHorizontalScroll(win, '[スマホ幅] 連絡先');
+    await win.close();
+  }
+
+  /** ③ 時間: 1 件が 1 行の表(時間帯 | 名前 | ノート | 操作 が同じ行に並ぶ)。 */
+  {
+    const win = await openAppWindow(page, 'timers', 'timers', wide);
+    const row = win.locator('[data-pkc-view-pane="timers"] [data-pkc-field="timers-list"] > li').first();
+    await expect(row, '窓に計った時間が並ばない').toBeVisible({ timeout: 15_000 });
+    for (const scheme of ['light', 'dark'] as const) {
+      await win.emulateMedia({ colorScheme: scheme });
+      const when = await boxOf(row.locator('[data-pkc-field="timers-when"]'));
+      const name = await boxOf(row.locator('[data-pkc-field="timers-name"]'));
+      const note = await boxOf(row.locator('[data-pkc-field="timers-note-open"]'));
+      const tools = await boxOf(row.locator('[data-pkc-field="timers-tools"]'));
+      expect(name.x, `[${scheme}] 名前が時間帯の右に並んでいない`).toBeGreaterThan(when.x + when.width - 2);
+      expect(note.x, `[${scheme}] ノートが名前の右に並んでいない`).toBeGreaterThan(name.x + name.width - 2);
+      expect(tools.x, `[${scheme}] 操作がノートの右に並んでいない`).toBeGreaterThan(note.x + note.width - 2);
+      // 1 行に収まる(4 つの top が揃う ── 縦に積まれていない)
+      expect(Math.max(when.y, name.y, note.y, tools.y) - Math.min(when.y, name.y, note.y, tools.y), `[${scheme}] 時間の行が縦に積まれている`).toBeLessThan(24);
+      expect(tools.x + tools.width, `[${scheme}] 操作が窓の右端まで使われていない`).toBeGreaterThan(wide.width - 60);
+      await expectNoHorizontalScroll(win, `[${scheme}] 時間`);
+    }
+    await win.setViewportSize(phone);
+    const when = await boxOf(row.locator('[data-pkc-field="timers-when"]'));
+    const note = await boxOf(row.locator('[data-pkc-field="timers-note-open"]'));
+    expect(note.y, '[スマホ幅] 時間が縦に積まれない').toBeGreaterThan(when.y + when.height - 2);
+    await expectNoHorizontalScroll(win, '[スマホ幅] 時間');
+    await win.close();
+  }
+
+  /** ④ 録ったもの: カードが 2 列以上、ボタンは行いっぱいに伸びず横に並ぶ。 */
+  {
+    const win = await openAppWindow(page, 'captures', 'captures', wide);
+    const cards = win.locator('[data-pkc-view-pane="captures"] [data-pkc-field="captures-list"] > li');
+    await expect(cards.nth(1), '窓に録ったものが 2 件並ばない').toBeVisible({ timeout: 15_000 });
+    for (const scheme of ['light', 'dark'] as const) {
+      await win.emulateMedia({ colorScheme: scheme });
+      const a = await boxOf(cards.nth(0));
+      const b = await boxOf(cards.nth(1));
+      expect(b.x, `[${scheme}] 録ったものが横に並んでいない`).toBeGreaterThan(a.x + a.width - 2);
+      expect(Math.abs(a.y - b.y), `[${scheme}] 同じ行のカードの top が揃っていない`).toBeLessThan(2);
+      const play = await boxOf(cards.nth(0).locator('[data-pkc-field="capture-play"]'));
+      const text = await boxOf(cards.nth(0).locator('[data-pkc-field="capture-transcribe"]'));
+      expect(text.x, `[${scheme}] ボタンが横に並んでいない(縦に積まれている)`).toBeGreaterThan(play.x + play.width - 2);
+      expect(text.width, `[${scheme}] ボタンが行いっぱいに伸びている`).toBeLessThan(a.width / 2);
+      await expectNoHorizontalScroll(win, `[${scheme}] 録ったもの`);
+    }
+    // 聞くと、その 1 枚だけ行いっぱいに広がる(波形・再生機が窮屈にならない)
+    await clickReal(win, cards.nth(0).locator('[data-pkc-field="capture-play"]'));
+    await expect(cards.nth(0), '聞いている 1 枚の印が付かない').toHaveAttribute('data-pkc-capture-open', '');
+    const open = await boxOf(cards.nth(0));
+    expect(open.width, '聞いている 1 枚が行いっぱいに広がらない').toBeGreaterThan(wide.width - 120);
+    await clickReal(win, cards.nth(0).locator('[data-pkc-action="capture-stop"]'));
+    await win.setViewportSize(phone);
+    const a = await boxOf(cards.nth(0));
+    const b = await boxOf(cards.nth(1));
+    expect(Math.abs(a.x - b.x), '[スマホ幅] 録ったものが 1 列に戻らない').toBeLessThan(2);
+    await expectNoHorizontalScroll(win, '[スマホ幅] 録ったもの');
+    await win.close();
+  }
+
+  /**
+   * ⑤ 予定表: 左に操作の列・右に見る所(一覧 / 月 / 週)が同じ top で横に並び、見る所が窓の高さを使う。
+   *   「+」は日の見出しのすぐ隣(右端へ孤立しない)。月は高さいっぱいに伸びる。スマホ幅は操作 → 見る所の縦積み。
+   */
+  {
+    const win = await openAppWindow(page, 'schedule', 'schedule', wide);
+    const rail = win.locator('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-rail"]');
+    const main = win.locator('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-main"]');
+    await expect(win.locator('[data-pkc-region="schedule-group"]').first(), '窓に予定の束が出ない').toBeVisible({ timeout: 15_000 });
+    for (const scheme of ['light', 'dark'] as const) {
+      await win.emulateMedia({ colorScheme: scheme });
+      const r = await boxOf(rail);
+      const m = await boxOf(main);
+      expect(m.x, `[${scheme}] 見る所が操作の列の右に並んでいない`).toBeGreaterThan(r.x + r.width - 2);
+      expect(Math.abs(r.y - m.y), `[${scheme}] 操作の列と見る所の top が揃っていない`).toBeLessThan(2);
+      expect(m.height, `[${scheme}] 見る所が窓の高さを使っていない(${String(m.height)}px)`).toBeGreaterThan(wide.height * 0.6);
+      expect(m.x + m.width, `[${scheme}] 見る所が窓の幅を使い切っていない`).toBeGreaterThan(wide.width - 40);
+      // 「+」は見出しの字のすぐ隣(右端に孤立しない)
+      const head = win.locator('[data-pkc-field="schedule-group-label"]').first();
+      const text = await boxOf(head.locator('[data-pkc-field="schedule-group-text"]'));
+      const plus = await boxOf(head.locator('[data-pkc-field="schedule-quick-here"]'));
+      expect(plus.x - (text.x + text.width), `[${scheme}] 「+」が見出しから離れて孤立している`).toBeLessThan(40);
+      await expectNoHorizontalScroll(win, `[${scheme}] 予定表`);
+    }
+    // 月: 見る所の高さいっぱいに伸びる(下に空白が残らない)
+    await clickReal(win, win.locator('[data-pkc-view-pane="schedule"] [data-pkc-action="schedule-mode"][data-pkc-mode="month"]'));
+    const monthBody = win.locator('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-monthview-body"]');
+    await expect(monthBody, '月が出ない').toBeVisible();
+    const mb = await boxOf(monthBody);
+    expect(mb.y + mb.height, '月の升目が窓の高さまで伸びていない').toBeGreaterThan(wide.height - 60);
+    // 🔑 伸びるのは**最後の週の段**まで(箱だけ伸びて段が元のままだと、下に地の色の帯が残る)
+    const lastWeek = await boxOf(win.locator('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-monthview-week"]').last());
+    expect(lastWeek.y + lastWeek.height, '月の最後の週の段が窓の高さまで伸びていない(箱だけ伸びている)').toBeGreaterThan(wide.height - 60);
+    // 週: 時間の目盛りが見る所に出る(横 1 列の操作に押し下げられない)
+    await clickReal(win, win.locator('[data-pkc-view-pane="schedule"] [data-pkc-action="schedule-mode"][data-pkc-mode="week"]'));
+    const weekTop = await boxOf(win.locator('[data-pkc-view-pane="schedule"] [data-pkc-region="schedule-weekview"]'));
+    expect(weekTop.y, '週が操作の下へ押し下げられている').toBeLessThan(120);
+    // スマホ幅: 操作 → 見る所の縦積み(積む順は元のまま)
+    await win.setViewportSize(phone);
+    const r = await boxOf(rail);
+    const m = await boxOf(main);
+    expect(Math.abs(r.x - m.x), '[スマホ幅] 予定表が縦に積まれない').toBeLessThan(2);
+    expect(m.y, '[スマホ幅] 見る所が操作の下に来ない').toBeGreaterThan(r.y + r.height - 2);
+    await expectNoHorizontalScroll(win, '[スマホ幅] 予定表');
+    await win.close();
+  }
+
+  expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
+});
+
+/**
+ * 🔴 **グラフ・PC・シェルの広い窓**(#1442 S3-1 の点検の結果 ── 直した 2 つと、直さなくてよかった 1 つ)。
+ * - グラフ: 地図が窓の高さに収まる(幅いっぱい × 縦横比で窓より高く、下へ送らないと全体が見えなかった)
+ * - PC: 「Office のファイルを開く…」が行いっぱいに伸びない(「フォルダを選ぶ…」と同じ左寄せ)
+ * - シェル: 出力欄が窓の高さを使う(縦 1 列の崩れ・余白過多は無い ── 変えていない。退行防止)
+ */
+test('🔴 広い別ウィンドウ: グラフの地図は窓の高さに収まり、PC のボタンは伸びず、シェルは高さを使う (#1442 S3-1)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  const wide = { width: 1100, height: 800 };
+  // つながりのあるノートを 2 つ(地図は節点があるときだけ出る)
+  await createEntry(page, 'text');
+  await writeBody(page, '# 行き先B');
+  const lidB = await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().getAttribute('data-pkc-entry');
+  expect(lidB, 'B の lid が読めない').toBeTruthy();
+  await createEntry(page, 'text');
+  await writeBody(page, `# 起点A\n\n[行き先B](entry:${String(lidB)})`);
+  const lidA = await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().getAttribute('data-pkc-entry');
+  expect(lidA, 'A の lid が読めない').toBeTruthy();
+  // 3 つ目(C → A)── 3 節点 + 凡例の行まで出る形で測る(2 節点だと、地図が自分で縮んで窓に収まり、この直しが効いているか分からない)
+  await createEntry(page, 'text');
+  await writeBody(page, `# 手前C\n\n[起点A](entry:${String(lidA)})`);
+  await writesLanded(page);
+
+  {
+    const win = await openAppWindow(page, 'graph', 'graph', wide);
+    const map = win.locator('[data-pkc-view-pane="graph"] [data-pkc-field="graph-map"]');
+    await expect(map, 'グラフの地図が出ない').toBeVisible({ timeout: 15_000 });
+    for (const scheme of ['light', 'dark'] as const) {
+      await win.emulateMedia({ colorScheme: scheme });
+      const b = await boxOf(map);
+      expect(b.y + b.height, `[${scheme}] 地図が窓の高さを越えている(下へ送らないと全体が見えない)`).toBeLessThanOrEqual(wide.height);
+      // 🔑 高さは「窓の高さ − 7.5rem」(下限 20rem)で決まる ── 地図が自分で縮んで偶然収まった回(節点が少ないと縮む)と見分ける
+      const want = await win.evaluate(() => {
+        const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+        return Math.max(innerHeight - 7.5 * rem, 20 * rem);
+      });
+      expect(Math.abs(b.height - want), `[${scheme}] 地図の高さが「窓の高さ − 7.5rem」になっていない(${String(b.height)} / 期待 ${String(want)})`).toBeLessThan(1);
+      expect(b.height, `[${scheme}] 地図が小さすぎる(窓の高さを使っていない)`).toBeGreaterThan(wide.height * 0.5);
+      expect(b.width, `[${scheme}] 地図が窓の幅を使っていない`).toBeGreaterThan(wide.width - 120);
+      await expectNoHorizontalScroll(win, `[${scheme}] グラフ`);
+    }
+    await win.close();
+  }
+  {
+    const win = await openAppWindow(page, 'pc', 'pc', wide);
+    const pick = await boxOf(win.locator('[data-pkc-view-pane="pc"] [data-pkc-field="pc-pick"]'));
+    const office = await boxOf(win.locator('[data-pkc-view-pane="pc"] [data-pkc-field="pc-office"]'));
+    expect(Math.abs(office.x - pick.x), 'PC: 2 つのボタンの左が揃っていない').toBeLessThan(2);
+    expect(office.width, 'PC: 「Office のファイルを開く…」が行いっぱいに伸びている').toBeLessThan(wide.width / 3);
+    await expectNoHorizontalScroll(win, 'PC');
+    await win.close();
+  }
+  {
+    const win = await openAppWindow(page, 'shell', 'shell', wide);
+    const pane = await boxOf(win.locator('[data-pkc-view-pane="shell"]'));
+    expect(pane.height, 'シェルが窓の高さを使っていない').toBeGreaterThan(wide.height * 0.85);
+    expect(pane.width, 'シェルが窓の幅を使っていない').toBeGreaterThan(wide.width - 80);
+    await expectNoHorizontalScroll(win, 'シェル');
+    await win.close();
+  }
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
