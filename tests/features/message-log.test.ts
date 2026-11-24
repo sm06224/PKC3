@@ -22,6 +22,8 @@ import {
   isSystemMessageLid,
   lidForMessageKind,
   sanitizeMessageText,
+  fixedHeadForLabels,
+  markName,
   titleForMessageLid,
   trimSlackForLid,
   trimToCap,
@@ -376,5 +378,42 @@ describe('recentMessages ── 簡易履歴の種まき(本文の末尾から�
     expect(recentMessages(body, 2).map((m) => m.kind)).toEqual(['problem', 'caution']);
     expect(recentMessages('', 5)).toEqual([]);
     expect(recentMessages('## 見出しだけ\nただの文\n', 5)).toEqual([]);
+  });
+});
+
+describe('🔴 アプリの画面の名前だけを括弧に持つ知らせは伏せない(段 4b)', () => {
+  // ⚠ 期待値は実装の正規表現から作らない ── 固定の字で書く
+  const LABELS = ['端末間の同期', '今すぐ同期'];
+  it('名前が全部画面の名前なら、文がそのまま残る', () => {
+    const t = 'パスフレーズを入れると同期を再開します(設定の「端末間の同期」で入れられます)';
+    expect(sanitizeMessageText(t, fixedHeadForLabels(t, LABELS))).toContain('「端末間の同期」');
+  });
+  it('対照群: 渡さなければ今までどおり伏せる', () => {
+    expect(sanitizeMessageText('設定の「端末間の同期」で')).toContain('「…」');
+  });
+  it('知らない名前(user の題名)が 1 つでも混ざれば伏せる', () => {
+    const t = '「端末間の同期」で「家計簿 2026」を同期しました';
+    const out = sanitizeMessageText(t, fixedHeadForLabels(t, LABELS));
+    expect(out).not.toContain('家計簿');
+  });
+  it('名前の目印・『』・釣り合わない括弧は通さない', () => {
+    expect(fixedHeadForLabels(`「端末間の同期」${markName('秘密')}`, LABELS)).toBe('');
+    expect(fixedHeadForLabels('「端末間の同期」『秘密』', LABELS)).toBe('');
+    expect(fixedHeadForLabels('「端末間の「同期」」', LABELS)).toBe('');
+    expect(fixedHeadForLabels('括弧なし', LABELS)).toBe('');
+  });
+});
+
+describe('🔴 同期の知らせの配線(段 4b)', () => {
+  it('main.ts の同期(フォルダ・S3)の say / fail は画面の名前を通す', async () => {
+    const { readFileSync } = await import('node:fs');
+    const main = readFileSync('src/main.ts', 'utf-8');
+    for (const src of ['folder-sync', 'sync']) {
+      for (const kind of ['result', 'problem']) {
+        expect(main, `${src} ${kind}`).toContain(
+          `appMessagePost.post({ kind: '${kind}', source: '${src}', text, fixedHead: fixedHeadForLabels(text, SYNC_MESSAGE_LABELS) })`,
+        );
+      }
+    }
   });
 });

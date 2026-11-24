@@ -239,7 +239,7 @@ import { appCopyHistory } from '@adapter/platform/copy-history-store';
 // 🔑 メッセージの口は 1 個(設計 doc §7、段②a。CLAUDE.md §7)
 import { appMessagePost, postStorageCautionOnce, READ_AT_KEY } from '@adapter/platform/message-post';
 import { appSyncEnabled } from '@adapter/ui/render/sync-enabled';
-import { SYNC_FORGET_CONFIRM, SYNC_FORGET_CONFIRM_ON_OFF, SYNC_FORGET_LABEL, SYNC_OFF_CONFIRM } from '@features/sync/sync-setting';
+import { SYNC_FORGET_CONFIRM, SYNC_FORGET_CONFIRM_ON_OFF, SYNC_FORGET_LABEL, SYNC_MESSAGE_LABELS, SYNC_OFF_CONFIRM } from '@features/sync/sync-setting';
 import { SHOW_SYNC_CONFLICTS_ACTION } from '@adapter/ui/actions/sync-diff';
 import { applySyncDiff, backupSyncSeed, buildSyncDiff, exportSyncDiff, importSyncDiff, seedSyncFromBackup, type SyncDeps } from '@adapter/ui/actions/sync-diff';
 import { idbSyncFolderStore, SyncFolder, type SyncFolderPicker } from '@adapter/platform/sync-folder';
@@ -249,7 +249,7 @@ import { readDiffZip } from '@features/sync/diff-file';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
-import { markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
+import { fixedHeadForLabels, markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
 import {
   purgeBlockReason,
   runExplicitPurge,
@@ -1927,8 +1927,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      *   状態だけ(`folderSync.statusLine()` ── 「同期しています…」「最終同期 HH:MM」)。⚠ `OP_FAILED` は使わない
      *   (state.error がステータスバーの errorLine に出てしまう)。
      */
-    say: (text) => appMessagePost.post({ kind: 'result', source: 'folder-sync', text }),
-    fail: (text) => appMessagePost.post({ kind: 'problem', source: 'folder-sync', text }),
+    say: (text) => appMessagePost.post({ kind: 'result', source: 'folder-sync', text, fixedHead: fixedHeadForLabels(text, SYNC_MESSAGE_LABELS) }),
+    fail: (text) => appMessagePost.post({ kind: 'problem', source: 'folder-sync', text, fixedHead: fixedHeadForLabels(text, SYNC_MESSAGE_LABELS) }),
     // 状態が変わったら、PC タブとステータスバーの両方を描き直す(`paint` は後で組まれる ── 押されるのは boot の後)
     onChange: () => {
       repaintPanes();
@@ -3921,8 +3921,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       const diff = await readDiffZip(file);
       return { outcome: await applySyncDiff(await syncFolderDeps(auto), diff, name, { auto, folder: true }), manifest: diff.manifest };
     },
-    say: (text) => appMessagePost.post({ kind: 'result', source: 'sync', text }),
-    fail: (text) => appMessagePost.post({ kind: 'problem', source: 'sync', text }),
+    say: (text) => appMessagePost.post({ kind: 'result', source: 'sync', text, fixedHead: fixedHeadForLabels(text, SYNC_MESSAGE_LABELS) }),
+    fail: (text) => appMessagePost.post({ kind: 'problem', source: 'sync', text, fixedHead: fixedHeadForLabels(text, SYNC_MESSAGE_LABELS) }),
     onChange: () => {
       repaintPanes();
       paint();
