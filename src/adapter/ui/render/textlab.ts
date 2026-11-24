@@ -31,6 +31,8 @@ import {
   type LabRecipe,
   type LabTableMode,
 } from '@features/markdown/text-lab';
+import { makeBarMenu, makeBarSpacer } from './bar-menu';
+import { markPrimary, markVariant } from './icons';
 
 /** 画面の部品を引く属性。⚠ 綴りはここ 1 か所(binder は import する)。 */
 export const LAB_OP_ATTR = 'data-pkc-lab-op';
@@ -331,7 +333,15 @@ export class TextLabRenderer {
     load.setAttribute('data-pkc-action', 'textlab-load-note');
     const clear = this.button('textlab-clear', '消す', '左の欄を空にします');
     clear.setAttribute('data-pkc-action', 'textlab-clear');
-    inButtons.append(load, clear);
+    /**
+     * 🔴 **帯の並び**(#1442 S3-2。SQL 画面と同じ方針 ── 常用は出す・副次は 1 段奥・主は 1 つ)。
+     * - 左(元の文章): 開いているノートを読み込む(出す)/ 消す(「その他 ▾」の奥。**危険**: 入力した字が戻らない)
+     * - 右(整えた結果): 結果をコピー(出す。**主** ── 整えて持ち出す、が一番の使い方)/
+     *   「書き出す ▾」の奥に 新しいノートにする・このノートの本文を置き換える(ノートを作る・書き換える)
+     * ⚠ `data-pkc-action` / `data-pkc-field` は変えない。⚠ 消した物は無い(奥へ移しただけ)。
+     */
+    markVariant(clear, 'danger');
+    inButtons.append(load, makeBarSpacer(), makeBarMenu('textlab-more', 'その他', '左の欄を空にする', [clear]));
     const left = document.createElement('section');
     left.setAttribute('data-pkc-field', 'textlab-left');
     const lh = document.createElement('h3');
@@ -354,7 +364,12 @@ export class TextLabRenderer {
     toNote.setAttribute('data-pkc-action', 'textlab-to-note');
     const apply = this.button('textlab-apply-note', 'このノートの本文を置き換える', '');
     apply.setAttribute('data-pkc-action', 'textlab-apply-note');
-    outButtons.append(copy, toNote, apply);
+    markPrimary(copy);
+    outButtons.append(
+      copy,
+      makeBarSpacer(),
+      makeBarMenu('textlab-out', '書き出す', '新しいノートにする / このノートの本文を置き換える', [toNote, apply]),
+    );
     const right = document.createElement('section');
     right.setAttribute('data-pkc-field', 'textlab-right');
     const rh = document.createElement('h3');

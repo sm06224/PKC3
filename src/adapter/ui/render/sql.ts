@@ -35,6 +35,7 @@ import { erArrowTarget, paintSqlEr, type ErSizeMemory } from './sql-er';
 import { createSqlTree, treeViewOf, type SqlTreeHandle } from './sql-tree';
 import { appSqlLayout } from './sql-layout';
 import { markPrimary, markVariant } from './icons';
+import { makeBarMenu } from './bar-menu';
 import {
   clampSqlSplit,
   insertionWithSpacing,
@@ -396,51 +397,10 @@ export class SqlRenderer {
      * ⚠ 押したら閉じる ── ただし**次のイベントで**閉じる(`setTimeout 0`)。同じ押しで開くメニュー(ファイルへ書き出す = 形の一覧)が
      *   押した項目の位置を読むので、先に閉じると位置が 0 になる。⚠ 外を押す / `Esc` でも閉じる。
      */
-    /**
-     * 🔴 **外を押したら閉じる聞き手は、文書に 1 本だけ**(着地前レビュー W6)。メニューごとに足すと、器を作り直す日に
-     *   外し忘れた分が溜まる。⚠ 開いているメニューの一覧(`menus`)を見て、外を押された物だけ閉じる。
-     */
-    const menus: HTMLDetailsElement[] = [];
-    document.addEventListener('pointerdown', (ev) => {
-      for (const d of menus) {
-        if (d.open && ev.target instanceof Node && !d.contains(ev.target)) d.open = false;
-      }
-    });
-    const makeMenu = (field: string, label: string, hint: string, items: HTMLElement[]): HTMLDetailsElement => {
-      const d = document.createElement('details');
-      d.setAttribute('data-pkc-field', field);
-      const sum = document.createElement('summary');
-      sum.textContent = label;
-      sum.title = hint;
-      const list = document.createElement('div');
-      list.setAttribute('data-pkc-field', 'sql-menu-list');
-      list.setAttribute('role', 'group');
-      list.append(...items);
-      d.append(sum, list);
-      d.addEventListener('click', (ev) => {
-        const btn = ev.target instanceof Element ? ev.target.closest('button') : null;
-        if (btn === null) return;
-        /**
-         * 🔴 **形の一覧を開く項目(ファイルへ書き出す)を押したときは、メニューを開いたままにする**(着地前レビュー W6)。
-         *   一覧はこの項目を**錨**に開き(位置・閉じたあとの焦点戻し)、メニューを閉じるとその錨が消える。
-         *   開いたままなら、もう一度押す(一覧が閉じる)/ 外を押す / `Esc` が全部効く。
-         */
-        if (btn.getAttribute('data-pkc-action') === 'sql-export-menu') return;
-        // ⚠ 次のイベントで閉じる(同じ押しで開く物が、押した項目の位置を読むため)
-        setTimeout(() => {
-          d.open = false;
-        }, 0);
-      });
-      menus.push(d);
-      d.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Escape' && d.open) {
-          ev.stopPropagation();
-          d.open = false;
-          sum.focus();
-        }
-      });
-      return d;
-    };
+    // 🔴 メニューの作り方は共通の 1 本(`bar-menu.ts`。集計・差分・計算・テキスト整形・2 ペインも同じ ── #1442 S3-2)。
+    //   ⚠ 「ファイルへ書き出す」は形の一覧をこの項目を錨に開くので、メニューを開いたままにする(着地前レビュー W6)
+    const makeMenu = (field: string, label: string, hint: string, items: HTMLElement[]): HTMLDetailsElement =>
+      makeBarMenu(field, label, hint, items, { listField: 'sql-menu-list', keepOpenActions: ['sql-export-menu'] });
     const out = makeMenu('sql-out', '書き出す', 'ノートへ書き出す / ファイルへ書き出す', [save, toFile]);
     const more = makeMenu('sql-more', 'その他', '構造をノートへ書き出す など', [schema]);
     const spacer = document.createElement('span');

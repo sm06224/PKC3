@@ -1048,6 +1048,8 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
           return { left: r.left, textLeft: range.getBoundingClientRect().left };
         });
         expect(g.textLeft - g.left, '群の見出しが左に寄っていない(中央に浮いている)').toBeLessThan(16);
+        // 🔴 欄は「+ リンクを追加」で畳んでいる(#1442 S3-2)── 開いてから寸法を見る
+        await lp.locator('[data-pkc-field="launcher-add-open"]').click();
         const urlRight = await lp.locator('[data-pkc-field="launcher-add-url"]').evaluate((e) => e.getBoundingClientRect().right);
         const rowRight = await lp.locator('[data-pkc-action="open-tile"]').first().evaluate((e) => e.getBoundingClientRect().right);
         expect(Math.abs(urlRight - rowRight), `リンクを追加する欄の右端(${urlRight})が一覧の右端(${rowRight})と揃っていない`).toBeLessThan(6);
