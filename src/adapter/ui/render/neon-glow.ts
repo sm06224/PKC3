@@ -5,8 +5,10 @@
  *
  * ポインタから半径内にあるカードの輪郭(約 2px の線)に、`--neon`(テーマの `--accent` から導いた明るい色)と、
  * 中心の明るい芯(`--neon-core`)が点る。内側の地は光らない。離れると消えて、静止の輪郭(ヘアライン)だけに戻る。
- * 対象は 3 か所を**同じ 1 つの仕組み**で扱う: ログの記録(`[data-pkc-log-card]`)/ 情報ペインのカード(`[data-pkc-card]`)/
- * 左端の縦のバーのボタン(`button`)。旧い「バーの淡い灰色の光」(G1。`rail-glow.ts`)はこれに置き換えた。
+ * 対象は**情報の 1 単位を囲む境界**を**同じ 1 つの仕組み**で扱う: ログの記録(`[data-pkc-log-card]`)/ 情報ペインのカードと入力欄 /
+ * 左端の縦のバーのボタン(`button`)/ 本文のブロック(コード・表・図・引用・折りたたみ。通常のノートと Split の表示)/ 追記欄 /
+ * 検索欄 / SQL の打つ欄。旧い「バーの淡い灰色の光」(G1。`rail-glow.ts`)はこれに置き換えた。
+ * キーボードのフォーカスは**ここでは扱わない**(CSS の `:focus-visible` / `:focus-within` が同じ線を全周に静止させる。近接の光より優先)。
  * 描くのは CSS(`app.css` の `::before` + `mask-composite: exclude`)。ここは**近いカードに局所座標(`--gx` / `--gy`)と印を書くだけ**。
  *
  * ## 🔴 定常のコスト(北極星「効くのは定常」)
@@ -22,6 +24,8 @@
  *   そのコマで光の位置が追いつく(光が置いていかれない)。
  * - ⚠ 自分の書き込み(`style` / 印)の観測器の記録は、コマの終わりに `takeRecords()` で捨てる(でないと毎コマ汚れて測り直しが続く)。
  *   捨てた後に届く記録は全部、他の変更として汚れにする(`style` だからと除かない)。
+ * - 画面内の候補だけ測る: 候補は `IntersectionObserver` で見張り、画面に出ていない物は矩形を測らず書きもしない
+ *   (本文のブロックを対象に入れた分の定常コストを増やさない)。観測器が無い環境では全部を候補にする。
  * - ⚠ 変数は**光る側のカード 1 枚**にだけ書く(`:root` / ゾーンへ書くと全子孫の style を計算し直す ── 実測 40 秒 / 600 回)。
  *
  * 呼び手: `main.ts`(`installNeonGlow` と、描き直しの後の `revalidateNeonGlow`)と、版面が入れ替わるたびに通る
@@ -34,19 +38,39 @@ export const GLOW_QUERY = '(hover: hover) and (pointer: fine) and (prefers-reduc
 /** 近いカードに付く印(CSS が読む)。 */
 export const NEAR_ATTR = 'data-pkc-glow-near';
 
-/** ゾーン(ポインタが入っている間だけ働く範囲)と、そこで光るカード。 */
-export interface NeonZoneSpec {
-  readonly zone: string;
+/** ゾーンの中で光る物の 1 種類(大きさの違う物が 1 つのゾーンに混ざるので、半径は種類ごと)。 */
+export interface NeonTarget {
   readonly cards: string;
   readonly radius: number;
   /** ゾーンの直接の子だけが光る(CSS が `>` で書いている所。⚠ CSS と揃える ── 揃えないと光らない要素へ無駄に書く)。 */
   readonly direct: boolean;
 }
+/** ゾーン(ポインタが入っている間だけ働く範囲)と、そこで光る物。 */
+export interface NeonZoneSpec {
+  readonly zone: string;
+  readonly targets: readonly NeonTarget[];
+}
+/** 入力欄(チェック・ラジオ・隠し・範囲・ファイル・色は輪郭を持たないので除く)。⚠ CSS の `FIELD` の並びと揃える(`tests/adapter/neon-glow.test.ts` が突き合わせる)。 */
+export const NEON_FIELDS = 'input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="range"], [type="file"], [type="color"]), textarea:not([data-pkc-field="sql-input"]), select';
 export const NEON_ZONES: readonly NeonZoneSpec[] = [
-  { zone: '[data-pkc-log-days]', cards: '[data-pkc-log-card]', radius: NEON_RADIUS.log, direct: true },
-  { zone: '[data-pkc-region="inspector"]', cards: '[data-pkc-card]', radius: NEON_RADIUS.inspector, direct: true },
+  { zone: '[data-pkc-log-days]', targets: [{ cards: '[data-pkc-log-card]', radius: NEON_RADIUS.log, direct: true }] },
+  {
+    zone: '[data-pkc-region="inspector"]',
+    targets: [
+      { cards: '[data-pkc-card]', radius: NEON_RADIUS.inspector, direct: true },
+      { cards: NEON_FIELDS, radius: NEON_RADIUS.field, direct: false },
+    ],
+  },
   // バーのボタンは群(タブ・操作)の中に入れ子で並ぶので直接の子ではない
-  { zone: '[data-pkc-region="rail"]', cards: 'button', radius: NEON_RADIUS.rail, direct: false },
+  { zone: '[data-pkc-region="rail"]', targets: [{ cards: 'button', radius: NEON_RADIUS.rail, direct: false }] },
+  // 本文(通常のノート・Split の表示。⚠ ログの本文は先頭のゾーンが握る)── コード・表・図の枠(`.pkc-md-block`)/ 折りたたみ / 引用
+  {
+    zone: '.pkc-md-rendered',
+    targets: [{ cards: '.pkc-md-block, .pkc-details, blockquote:not(.pkc-section-callout)', radius: NEON_RADIUS.block, direct: false }],
+  },
+  { zone: '[data-pkc-region="append"]', targets: [{ cards: '[data-pkc-field="append-form"]', radius: NEON_RADIUS.block, direct: false }] },
+  { zone: '[data-pkc-region="find-bar"]', targets: [{ cards: NEON_FIELDS, radius: NEON_RADIUS.field, direct: false }] },
+  { zone: '[data-pkc-field="sql-editor"]', targets: [{ cards: '[data-pkc-field="sql-input-wrap"]', radius: NEON_RADIUS.block, direct: false }] },
 ];
 const ANY_ZONE = NEON_ZONES.map((z) => z.zone).join(', ');
 
@@ -105,6 +129,12 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
   let mo: MutationObserver | null = null;
   let ro: ResizeObserver | null = null;
   let roFirst = true;
+  /** 画面に出ているかを見張る観測器(候補を画面内へ絞る)。 */
+  let io: IntersectionObserver | null = null;
+  /** 見張っている候補。 */
+  const watched = new Set<HTMLElement>();
+  /** 観測器が「画面に出ていない」と教えた候補(教えられるまでは「出ている」として扱う ── 光り損ねない側へ倒す)。 */
+  const offscreen = new Set<HTMLElement>();
   /** 光っているカード(`ro` で大きさも見ている)。 */
   const lit = new Map<HTMLElement, { gx: number; gy: number }>();
   /** `ro` に付けた直後で、最初の通知(いまの大きさ)をまだ受けていないカード。 */
@@ -115,18 +145,40 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
   let zoneBox: { left: number; top: number; width: number; height: number } | null = null;
   let boxAt = 0;
   const now = (): number => view?.performance?.now() ?? 0;
+  const watch = (el: HTMLElement): void => {
+    if (io === null || watched.has(el)) return;
+    watched.add(el);
+    io.observe(el);
+  };
   const cache = createRectCache<Item>(() => {
     const out: Item[] = [];
     if (zone === null || spec === null) return out;
     const zr = zone.getBoundingClientRect();
     zoneBox = { left: zr.left, top: zr.top, width: zr.width, height: zr.height };
     boxAt = now();
-    for (const el of zone.querySelectorAll<HTMLElement>(spec.cards)) {
-      if (spec.direct && el.parentElement !== zone) continue;
-      const r = el.getBoundingClientRect();
-      // 隠れている(畳み・非表示)カードは矩形が 0 ── 原点の近くで偽って光らせない
-      if (r.width === 0 && r.height === 0) continue;
-      out.push({ el, left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    const seen = new Set<HTMLElement>();
+    for (const t of spec.targets) {
+      for (const el of zone.querySelectorAll<HTMLElement>(t.cards)) {
+        if (t.direct && el.parentElement !== zone) continue;
+        if (seen.has(el)) continue;
+        seen.add(el);
+        watch(el);
+        // 画面に出ていない(観測器が「出ていない」と教えた)物は測らない・書かない
+        if (offscreen.has(el)) continue;
+        const r = el.getBoundingClientRect();
+        // 隠れている(畳み・非表示)カードは矩形が 0 ── 原点の近くで偽って光らせない
+        if (r.width === 0 && r.height === 0) continue;
+        out.push({ el, left: r.left, top: r.top, right: r.right, bottom: r.bottom, radius: t.radius });
+      }
+    }
+    // 外れた(切り離された)物の見張りをやめる
+    if (io !== null) {
+      for (const el of [...watched]) {
+        if (el.isConnected) continue;
+        io.unobserve(el);
+        watched.delete(el);
+        offscreen.delete(el);
+      }
     }
     return out;
   });
@@ -167,7 +219,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       if (zr.left !== zoneBox.left || zr.top !== zoneBox.top || zr.width !== zoneBox.width || zr.height !== zoneBox.height) cache.markDirty();
     }
     const items = cache.get();
-    const near = nearCards(items, px, py, spec.radius);
+    const near = nearCards(items, px, py, 0);
     const next = new Set<HTMLElement>();
     for (const n of near) {
       const el = items[n.index]!.el;
@@ -227,6 +279,24 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     if (changed) markDirty();
   };
   const onFonts = (): void => markDirty();
+  const onIntersect = (entries: readonly { target: Element; isIntersecting: boolean }[]): void => {
+    let changed = false;
+    for (const e of entries) {
+      const el = e.target as HTMLElement;
+      if (!watched.has(el)) continue;
+      if (e.isIntersecting) changed = offscreen.delete(el) || changed;
+      else if (!offscreen.has(el)) {
+        offscreen.add(el);
+        changed = true;
+        // 画面の外へ出た物に光が残らない
+        if (lit.has(el)) {
+          clearOne(el);
+          lit.delete(el);
+        }
+      }
+    }
+    if (changed) markDirty();
+  };
 
   const enter = (z: HTMLElement, s: NeonZoneSpec, e: PointerEvent): void => {
     zone = z;
@@ -244,6 +314,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       mo = new MutationObserver(onMutations);
       mo.observe(z, { childList: true, subtree: true, attributes: true });
     }
+    if (typeof IntersectionObserver !== 'undefined') io = new IntersectionObserver(onIntersect);
     if (typeof ResizeObserver !== 'undefined') {
       roFirst = true;
       ro = new ResizeObserver(onResizeObserved);
@@ -260,8 +331,12 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     doc.fonts?.removeEventListener?.('loadingdone', onFonts);
     mo?.disconnect();
     ro?.disconnect();
+    io?.disconnect();
     mo = null;
     ro = null;
+    io = null;
+    watched.clear();
+    offscreen.clear();
     if (frame !== 0) caf?.(frame);
     frame = 0;
     clearAll();
