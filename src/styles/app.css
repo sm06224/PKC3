@@ -16219,6 +16219,24 @@ h6:hover > .pkc-heading-anchor,
     right: auto;
     left: var(--s3);
   }
+  /* 🔴 ボードの枠(`place-body`)に差し込んだ図はカードにしない ── 枠そのものが既にカードで、高さが固定。
+   *   カードの余白(上 28 + 下 8 + 枠 2)を重ねると、図だけのノートの枠が溢れてスクロールバーが付く(smoke place-board ①-b)。
+   *   枠の中は直す前の形(器の上に「図を保存」の 1 行ぶん 22px)に戻す */
+  [data-pkc-field='place-body'] .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) {
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 0;
+  }
+  [data-pkc-field='place-body'] .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) [data-pkc-mermaid-src] {
+    position: relative;
+    padding-top: 22px;
+  }
+  [data-pkc-field='place-body'] .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) [data-pkc-field='diagram-save'] {
+    top: 0;
+    right: 0;
+    left: auto;
+  }
   /* 原文に切り替えたときの `pre` は、カードの枠の中で二重の枠にしない */
   .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) > pre.pkc-render-source {
     margin: 0;
