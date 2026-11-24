@@ -1,9 +1,7 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { gotoApp, clickReal, collectPageErrors, createEntry, openMessagePopover } from './helpers';
-import { fakeS3 } from '../helpers/fake-s3';
+import { SECRET, PASS, startMockS3 } from './mock-s3';
 
 /**
  * 🔴 **S3 互換の保管先(#2000 段 4a-4。user 必須ガード)── COOP/COEP で分離した実ブラウザの 2 台から、作り物の S3 サーバを読み書きする**。
@@ -17,71 +15,7 @@ import { fakeS3 } from '../helpers/fake-s3';
  *   ⑦置き場には `.enc` と `keyring.json` だけ(平文の zip も、ノートの字も、パスフレーズ・回復キーも無い)⑧ B は回復キーで開いて受け取る
  *   ⑨画面を開き直しても、端末に置いた暗号化キーで自動で再開する / 「開くたびにパスフレーズを入れる」は、入れるまで待ち、メッセージの「いまの状態」から入れに行ける。
  */
-const SECRET = { accessKeyId: 'SMOKE-KEY-ID-4a4', secretAccessKey: 'smoke/SECRET+key=4a4' };
-const PASS = 'smoke-パスフレーズ-4b-φ-2026';
 const NOTE_TITLE = 'S3 で運ぶメモ';
-
-interface MockS3 {
-  url: string;
-  s3: ReturnType<typeof fakeS3>;
-  cors: boolean;
-  race: boolean;
-  server: Server;
-}
-
-async function startMockS3(): Promise<MockS3> {
-  const m = { cors: true, race: false } as MockS3;
-  m.s3 = fakeS3(SECRET, {
-    beforePut: (key) => {
-      if (!m.race) return;
-      m.race = false;
-      m.s3.objects.set(key, { body: new TextEncoder().encode('別の端末が書いた'), etag: '"racer"', mtime: new Date().toISOString() });
-    },
-  });
-  m.server = createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => {
-      void (async () => {
-        const origin = req.headers.origin ?? '';
-        const corsHeaders: Record<string, string> = m.cors
-          ? { 'access-control-allow-origin': origin, 'access-control-expose-headers': 'ETag', vary: 'Origin' }
-          : {};
-        if (req.method === 'OPTIONS') {
-          res.writeHead(
-            m.cors ? 204 : 403,
-            m.cors
-              ? {
-                  ...corsHeaders,
-                  'access-control-allow-methods': 'GET, PUT, DELETE, HEAD',
-                  'access-control-allow-headers': req.headers['access-control-request-headers'] ?? '',
-                  'access-control-max-age': '0',
-                }
-              : {},
-          );
-          res.end();
-          return;
-        }
-        const headers: Record<string, string> = {};
-        for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers[k] = v;
-        const body = Buffer.concat(chunks);
-        const r = await m.s3.fetch(`http://${req.headers.host ?? ''}${req.url ?? '/'}`, {
-          method: req.method ?? 'GET',
-          headers,
-          ...(req.method === 'PUT' ? { body: new Uint8Array(body) } : {}),
-        });
-        const out: Record<string, string> = { ...corsHeaders };
-        const etag = r.headers.get('etag');
-        if (etag !== null) out.etag = etag;
-        res.writeHead(r.status, out);
-        res.end(Buffer.from(await r.arrayBuffer()));
-      })();
-    });
-  });
-  await new Promise<void>((resolve) => m.server.listen(0, '127.0.0.1', resolve));
-  m.url = `http://127.0.0.1:${String((m.server.address() as AddressInfo).port)}`;
-  return m;
-}
 
 async function device(browser: Browser): Promise<Page> {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
