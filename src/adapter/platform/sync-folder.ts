@@ -917,12 +917,10 @@ export class SyncFolder {
       // 🔴 平文と暗号化の両方が在る端末は、ここで 1 つに決める(暗号化していれば暗号化を優先)
       const chosen = chooseRoundFiles(listed, self, encOn);
       const files = chosen.files;
-      // 🔴 暗号化している間、平文の相手のファイルは取り込まない。控え(`seen`)だけ更新し、案内は「その版を初めて見たとき」だけ出す
-      const skippedNames = new Set(chosen.skippedPlain.map((f) => f.name));
-      const newPlain = chosen.skippedPlain.filter((f) => {
-        const had = this.record.seen[f.name];
-        return had === undefined || !sameFileVersion(had, f);
-      });
+      // 🔴 暗号化している間、平文の相手のファイルは取り込まない。⚠ 控え(`seen`)には入れない(暗号化をオフに戻したら、次の無人の回で読む)。
+      //   案内は別の記録(`guided`)で「その版を初めて見たとき」だけ出す
+      const versionKey = (f: FolderFile): string => f.version ?? [f.size, f.mtime].join('/');
+      const newPlain = chosen.skippedPlain.filter((f) => this.record.guided?.[f.name] !== versionKey(f));
       const plan = planFolderRound(self, files, this.record, manual);
       // ── 自分の名前のファイルを、自分以外が書いた(端末のデータの複製)── 取り込みの核が見分けて、手で同期したときに確認する
       const ownFile = plan.ownFile;
@@ -993,10 +991,10 @@ export class SyncFolder {
           problems.push(`${f.name}: ${errorText(e)}`);
         }
       }
-      for (const n of plan.vanished) if (!skippedNames.has(n)) delete this.record.seen[n];
-      for (const f of chosen.skippedPlain) {
-        this.record.seen[f.name] = { size: f.size, mtime: f.mtime, ...(f.version === undefined ? {} : { version: f.version }), want: this.record.seen[f.name]?.want ?? [] };
-      }
+      for (const n of plan.vanished) delete this.record.seen[n];
+      // 案内した版を控える(平文でなくなった / 暗号化をオフにしたファイルの分は外す ── 次にまた平文になったら案内し直す)
+      if (chosen.skippedPlain.length > 0) this.record.guided = Object.fromEntries(chosen.skippedPlain.map((f) => [f.name, versionKey(f)]));
+      else delete this.record.guided;
       if (gen !== this.generation) return;
       // 🔴 自分の名前のファイルを、まだ片付けていない誰かが書いている(同じ端末 id の別の端末 / このブラウザの別のワークスペース)──
       //   同じ名前のファイルを書き合わないよう、書かずに待つ

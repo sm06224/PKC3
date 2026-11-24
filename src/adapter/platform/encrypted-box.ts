@@ -131,18 +131,27 @@ export class EncryptedBox implements RemoteBox {
 
   /**
    * パスフレーズの変更・付け直し = 包み直した束で**置き換える**(同じ `keyId` だけ)。
-   * @param baseVersion 🔴 `next` を作るもとにした束を**読んだときの版**(`loadKeyring` の `version`)。S3 は `If-Match: <baseVersion>` で書く
-   *   ── 読んでから包み直す間に別の端末が変えていたら(412)**上書きせず** `KeyringConflictError`。
-   *   ⚠ 書く直前に読み直した版を使わない(その版は `next` のもとではない)。フォルダは版が無い(`undefined`)ので条件なし。
+   * @param base 🔴 `next` を作るもとにした束を**読んだときの版**。
+   *   - S3: `loadKeyring` の `version`(文字列)。`If-Match: <base>` で書く ── 読んでから包み直す間に別の端末が変えていたら(412)**上書きせず** `KeyringConflictError`。
+   *   - フォルダ(版が無い): もとにした**束そのもの**(`Keyring`)。書く前に置き場の束と同じ字か照らし、違えば止まる。書いたあとにも読み直して `next` と同じか確かめる。
+   *   ⚠ 書く直前に読み直した版を使わない(その版は `next` のもとではない)。
+   *   ⚠ フォルダは条件付き書き込みが無いので、照らしてから書くまでの一瞬の競合は**完全には防げない**(書いたあとの読み直しで検出して止まる ── 上書きされた側が分かる)。
    */
-  async rewrapKeyring(next: Keyring, baseVersion: string | undefined): Promise<{ keyring: Keyring; version?: string }> {
+  async rewrapKeyring(next: Keyring, base: string | Keyring | undefined): Promise<{ keyring: Keyring; version?: string }> {
     const cur = await this.loadKeyring();
     if (cur === null) throw new E2EError('format', '置き場に暗号化キーの束がありません');
     if (cur.keyring.keyId !== next.keyId) throw new KeyringConflictError('置き場の暗号化キーの束は別の暗号化キーです(置き換えません)');
+    const baseVersion = typeof base === 'string' ? base : undefined;
     if (baseVersion !== undefined && cur.version !== baseVersion) throw new KeyringConflictError();
+    if (typeof base === 'object' && serializeKeyring(cur.keyring) !== serializeKeyring(base)) throw new KeyringConflictError();
     const expect: BoxEntry | null = baseVersion === undefined ? null : { name: KEYRING_NAME, size: 0, mtime: 0, version: baseVersion };
     try {
       const after = await this.o.inner.write(KEYRING_NAME, new Blob([serializeKeyring(next)], { type: 'application/json' }), expect);
+      if (baseVersion === undefined) {
+        // 条件付き書き込みが無い保管先: 書いたあとに読み直し、自分の束のままか確かめる(別の端末に上書きされていたら止まる)
+        const now = await this.loadKeyring();
+        if (now === null || serializeKeyring(now.keyring) !== serializeKeyring(next)) throw new KeyringConflictError();
+      }
       return { keyring: next, ...(after.version === undefined ? {} : { version: after.version }) };
     } catch (e) {
       if (e instanceof BoxConflictError) throw new KeyringConflictError();

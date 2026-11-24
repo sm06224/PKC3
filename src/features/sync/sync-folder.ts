@@ -92,6 +92,11 @@ export interface FolderSyncRecord {
    * ⚠ 旧い版はこの欄を知らない(`normalizeFolderRecord` は知っている欄だけを読む ── 無視されて壊れない。`tests/features/sync/e2e-rollback.test.ts` で固定)。
    */
   peerSeq: Record<string, PeerSeq>;
+  /**
+   * 暗号化している間に「平文のままだ」と案内した他の端末のファイル(ファイル名 → 版の印)。同じ版を言い直さないための控え。
+   * ⚠ `seen`(取り込み済みの控え)とは別 ── 案内しただけで取り込んでいないので、暗号化をオフに戻したら読む。
+   */
+  guided?: Record<string, string>;
   /** 前回自分のファイルに書いた中身の要約(同じなら書かない)。 */
   lastKey: string | null;
   /** 全件を頼んでいる相手。 */
@@ -119,6 +124,11 @@ export function normalizeFolderRecord(v: unknown): FolderSyncRecord {
         want: Array.isArray(r.want) ? r.want.filter((x): x is string => isDeviceId(x)) : [],
       };
     }
+  }
+  if (typeof o.guided === 'object' && o.guided !== null) {
+    const g: Record<string, string> = {};
+    for (const [name, v] of Object.entries(o.guided as Record<string, unknown>)) if (deviceOfFileName(name) !== null && typeof v === 'string') g[name] = v;
+    if (Object.keys(g).length > 0) out.guided = g;
   }
   if (typeof o.peerSeq === 'object' && o.peerSeq !== null) {
     for (const [dev, s] of Object.entries(o.peerSeq as Record<string, unknown>)) {

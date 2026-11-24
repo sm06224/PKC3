@@ -305,6 +305,33 @@ describe('🔴 途中の切り替え(平文 → 暗号化)', () => {
   });
 });
 
+describe('🔴 暗号化をオフに戻したら、取り込まなかった平文を読む', () => {
+  it('暗号化オン → 平文の相手を取り込まない → オフに戻す → 次の無人の回で取り込む(案内の記録が控えを塞がない)', async () => {
+    const s3 = fakeS3(SECRET);
+    const A0 = await rig('A', s3, { e2e: false });
+    const B0 = await rig('B', s3, { e2e: false });
+    await A0.d.put('n1', 'A のメモ', 'a');
+    await A0.sf.connectRemote(FORM);
+    await B0.sf.connectRemote(FORM);
+    await B0.d.put('n2', 'B の新しいメモ', 'b');
+    await B0.sf.syncNow(true); // B の平文に新しいメモが載る
+    const A = await rig('A', s3, { d: A0.d, ks: A0.ks, store: A0.store });
+    await provisionFirst(A, s3);
+    await A.sf.boot();
+    await A.sf.syncNow(true);
+    expect(await titles(A.d), '暗号化している間は取り込まない').not.toContain('B の新しいメモ');
+    const saved = A.store.map.get(A.d.cid)!.record;
+    expect(Object.keys(saved.seen).filter((n) => !n.endsWith('.enc')), '平文は控え(seen)に入っていない').toEqual([]);
+    expect(Object.keys(saved.guided ?? {}), '案内した記録は別に在る').toHaveLength(1);
+    // 暗号化をオフに戻す(口を渡さない = 平文)── 無人の回で読む
+    const A2 = await rig('A', s3, { e2e: false, d: A.d, ks: A.ks, store: A.store });
+    await A2.sf.boot(); // 起動の回(無人 = 手で押していない)
+    for (let i = 0; i < 200 && A2.sf.view().lastAt === null; i += 1) await new Promise((r) => setTimeout(r, 25));
+    expect(A2.sf.view().lastAt, '空振り防止: 起動の無人の回が実際に終わった').not.toBeNull();
+    expect(await titles(A2.d), '次の無人の回で取り込まれた').toContain('B の新しいメモ');
+  });
+});
+
 describe('🔴 巻き戻し・差し替え・格下げの拒否', () => {
   async function pair() {
     const s3 = fakeS3(SECRET);
