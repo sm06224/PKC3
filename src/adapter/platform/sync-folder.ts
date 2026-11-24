@@ -88,10 +88,11 @@ export interface SyncRemoteDeps {
 export interface SyncE2EDeps {
   readonly crypto: E2ECrypto;
   /** 開いた暗号化キー(無ければ `null` ── まだパスフレーズを入れていない / 保管しない設定で開き直していない)。 */
-  key(cid: string): Promise<OpenedKey | null>;
+  /** `fromStore` = 偽なら端末の保管を読まない(「開くたびにパスフレーズを入れる」の接続)。 */
+  key(cid: string, fromStore?: boolean): Promise<OpenedKey | null>;
   /** 画面の見え方(開いているか・端末に置いてあるか)。`refresh` のあとに正しい。 */
   state(cid: string): E2EKeyState;
-  refresh(cid: string): Promise<E2EKeyState>;
+  refresh(cid: string, fromStore?: boolean): Promise<E2EKeyState>;
   /** 開いた暗号化キーを置く(`remember` = 端末の保管にも置く / 偽 = メモリだけ)。 */
   hold(cid: string, key: OpenedKey, remember: boolean): Promise<void>;
   /** 端末の保管の有無だけを切り替える(開いているときだけ。切り替えたか)。 */
@@ -248,7 +249,7 @@ export const SYNC_FOLDER_CRASHED_NOTE =
 /** 🔴 暗号化の案内(#2000 段 4b)。⚠ 字に端末 ID の先頭 8 字だけを出す。 */
 const shortDevices = (ds: readonly string[]): string => ds.map((d) => d.slice(0, 8)).join('・');
 export const SYNC_E2E_LOCKED_NOTE = '暗号化キーが開かれていないため、同期を止めています。パスフレーズを入れると同期を再開します(設定の「端末間の同期」で入れられます)';
-export const SYNC_E2E_SETUP_NOTE = 'この置き場にはまだ暗号化キーがありません。同期を止めています。設定の「端末間の同期」でパスフレーズを決めると、同期を始めます';
+export const SYNC_E2E_SETUP_NOTE = 'この置き場にはまだ暗号化キーがありません。同期を止めています。設定の「端末間の同期」でパスフレーズを決めると、同期を始めます(暗号化しないときは「中身を暗号化する」をオフにしてください)';
 export const SYNC_E2E_UNAVAILABLE_NOTE = 'このブラウザでは暗号化を使えないため、同期を止めています(暗号化したい接続は、平文では書きません)';
 /** 状態の 1 行(メッセージの「いまの状態」)。 */
 export const SYNC_E2E_LOCKED_STATUS = 'パスフレーズを入れると同期を再開します';
@@ -652,6 +653,13 @@ export class SyncFolder {
       this.generation += 1;
       this.clearTimer();
       await this.waitCurrent();
+      // 🔴 別の接続先(バケット・置き場が違う)へ替えるなら、前の置き場の暗号化キーを引き継がない(開いたままに見えて止まる行き止まりを作らない)
+      const sameTarget =
+        this.remote !== null && (['endpoint', 'bucket', 'region', 'prefix'] as const).every((k) => this.remote?.config[k] === got.config[k]);
+      if (!sameTarget && this.hasTarget()) {
+        this.resetE2E();
+        await this.deps.e2e?.forget(this.deps.cid()).catch(() => undefined);
+      }
       this.swapToRemote(box, got.config);
     } finally {
       this.connecting = false;
@@ -761,6 +769,12 @@ export class SyncFolder {
     const sameFolder = this.dir !== null && typeof (this.dir as { isSameEntry?: unknown }).isSameEntry === 'function'
       ? await (this.dir as unknown as { isSameEntry(o: unknown): Promise<boolean> }).isSameEntry(dir).catch(() => false)
       : false;
+    if (!sameFolder && this.hasTarget()) {
+      // 🔴 別のフォルダ: 前の置き場の暗号化キーと設定を引き継がない(開いたままに見えて止まる行き止まりを作らない)
+      this.resetE2E();
+      this.folderEncrypt = false;
+      await this.deps.e2e?.forget(this.deps.cid()).catch(() => undefined);
+    }
     this.dir = dir;
     if (!sameFolder) {
       this.record = emptyFolderRecord();
@@ -884,7 +898,7 @@ export class SyncFolder {
 
   /**
    * 🔴 **この端末を受け入れ直す**(相手が古いバックアップから戻したときの救済 ── 画面は段 4b-B)。その相手の連番の記録を忘れ、
-   * 次の回から読み直す。他の相手の記録は動かさない。
+   * 次の回から再読み込みする。他の相手の記録は動かさない。
    * @returns 記録を変えたか
    */
   async acceptPeerAgain(device: string): Promise<boolean> {
@@ -941,7 +955,7 @@ export class SyncFolder {
     } catch (e) {
       this.keyringState = e instanceof KeyringFormatError ? 'broken' : 'unknown';
     }
-    await e2e.refresh(this.deps.cid()).catch(() => undefined);
+    await e2e.refresh(this.deps.cid(), !this.e2eAsk).catch(() => undefined);
   }
 
   /** 画面を開いたとき・操作のあと: 置き場の束の有無と、暗号化キーの保管の有無を調べ直す。 */
@@ -992,7 +1006,16 @@ export class SyncFolder {
       }
       this.remote = { box: this.remote.box, config };
     } else {
+      // 🔴 フォルダは記録に書けなければ戻す(書けないまま続けると、再起動でオフに戻り、平文で書き直してしまう)
+      const prev = this.folderEncrypt;
       this.folderEncrypt = on;
+      try {
+        await this.persist();
+      } catch (e) {
+        this.folderEncrypt = prev;
+        this.schedule();
+        return { ok: false, text: `暗号化の設定を保存できませんでした(変えていません): ${errorText(e)}` };
+      }
     }
     if (!on) {
       await this.deps.e2e?.forget(this.deps.cid()).catch(() => undefined);
@@ -1001,7 +1024,7 @@ export class SyncFolder {
     try {
       await this.persist();
     } catch {
-      /* 次に保存できたときに残る */
+      /* 次に保存できたときに残る(S3 は接続情報に保存済み) */
     }
     this.changed();
     if (this.phase === 'stopped') this.phase = 'idle';
@@ -1052,8 +1075,9 @@ export class SyncFolder {
             this.changed();
             return { ok: false, text: '先に別の端末が暗号化キーを作っていました。その端末のパスフレーズか回復キーで開いてください(いま作った分は捨てました)' };
           }
+          if (!remember) await this.setAsk(true); // 先に選び方を残す(保管を消せなくても、自動では開かない)
           await e2e.hold(this.deps.cid(), { dataKey: m.dataKey, keyId: m.keyring.keyId }, remember);
-          await this.setAsk(!remember);
+          if (remember) await this.setAsk(false);
         } catch (e) {
           return { ok: false, text: `暗号化キーを置けませんでした: ${this.e2eErrorText(e)}` };
         }
@@ -1079,8 +1103,9 @@ export class SyncFolder {
         return { ok: false, text: 'この置き場にはまだ暗号化キーがありません(先にパスフレーズを決めてください)' };
       }
       const key = await openDataKey(e2e.crypto, have.keyring, via);
+      if (!remember) await this.setAsk(true);
       await e2e.hold(this.deps.cid(), key, remember);
-      await this.setAsk(!remember);
+      if (remember) await this.setAsk(false);
     } catch (e) {
       return { ok: false, text: this.e2eErrorText(e) };
     }
@@ -1096,13 +1121,14 @@ export class SyncFolder {
     const e2e = this.deps.e2e;
     if (e2e === undefined || e2e === null) return { ok: false, text: SYNC_E2E_UNAVAILABLE_NOTE };
     try {
+      if (!remember) await this.setAsk(true);
       const done = await e2e.setRemember(this.deps.cid(), remember);
       if (!done) return { ok: false, text: '暗号化キーがまだ開かれていません(先にパスフレーズを入れてください)' };
-      await this.setAsk(!remember);
+      if (remember) await this.setAsk(false);
     } catch (e) {
       return { ok: false, text: this.e2eErrorText(e) };
     }
-    await e2e.refresh(this.deps.cid()).catch(() => undefined);
+    await e2e.refresh(this.deps.cid(), !this.e2eAsk).catch(() => undefined);
     this.changed();
     return { ok: true, text: remember ? 'この端末に暗号化キーを置きます(開くたびにパスフレーズを入れなくても同期します)' : 'この端末には暗号化キーを置きません(開くたびにパスフレーズを入れてください)' };
   }
@@ -1143,7 +1169,7 @@ export class SyncFolder {
     if (this.current !== null) await this.current.catch(() => undefined);
   }
 
-  /** 1 回同期する。`manual` = 手で(確認が要る相手もその場で聞き、変わっていないファイルも読み直す)。 */
+  /** 1 回同期する。`manual` = 手で(確認が要る相手もその場で聞き、変わっていないファイルも再読み込みする)。 */
   async syncNow(manual: boolean): Promise<void> {
     if (!this.hasTarget() || this.connecting || this.phase === 'unsupported' || this.phase === 'off' || this.phase === 'none') return;
     if (!this.deps.enabled()) return;
@@ -1211,7 +1237,7 @@ export class SyncFolder {
           this.lastFail = this.message;
           return;
         }
-        const key = await e2e.key(this.deps.cid()).catch(() => null);
+        const key = await e2e.key(this.deps.cid(), !this.e2eAsk).catch(() => null);
         if (key === null) {
           await this.probeKeyring(rawBox, e2e);
           this.e2eLocked = true;
@@ -1227,8 +1253,11 @@ export class SyncFolder {
         const ring = await eb.loadKeyring().catch(() => undefined);
         this.keyringState = ring === undefined ? 'unknown' : ring === null ? 'none' : 'present';
         if (ring === undefined || ring === null || ring.keyring.keyId !== key.keyId) {
+          // 🔴 束が無い / 別の束(確かに分かったとき)は、開いているキーを忘れて「設定 / 開く」へ戻す(止まったまま入口が出ない行き止まりを作らない)
+          if (ring !== undefined) await e2e.forget(this.deps.cid()).catch(() => undefined);
+          this.e2eLocked = true;
           this.phase = 'stopped';
-          this.message = SYNC_E2E_KEYRING_NOTE;
+          this.message = ring === null ? SYNC_E2E_SETUP_NOTE : SYNC_E2E_KEYRING_NOTE;
           this.changed();
           if (manual || this.message !== this.lastFail) this.deps.fail(this.message);
           this.lastFail = this.message;
@@ -1274,7 +1303,7 @@ export class SyncFolder {
         try {
           const rd = box.readWithMeta !== undefined ? await box.readWithMeta(f.name) : { blob: await box.read(f.name), meta: null };
           if (peer !== self) {
-            // 🔴 巻き戻し・差し替えの拒否(段 4b-d)── 取り込まない。同じ中身を無人の回で読み直し続けない(変わったら読む)
+            // 🔴 巻き戻し・差し替えの拒否(段 4b-d)── 取り込まない。同じ中身を無人の回で再読み込みし続けない(変わったら読む)
             const refuse =
               rd.meta !== null
                 ? ((v) => (v === 'ok' ? null : syncE2ERollbackNote(peer, v)))(checkPeerSeq(this.record, peer, rd.meta.seq, f, rd.meta.contentId))
@@ -1302,7 +1331,7 @@ export class SyncFolder {
             const why = outcome.reason ?? f.name;
             problems.push(why);
             if (peer === self) ownUnresolved = why;
-            // 🔴 同じ中身のファイルを無人の回で読み直し続けない(変わったら読む。手で同期すれば読み直す)── 頼み(`want`)は動かさない
+            // 🔴 同じ中身のファイルを無人の回で再読み込みし続けない(変わったら読む。手で同期すれば再読み込みする)── 頼み(`want`)は動かさない
             else
               this.record.seen[f.name] = {
                 size: f.size,

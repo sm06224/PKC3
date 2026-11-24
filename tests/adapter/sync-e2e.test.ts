@@ -975,3 +975,96 @@ describe('🔴 設定の操作(段 4b-B): 初回の設定 / 開く / 開くた�
     expect(await A.ks.openDataKey(A.d.cid), 'やめたら暗号化キーも忘れる').toBeNull();
   });
 });
+
+describe('🔴 レビュー対応(段 4b-B): 別の置き場への切り替え・保存の失敗・消せない保管', () => {
+  async function opened(s3: FakeS3, name = 'A', opts: Parameters<typeof rig>[2] = {}) {
+    const A = await rig(name, s3, opts);
+    await A.sf.connectRemote(FORM);
+    const st = await A.sf.e2eBeginSetup(PASS, true);
+    if (st.kind !== 'ready') throw new Error('作れていない');
+    expect((await st.commit()).ok).toBe(true);
+    return A;
+  }
+  const PASS_B = 'べつの-パスフレーズ-1234';
+
+  it('🔴 S3: 別の置き場(prefix)へ接続し直すと、前のキーを引き継がず「設定」へ戻る(入口のボタンも出る)/ 同じ置き場への接続し直しは引き継ぐ(対照群)', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await opened(s3);
+    expect(A.sf.view().e2e.open).toBe(true);
+    await A.sf.connectRemote(FORM); // 同じ置き場
+    expect(A.sf.view()).toMatchObject({ phase: 'idle', e2e: { open: true } });
+    await A.sf.connectRemote({ ...FORM, prefix: 'other' });
+    expect(A.sf.view().e2e, '前の置き場のキーを忘れた').toMatchObject({ open: false, keyring: 'none' });
+    expect(await A.ks.openDataKey(A.d.cid)).toBeNull();
+    expect(A.sf.view().phase).toBe('stopped');
+    expect(A.sf.needsPassphrase()).toBe(true);
+    expect(A.sf.unlockButtonLabel()).toBe('暗号化を設定する');
+    expect([...s3.objects.keys()].filter((k) => k.startsWith('pkc3/other/') || k.startsWith('other/')), '新しい置き場には何も書いていない').toEqual([]);
+  });
+
+  it('🔴 置き場の束が消えた / 別の束になった: 開いているキーを忘れ、入口(設定 / 開く)へ戻る', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await opened(s3);
+    s3.objects.delete('pkc3/keyring.json');
+    await A.sf.syncNow(true);
+    expect(A.sf.view()).toMatchObject({ phase: 'stopped', e2e: { open: false, keyring: 'none' } });
+    expect(A.sf.needsPassphrase()).toBe(true);
+    expect(A.sf.unlockButtonLabel()).toBe('暗号化を設定する');
+    expect(await A.ks.openDataKey(A.d.cid)).toBeNull();
+    // 別の束を置く(別の端末が作った)
+    const C = await rig('C', s3);
+    await C.sf.connectRemote(FORM);
+    const st = await C.sf.e2eBeginSetup(PASS_B, true);
+    if (st.kind !== 'ready') throw new Error('作れていない');
+    await st.commit();
+    await A.sf.syncNow(true);
+    expect(A.sf.view().e2e).toMatchObject({ open: false, keyring: 'present' });
+    expect(A.sf.unlockButtonLabel()).toBe('パスフレーズを入れる');
+    expect((await A.sf.e2eUnlock({ passphrase: PASS_B }, true)).ok).toBe(true);
+  });
+
+  it('🔴 同期フォルダ: 別のフォルダを選ぶと、暗号化の設定とキーを引き継がない', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3, { folder: new FakeFolder() });
+    await A.sf.pick();
+    await A.sf.setEncrypt(true);
+    const st = await A.sf.e2eBeginSetup(PASS, true);
+    if (st.kind !== 'ready') throw new Error('作れていない');
+    await st.commit();
+    expect(A.sf.view().e2e).toMatchObject({ on: true, open: true });
+    await A.sf.pick(); // 別のフォルダ(rig の picker は毎回新しい物は返さないが、isSameEntry が無いので別扱い)
+    expect(A.sf.view().e2e).toMatchObject({ on: false, open: false });
+    expect(await A.ks.openDataKey(A.d.cid)).toBeNull();
+  });
+
+  it('🔴 フォルダの暗号化のオン: 記録に書けなければ戻して失敗を返す(再起動でオフに戻って平文を書かない)', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3, { folder: new FakeFolder() });
+    await A.sf.pick();
+    const spy = vi.spyOn(A.store, 'save').mockRejectedValue(new Error('保存できない'));
+    const r = await A.sf.setEncrypt(true);
+    spy.mockRestore();
+    expect(r.ok).toBe(false);
+    expect(r.text).toContain('変えていません');
+    expect(A.sf.view().e2e.on, 'オンにしていない(記録と食い違わない)').toBe(false);
+    expect((await A.sf.setEncrypt(true)).ok, '対照群: 書ければ通る').toBe(true);
+    expect(A.sf.view().e2e.on).toBe(true);
+  });
+
+  it('🔴 開くたびに入れる(B)へ切り替えるとき保管を消せなかった: 失敗を返し、開き直しても自動では開かない', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await opened(s3);
+    const spy = vi.spyOn(A.ks, 'removeDataKey').mockRejectedValue(new Error('消せない'));
+    const r = await A.sf.e2eSetRemember(false);
+    spy.mockRestore();
+    expect(r.ok).toBe(false);
+    expect(await A.ks.openDataKey(A.d.cid), '保管には残っている').not.toBeNull();
+    // 再起動(同じ端末・同じ記録)── 選び方(ask)は残っていて、保管のキーを読まない
+    const A2 = await rig('A', s3, { d: A.d, ks: A.ks, store: A.store });
+    await A2.sf.boot();
+    for (let i = 0; i < 200 && A2.sf.view().phase !== 'stopped'; i += 1) await new Promise((r2) => setTimeout(r2, 25));
+    expect(A2.sf.view()).toMatchObject({ phase: 'stopped', e2e: { open: false, ask: true } });
+    const unlocked = await A2.sf.e2eUnlock({ passphrase: PASS }, false);
+    expect(unlocked.ok, '残った保管を消せるようになれば開ける').toBe(true);
+  });
+});

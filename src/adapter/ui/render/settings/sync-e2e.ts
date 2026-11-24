@@ -111,7 +111,7 @@ export function buildE2EPanel(kind: E2EPanelKind): HTMLElement {
   const unlockNote = document.createElement('p');
   unlockNote.textContent = 'この置き場の暗号化キーを開きます。ほかの端末で決めたパスフレーズ(忘れたときは回復キー)を入れてください。';
   const uvia = viaSelect('sync-e2e-unlock-via');
-  const usecret = secretInput('sync-e2e-unlock-secret', '入力');
+  const usecret = secretInput('sync-e2e-unlock-secret', '入力', 'current-password');
   const uask = checkRow('sync-e2e-ask-unlock', null, SYNC_E2E_ASK_LABEL, ASK_TITLE);
   uask.box.addEventListener('change', () => uask.box.setAttribute('data-pkc-touched', '1'));
   unlock.append(unlockNote, uvia, usecret.row, uask.row, button('unlock-sync-e2e', SYNC_E2E_UNLOCK_LABEL, '暗号化キーを開いて、同期を再開します'));
@@ -124,7 +124,7 @@ export function buildE2EPanel(kind: E2EPanelKind): HTMLElement {
   const sum = document.createElement('summary');
   sum.textContent = SYNC_E2E_CHANGE_LABEL;
   const cvia = viaSelect('sync-e2e-change-via');
-  const cur = secretInput('sync-e2e-change-current', 'いまの入力');
+  const cur = secretInput('sync-e2e-change-current', 'いまの入力', 'current-password');
   const n1 = secretInput('sync-e2e-change-new', '新しいパスフレーズ', 'new-password');
   const n2 = secretInput('sync-e2e-change-new2', 'もう一度', 'new-password');
   const chint = field(document.createElement('p'), 'sync-e2e-change-hint');
@@ -181,7 +181,7 @@ export function syncE2EPanel(panel: HTMLElement, v: SyncFolderView | null, opts:
   } else if (!e.on) {
     status = STATUS_NOTE.off;
     phase = 'off';
-  } else if (e.open) {
+  } else if (e.open && e.keyring !== 'none' && e.keyring !== 'broken') {
     status = STATUS_NOTE.open;
     phase = 'open';
   } else if (e.keyring === 'none') {

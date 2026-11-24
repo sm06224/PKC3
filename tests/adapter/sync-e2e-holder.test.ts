@@ -43,4 +43,15 @@ describe('SyncE2E(開いた暗号化キーの持ち主 = 段 4b-B)', () => {
     expect(ks.map.size).toBe(0);
     expect(a.state('c')).toEqual({ open: false, stored: false });
   });
+
+  it('🔴 置かない(B)で保管を消せなかったら投げる: メモリにも開かない / fromStore=false なら残った保管を読まない', async () => {
+    const ks = mem();
+    const a = new SyncE2E({ crypto, keys: ks });
+    await a.hold('c', { dataKey: await dataKey(), keyId: 'k' }, true);
+    const fresh = new SyncE2E({ crypto, keys: { ...ks, remove: async () => { throw new Error('消せない'); } } });
+    await expect(fresh.hold('c', { dataKey: await dataKey(), keyId: 'k2' }, false)).rejects.toThrow('消せない');
+    expect(fresh.state('c').open, 'メモリに開いていない').toBe(false);
+    expect(await fresh.key('c', false), '保管に残っていても、読まない').toBeNull();
+    expect((await fresh.key('c'))?.keyId, '対照群: 読む設定なら開く').toBe('k');
+  });
 });

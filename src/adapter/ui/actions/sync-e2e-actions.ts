@@ -56,6 +56,7 @@ export function runSetVia(target: HTMLElement): void {
   if (input === null) return;
   input.value = '';
   input.type = target.value === 'recovery' ? 'text' : 'password';
+  input.setAttribute('autocomplete', target.value === 'recovery' ? 'off' : 'current-password');
   input.placeholder = target.value === 'recovery' ? 'XXXX-XXXX-…(32 文字)' : '';
 }
 

@@ -35,9 +35,11 @@ export class SyncE2E {
   private readonly keys: E2EKeyStore;
 
   /** 暗号化キー(メモリを先に、無ければ保管から)。無ければ `null`(同期は待つ)。 */
-  async key(cid: string): Promise<OpenedKey | null> {
+  async key(cid: string, fromStore = true): Promise<OpenedKey | null> {
     const m = this.mem.get(cid);
     if (m !== undefined) return m;
+    // 🔴 「開くたびにパスフレーズを入れる」の接続は、保管を読まない(消せなかった古いキーが残っていても、自動で開かない)
+    if (!fromStore) return null;
     const s = await this.keys.load(cid);
     this.storedFlag.set(cid, s !== null);
     if (s === null) return null;
@@ -52,14 +54,14 @@ export class SyncE2E {
   }
 
   /** 保管を読んで、`state` を最新にする。 */
-  async refresh(cid: string): Promise<E2EKeyState> {
-    await this.key(cid).catch(() => null);
+  async refresh(cid: string, fromStore = true): Promise<E2EKeyState> {
+    await this.key(cid, fromStore).catch(() => null);
     return this.state(cid);
   }
 
   /** 開いた暗号化キーを置く。`remember` = 保管にも置く(A)/ 偽 = メモリだけ(B。保管に前の物があれば消す)。 */
   async hold(cid: string, key: OpenedKey, remember: boolean): Promise<void> {
-    this.mem.set(cid, key);
+    // 🔴 保管の操作を先に(失敗したら投げる = メモリに開かない)。メモリはあとから
     if (remember) {
       await this.keys.save(cid, { keyId: key.keyId, key: key.dataKey });
       this.storedFlag.set(cid, true);
@@ -67,6 +69,7 @@ export class SyncE2E {
       await this.keys.remove(cid);
       this.storedFlag.set(cid, false);
     }
+    this.mem.set(cid, key);
   }
 
   /** 保管の有無だけを切り替える(開いているキーがあるときだけ)。@returns 切り替えたか */

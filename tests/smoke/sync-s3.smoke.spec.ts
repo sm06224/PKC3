@@ -189,6 +189,15 @@ async function setupEncryption(page: Page, opts: { ask?: boolean } = {}): Promis
   const keyEl = page.locator('[data-pkc-region="app-dialog"] [data-pkc-field="recovery-key"]');
   await expect(keyEl, '回復キーの窓が出ない').toBeVisible({ timeout: 20_000 });
   await shot(page, 'e2e-2-recovery-dialog');
+  // 🔴 本物の Escape で閉じる = 設定をやめる(何も作らない)。入力は空に戻っているので入れ直す
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pkc-region="app-dialog"]'), 'Esc で閉じない').toBeHidden();
+  await expect(e2eField(page, 'sync-e2e-result')).toContainText('何も書いていません');
+  await e2eField(page, 'sync-e2e-pass').fill(PASS);
+  await e2eField(page, 'sync-e2e-pass2').fill(PASS);
+  if (opts.ask === true) await e2eField(page, 'sync-e2e-ask-setup').check();
+  await clickReal(page, '[data-pkc-region="settings-sync-s3"] [data-pkc-action="start-sync-e2e-setup"]');
+  await expect(keyEl, '2 回目の回復キーの窓が出ない').toBeVisible({ timeout: 20_000 });
   const key = ((await keyEl.textContent()) ?? '').trim();
   expect(key).toMatch(/^([0-9A-Z]{4}-){7}[0-9A-Z]{4}$/);
   // 保存(テキストファイル)

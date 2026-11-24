@@ -401,13 +401,18 @@ describe('🔴 アプリの画面の名前だけを括弧に持つ知らせは�
     expect(fixedHeadForLabels('「端末間の同期」『秘密』', LABELS)).toBe('');
     expect(fixedHeadForLabels('「端末間の「同期」」', LABELS)).toBe('');
     expect(fixedHeadForLabels('括弧なし', LABELS)).toBe('');
+    // 釣り合いの検査(名前だけ見ると通ってしまう形): 閉じが余る / 開きが余る
+    expect(fixedHeadForLabels('「端末間の同期」」', LABELS)).toBe('');
+    expect(fixedHeadForLabels('「端末間の同期」「秘密', LABELS)).toBe('');
+    expect(fixedHeadForLabels('「端末間の同期」', LABELS), '対照群: 釣り合っていれば通る').toBe('「端末間の同期」');
   });
 });
 
 describe('🔴 同期の知らせの配線(段 4b)', () => {
-  it('main.ts の同期(フォルダ・S3)の say / fail は画面の名前を通す', async () => {
+  it('main.ts の同期(フォルダ・S3)の say / fail は画面の名前を通す(コメントを除いて見る)', async () => {
     const { readFileSync } = await import('node:fs');
-    const main = readFileSync('src/main.ts', 'utf-8');
+    // コメント(行・ブロック)を剥がしてから見る ── コメントの中の同じ字で満たされない
+    const main = readFileSync('src/main.ts', 'utf-8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     for (const src of ['folder-sync', 'sync']) {
       for (const kind of ['result', 'problem']) {
         expect(main, `${src} ${kind}`).toContain(

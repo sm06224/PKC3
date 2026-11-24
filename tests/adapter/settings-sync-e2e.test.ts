@@ -569,7 +569,7 @@ describe('🔴 画面から実体へ通す + 秘密が画面・保存・メッ�
 
     // 開くたびに入れる → 変更(いまの入力 = 回復キー)
     q<HTMLInputElement>('[data-pkc-field="sync-e2e-ask"]').click();
-    await until(() => A.sf.view().e2e.ask, '開くたびに入れる');
+    await until(() => A.sf.view().e2e.ask && !A.sf.view().e2e.stored, '開くたびに入れる(端末のキーが消える)');
     expect(await A.ks.openDataKey('c1')).toBeNull();
     const det = q<HTMLDetailsElement>('[data-pkc-field="sync-e2e-change"]');
     det.open = true;
