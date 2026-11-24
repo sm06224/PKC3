@@ -76,50 +76,47 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
     'お知らせへのリンクがまだ先頭に居る(並べ替えが効いていない)',
   ).toBe(false);
   /**
-   * 🔑 **目次の行を押すと、その節へ送られる**。
-   * ⚠ 動くのは `help-body` ではなく**マニュアルの箱**(`help-manual` は
-   *   `max-height: 60vh; overflow: auto` の器)── 1 稿目は器を取り違えて、
-   *   「押しても動かない」と読んだ。
+   * 🔑 **目次の行を押すと、その節へ送られる**(Stage 2 PR-3 の 8-1c)。
+   * ⚠ スクロールの箱は**外側(`detail`)の 1 つだけ**。直す前は `help-manual` が `max-height: 60vh; overflow: auto` の
+   *   入れ子の箱で、箱が画面の外にあると押しても本文が動かず、外側を `scrollTop = keep` へ戻していた。
+   *   いまは `help-manual` は自分でスクロールしない(`overflow: visible`)。
    */
   const manualBox = page.locator('[data-pkc-region="help-manual"]');
   const outer = page.locator('[data-pkc-region="detail"]');
-  const before = await manualBox.evaluate((el) => el.scrollTop);
-  expect(before, '前提が崩れている: 開いた直後なのに既にスクロールしている').toBe(0);
+  expect(
+    await manualBox.evaluate((el) => getComputedStyle(el).overflowY),
+    'マニュアルの箱が自分でスクロールする(入れ子のスクロールに戻った)',
+  ).toBe('visible');
+  expect(await manualBox.evaluate((el) => el.scrollTop), '前提: 箱は動かない').toBe(0);
   expect(
     await outer.evaluate((el) => el.scrollTop),
-    '前提が崩れている: 外側が既にスクロールしている',
+    '前提が崩れている: 開いた直後なのに外側が既にスクロールしている',
   ).toBe(0);
   /**
-   * 🔴 **押す前に、行を自分で見える所へ送る**(2026-09-16 に測って直した)。
-   *
-   * ⚠ `locator.click()` は**押す前に対象を見える所まで送る**(playwright の既定)。
-   *   目次は行が多いので、下のほうの行を押すと**その送りで外側が動く** ──
-   *   直す前はそれを「飛んだせいで動いた」と読んで落ちていた
-   *   (実測: 押した時点で既に **496**、`jumpTo` に入る前)。
-   * 🔑 **送りと飛びを分ける** ── 先に送って外側の位置を控え、
-   *   **飛ぶ前後で動いていないこと**を見る。これは `toBe(0)` より**強い**:
-   *   外側がどこに在っても「飛びで動かない」を要求する。
+   * 🔴 **目次の 9 行目を押すと、その見出しが画面の中に来る**(押した結果を見る ── scrollTop の変化ではなく幾何)。
+   * ⚠ `locator.click()` は押す前に対象を見える所へ送る(外側が動く)── 送りと飛びを分けるため、先に自分で送って位置を控える。
    */
   const row = page.locator('[data-pkc-field="help-toc-row"]').nth(8);
   await row.scrollIntoViewIfNeeded();
   const outerBeforeJump = await outer.evaluate((el) => el.scrollTop);
   await row.click();
-  await expect.poll(async () => manualBox.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  /**
-   * 🔴 **外側は動かない**(着地前レビュー・動線 4、実測で見つかった)。
-   * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、放っておくと
-   *   外側まで動いて**目次が画面の外へ出る**(実測 2026-09-16:門を通る途中は
-   *   **948** まで動き、門が **496** へ戻している)。
-   *   目次は「押して読んで、また押す」物なので、1 回で消えては使えない。
-   */
-  expect(
-    await outer.evaluate((el) => el.scrollTop),
-    '飛んだせいで外側までスクロールした(目次が画面の外へ出る)',
-  ).toBe(outerBeforeJump);
-  expect(
-    await inFirstScreen('[data-pkc-region="help-toc"]'),
-    '押した後、目次が画面から消えた',
-  ).toBe(true);
+  await expect
+    .poll(async () => outer.evaluate((el) => el.scrollTop), { message: '押しても外側が動かない(dead click)' })
+    .not.toBe(outerBeforeJump);
+  const landed = async (): Promise<{ top: number; bottom: number; vh: number }> =>
+    page.evaluate(() => {
+      const h = document.querySelectorAll('[data-pkc-region="help-manual"] :is(h1,h2,h3,h4,h5,h6)')[8] as HTMLElement;
+      const r = h.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, vh: window.innerHeight };
+    });
+  await expect
+    .poll(async () => {
+      const r = await landed();
+      return r.top >= 0 && r.bottom <= r.vh;
+    }, { message: '押した見出しが画面の中に来ていない' })
+    .toBe(true);
+  expect(await page.locator('[data-pkc-region="help-manual"] [data-pkc-jump-flash]').count(), '着いた見出しが光っていない').toBe(1);
+  await expect(page.locator('[data-pkc-field="manual-jump-back"]'), '帰り道が画面の中に見えない').toBeInViewport();
 
   /**
    * 🔴 **数字で始まる見出しの行でも飛ぶ**(着地前レビュー・実装 ⚠-7)。
@@ -133,7 +130,7 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
    * ⚠ 上の nth(8) が英字始まりなら、この穴は 1 度も通らない ──
    *   数字始まりの行を**名指しで**選ぶ。
    */
-  await manualBox.evaluate((el) => {
+  await outer.evaluate((el) => {
     el.scrollTop = 0;
   });
   const digitAt = await page.evaluate(() => {
@@ -153,7 +150,7 @@ test('🔴 ヘルプの面が開き、マニュアルが描かれる', async ({ 
   expect(digitAt, '前提が崩れている: 数字で始まる見出しが 1 つも無い').toBeGreaterThanOrEqual(0);
   await page.locator('[data-pkc-field="help-toc-row"]').nth(digitAt).click();
   await expect
-    .poll(async () => manualBox.evaluate((el) => el.scrollTop), { timeout: 5000 })
+    .poll(async () => outer.evaluate((el) => el.scrollTop), { timeout: 5000 })
     .toBeGreaterThan(0);
 
   /**
@@ -823,14 +820,22 @@ test('🔴 マニュアルの中を探して、押すとその節まで送られ
   // 🔴 **本文は 1 文字も隠していない**
   expect(((await host.textContent()) ?? '').length, 'マニュアル本体を畳んでいる').toBe(before);
 
-  // 🔴 **押すと実際に位置が動く**
-  const top0 = await host.evaluate((el) => el.scrollTop);
+  // 🔴 **押すと実際に位置が動く**(スクロールの箱は外側の 1 つ)
+  const outerFind = page.locator('[data-pkc-region="detail"]');
+  const top0 = await outerFind.evaluate((el) => el.scrollTop);
   await rows.first().click();
   await expect
-    .poll(async () => host.evaluate((el) => el.scrollTop), {
+    .poll(async () => outerFind.evaluate((el) => el.scrollTop), {
       message: '押しても 1px も動かない(dead click)',
     })
     .not.toBe(top0);
+  // 🔴 着いた見出しが画面の中にあり、光り、探した語が本文で塗られる(Stage 2 PR-3 の 8-1b)
+  await expect(page.locator('[data-pkc-region="help-manual"] [data-pkc-jump-flash]')).toHaveCount(1);
+  const flashed = await page.locator('[data-pkc-region="help-manual"] [data-pkc-jump-flash]').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return r.top >= 0 && r.bottom <= window.innerHeight;
+  });
+  expect(flashed, '着いた見出しが画面の外にある').toBe(true);
 
   expect(errors, 'console に赤が出ている').toEqual([]);
 });
@@ -899,7 +904,6 @@ test('🔴 本文の参照を押すと節へ送られ、「戻る」で読んで
   await gotoApp(page);
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
 
-  const manualBox = page.locator('[data-pkc-region="help-manual"]');
   const refs = page.locator('[data-pkc-field="manual-ref"]');
   await expect(refs.first()).toBeAttached({ timeout: 15_000 });
   // 空振り防止 ── 押せる参照が**たくさん**在ること(1 つだけなら偶然でありうる)
@@ -919,28 +923,18 @@ test('🔴 本文の参照を押すと節へ送られ、「戻る」で読んで
   //    「読んでいる途中で出会う」という当の場面にならない(実測: from が 0 のまま)
   const target = refs.nth(20);
   await target.scrollIntoViewIfNeeded();
-  const from = await manualBox.evaluate((el) => el.scrollTop);
+  // 🔴 スクロールの箱は外側(`detail`)の 1 つ(Stage 2 PR-3)
+  const outerBox = page.locator('[data-pkc-region="detail"]');
+  const from = await outerBox.evaluate((el) => el.scrollTop);
   expect(from, '前提が崩れている: 本文が送られていない').toBeGreaterThan(0);
-  const outerFrom = await page
-    .locator('[data-pkc-region="detail"]')
-    .evaluate((el) => el.scrollTop);
   await target.click();
 
   // ① 送られた ── 読んでいた場所から動いた
   await expect
-    .poll(async () => manualBox.evaluate((el) => el.scrollTop), {
+    .poll(async () => outerBox.evaluate((el) => el.scrollTop), {
       message: '押しても本文が動かない',
     })
     .not.toBe(from);
-
-  /**
-   * 🔴 **外側は動かない**(目次の行と同じ ── `jumpTo` は 1 か所)。
-   * ⚠ 動くと**帰り道まで画面の外へ出る**(#719 で目次が踏んだのと同じ形)。
-   */
-  expect(
-    await page.locator('[data-pkc-region="detail"]').evaluate((el) => el.scrollTop),
-    '外側までスクロールした(帰り道が画面の外へ出る)',
-  ).toBe(outerFrom);
 
   // ② 帰り道が出て、**画面の中に見えている**(出ているだけでは足りない)
   await expect(back, '飛んだのに帰り道が出ない').toBeVisible();
@@ -952,7 +946,7 @@ test('🔴 本文の参照を押すと節へ送られ、「戻る」で読んで
   // ③ 押すと読んでいた場所へ帰り、帰り道は畳まれる
   await page.locator('[data-pkc-field="manual-jump-back"]').click();
   await expect
-    .poll(async () => manualBox.evaluate((el) => el.scrollTop), {
+    .poll(async () => outerBox.evaluate((el) => el.scrollTop), {
       message: '読んでいた場所へ帰っていない',
     })
     .toBe(from);

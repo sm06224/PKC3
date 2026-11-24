@@ -250,7 +250,7 @@ describe('よく出る失敗を日本語で言う(#1087 の見直し 2026-10-13)
   it('🔴 表が無い / 列が無い / 書き方の誤りは、日本語と次の手を出し、元の英語は括弧で残す', () => {
     const t = sqlRunFailureText('no such table: 売上');
     expect(t.startsWith('「売上」という表はありません'), t).toBe(true);
-    expect(t).toContain('「構造を見る」');
+    expect(t).toContain('「スキーマ」');
     expect(t).toContain('(no such table: 売上)');
     expect(sqlRunFailureText('no such column: 金額').startsWith('「金額」という列はありません')).toBe(true);
     expect(sqlRunFailureText('near "FORM": syntax error').startsWith('SQL の書き方に誤りがあります')).toBe(true);
@@ -285,7 +285,7 @@ describe('DuckDB の失敗も日本語で言う(#1087)', () => {
     const raw1 = 'Catalog Error: Table with name 売上 does not exist!\nDid you mean "sales"?';
     const t = duckRunFailureText(raw1);
     expect(t.startsWith('「売上」という表はありません'), t).toBe(true);
-    expect(t).toContain('「構造を見る」');
+    expect(t).toContain('「スキーマ」');
     expect(t).toContain(`(${raw1})`);
     const raw2 = 'Binder Error: Referenced column "金額" not found in FROM clause!\nCandidate bindings: "t.id"';
     const c = duckRunFailureText(raw2);

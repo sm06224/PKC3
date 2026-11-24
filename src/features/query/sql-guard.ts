@@ -338,9 +338,9 @@ export function sqlRunFailureText(raw: string): string {
    *   **先に**拾い、書込拒否と中断は sqlite 自身の言い方(結果コード名か決まり文句)にだけ当てる。
    */
   const table = /no such table:\s*(\S+)/i.exec(raw);
-  if (table) return `「${table[1]}」という表はありません。表の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
+  if (table) return `「${table[1]}」という表はありません。表の名前は、SQL で調べる画面の「スキーマ」で分かります(${raw})`;
   const column = /no such column:\s*(\S+)/i.exec(raw);
-  if (column) return `「${column[1]}」という列はありません。列の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
+  if (column) return `「${column[1]}」という列はありません。列の名前は、SQL で調べる画面の「スキーマ」で分かります(${raw})`;
   if (/syntax error/i.test(raw)) return `SQL の書き方に誤りがあります。綴りや区切りの記号を確かめてください(${raw})`;
   const dup = /duplicate column name:\s*(\S+)/i.exec(raw);
   if (dup) return `「${dup[1]}」という列の名前が重なっています。AS で別の名前を付けてください(${raw})`;
@@ -361,8 +361,8 @@ export function sqlRunFailureText(raw: string): string {
  */
 export function duckRunFailureText(raw: string): string {
   const table = /Table with name "?([^"\s]+)"? does not exist/i.exec(raw);
-  if (table) return `「${table[1]}」という表はありません。表の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
+  if (table) return `「${table[1]}」という表はありません。表の名前は、SQL で調べる画面の「スキーマ」で分かります(${raw})`;
   const column = /Referenced column "([^"]+)" not found/i.exec(raw);
-  if (column) return `「${column[1]}」という列はありません。列の名前は、SQL で調べる画面の「構造を見る」で分かります(${raw})`;
+  if (column) return `「${column[1]}」という列はありません。列の名前は、SQL で調べる画面の「スキーマ」で分かります(${raw})`;
   return sqlRunFailureText(raw);
 }
