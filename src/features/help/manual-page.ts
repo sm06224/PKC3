@@ -27,7 +27,9 @@
  * `adapter/platform/manual-window.ts` はここから import する ── 2 つの経路で
  * 見た目が静かにずれるのを防ぐ(CLAUDE.md §7「同じ値は 1 回だけ作って両方へ配る」)。
  *
- * ## 🔴 inline `<script>` は 1 本だけ、しかも配色を当てるだけ
+ * ## 🔴 inline `<script>` は 2 本だけ ── 配色を当てる 1 本(`<head>`)と、探す欄の 1 本(`</body>` の直前。Stage 2 PR-3)
+ *
+ * 後者は `manual-page-find.ts`(目次の絞り込み・全文検索・節へ送る・一時の光)。以下は配色の 1 本についての記述。
  *
  * アプリ本体は CSP を持たない(`index.html` に meta 無し / SW は COI の 2 ヘッダのみ)ので
  * inline script は通る。だが**この page に振る舞いを持たせない** ── 持たせた瞬間、
@@ -37,6 +39,7 @@
 import { buildManualDoc, manualHeadingSlug } from './manual-doc';
 import { MANUAL_HEADING_REDIRECTS } from './manual-redirects';
 import type { ManualSection } from './manual-find';
+import { MANUAL_FIND_CSS, MANUAL_FIND_HTML, MANUAL_FIND_SCRIPT } from './manual-page-find';
 import { DEFAULT_TEXT_SCALE, TEXT_SCALES, textScaleSpec } from '../text-scale';
 
 /** 焼く file の名前。⚠ `dist/` 直下(`index.html` の隣)。SW の precache に載る。 */
@@ -224,6 +227,8 @@ export const MANUAL_CHROME_CSS = [
    * 🔑 grid と 100% と overflow を外し、帯と目次は紙に要らないので落とす。
    *   `tests/smoke/manual-window.smoke.spec.ts` が PDF の頁数で見る。
    */
+  // 🔴 目次の上の「マニュアルの中を探す」(Stage 2 PR-3 の 8-2。`manual-page-find.ts`)
+  ...MANUAL_FIND_CSS,
   '@media print{html,body{height:auto}body{display:block}',
   '[data-pkc-field="manual-window-head"],[data-pkc-region="manual-window-toc"]{display:none}',
   '[data-pkc-region="manual-window-body"]{display:block}',
@@ -480,10 +485,14 @@ export function buildManualPage(input: ManualPageInput): ManualPage {
      */
     '<details data-pkc-region="manual-window-toc">',
     '<summary data-pkc-field="manual-window-toc-open">目次</summary>',
+    // 🔴 目次の上に「マニュアルの中を探す」(Stage 2 PR-3 の 8-2)── 目次の絞り込み + 本文の全文検索
+    MANUAL_FIND_HTML,
     `<nav aria-label="目次">${toc}</nav>`,
     '</details>',
     `<div data-pkc-region="manual-window-main" class="${HOST_CLASS}">${built.html}</div>`,
     '</div>',
+    // 🔴 探す欄の振る舞い(配色の script とは別の 1 本。DOM が揃った `</body>` の直前で走る)
+    `<script>${MANUAL_FIND_SCRIPT}</script>`,
     '</body>',
     '</html>',
     '',

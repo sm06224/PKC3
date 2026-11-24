@@ -32,7 +32,7 @@ describe('ヘルプの目次は高さを切って自分で流す(#719)', () => {
     expect(b.length, '目次の器の規則が無い(空振り)').toBeGreaterThan(0);
     const joined = b.join('\n');
     expect(joined, '高さを切っていない(目次だけで 1 画面が埋まる)').toMatch(
-      decl('max-height', '30vh'),
+      decl('max-height', '22vh'),
     );
     expect(joined, '自分で流していない(切った先の行が読めず押せない)').toMatch(
       decl('overflow', 'auto'),
@@ -157,5 +157,29 @@ describe('ヘルプの目次は高さを切って自分で流す(#719)', () => {
     );
     expect(depth('5'), '段 5 の深さが段 4 と違う(段は 4 で止める約束)').toBe(s4);
     expect(depth('6'), '段 6 の深さが段 4 と違う(段は 4 で止める約束)').toBe(s4);
+  });
+});
+
+/**
+ * 🔴 **ヘルプのスクロールの箱は外側の 1 つだけ**(Stage 2 PR-3 の 8-1c)。
+ * 直す前は `help-manual` が `max-height: 60vh; overflow: auto` で外側の中に入れ子になり、
+ * 箱が画面の外にあると目次・検索を押しても本文が動かなかった。ここに箱を戻すと smoke の幾何も落ちるが、
+ * 原文でも見張る(コメントを剥がして対象の規則に絞る)。
+ */
+describe('ヘルプのマニュアルは箱を持たない(スクロールは外側の 1 つ)', () => {
+  it('🔴 help-manual の規則に overflow / max-height が無い(対照: 他の箱は持っている)', () => {
+    const b = blocksFor(css(), "[data-pkc-region='help-manual']");
+    expect(b.length, 'help-manual の規則が無い(空振り)').toBeGreaterThan(0);
+    const joined = b.join('\n');
+    expect(joined, '箱の高さを切っている(入れ子のスクロールに戻った)').not.toMatch(/max-height/);
+    expect(joined, '箱が自分でスクロールする(入れ子のスクロールに戻った)').not.toMatch(/overflow\s*:/);
+    // 対照群: 目次の箱は今も自分で流す(この検査が「何も持たない規則」で緑にならない)
+    expect(blocksFor(css(), TOC).join('\n')).toMatch(decl('overflow', 'auto'));
+  });
+
+  it('🔴 帰り道の帯は貼り付く(外側が箱なので、読み進めても上に残る)', () => {
+    const joined = blocksFor(css(), "[data-pkc-region='help-jump-back']").join('\n');
+    expect(joined).toMatch(decl('position', 'sticky'));
+    expect(joined).toMatch(decl('top', '0'));
   });
 });

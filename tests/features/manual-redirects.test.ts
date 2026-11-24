@@ -50,6 +50,7 @@ describe('旧い章の印の行き先', () => {
       連絡先を扱う: '付箋ボードと連絡先',
       'スマホ-タッチで使う': 'スマートフォン・タブレット',
       困ったとき: 'リファレンスと困ったときの対処',
+      'ブラウザの-ai-との連携': 'ブラウザの AI との連携(WebMCP)',
     });
   });
 
@@ -74,8 +75,10 @@ describe('旧い章の印の行き先', () => {
       ).toBe(true);
     }
     // 空振り防止 ── 表の鍵は旧 H2 の id と一致している
+    // ⚠ 旧 H2 のほかに、**あとから見出しの字を変えた H3**(章立ての組み替えでなく改名)も鍵になる(Stage 2 PR-3)
+    const RENAMED_LATER = [manualHeadingSlug('ブラウザの AI との連携')];
     expect(Object.keys(MANUAL_HEADING_REDIRECTS).sort()).toEqual(
-      OLD_H2.map(manualHeadingSlug).filter((id) => !slugs.has(id)).sort(),
+      [...OLD_H2.map(manualHeadingSlug).filter((id) => !slugs.has(id)), ...RENAMED_LATER].sort(),
     );
   });
 

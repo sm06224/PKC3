@@ -298,8 +298,12 @@ export function buildShellPrompt(sessionName: 'shell' | 'dual'): HTMLElement {
   input.spellcheck = false;
   input.setAttribute('autocapitalize', 'off');
   input.setAttribute('aria-label', sessionName === 'dual' ? '2 ペインのコマンド' : 'コマンド');
-  input.placeholder =
-    sessionName === 'dual' ? '選んだ行へのコマンド(例: mv 資料 / rm / tag add 重要)。help で一覧' : 'コマンドを打つ(help で一覧。Tab で補完、↑ ↓ で履歴)';
+  // 🔴 狭い左のペイン・2 ペインの帯でも切れにくい短さにする(Stage 2 PR-3)。使い方の細かい案内は `title`(乗せたとき)へ
+  input.placeholder = sessionName === 'dual' ? '選んだ行へのコマンド(例: mv 資料)' : 'コマンドを入力(help で一覧)';
+  input.title =
+    sessionName === 'dual'
+      ? '選んだ行へのコマンド(例: mv 資料 / rm / tag add 重要)。help で一覧。Tab で補完、↑ ↓ で履歴'
+      : 'コマンドを入力します。help で一覧、Tab で補完、↑ ↓ で履歴';
   const run = el('button', 'shell-run');
   run.type = 'button';
   run.setAttribute('data-pkc-action', 'shell-run');
