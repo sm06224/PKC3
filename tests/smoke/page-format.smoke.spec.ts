@@ -104,7 +104,8 @@ test('🔴 紙面を変えると散文の幅が変わる(表に読み幅の cap 
     return r.getClientRects().length;
   });
   expect(foldedLines, '表の升が 1 つも折れていない = 内容が器より狭い(前提が崩れている)').toBeGreaterThan(1);
-  expect(tableWide, '表に読み幅が掛かっている(器に cap を掛けた実装)').toBeGreaterThan(wide - 1);
+  // ⚠ 幅いっぱいの表は、近接発光の枠(透明な 2px)が右へ出られないぶん**ちょうど 2px 狭い**(Stage 2 PR-2。左は −2px の余白で相殺される)── 正確な値で縛る(±1 は丸め)
+  expect(Math.abs(tableWide - (wide - 2)), `表の幅が「器 − 2px」でない(表 ${tableWide} / 器 ${wide})── 読み幅が掛かった(狭い)か、枠のぶんが相殺されていない(広い)`).toBeLessThanOrEqual(1);
   expect(
     tableWide,
     '上限を外したのに表が広がっていない(左の余白が 0 に戻っていない)',
@@ -269,7 +270,8 @@ test('🔴 本文が列の中央に置かれ、表は段落と同じ左端に揃
     .poll(async () => (await box('p')).w, { timeout: 5000 })
     .toBeLessThan(p.w);
   const np = await box('p');
-  const nt = await box('.pkc-md-block[data-pkc-md-block-kind="table"]');
+  // ⚠ 表の**見える辺**(中の `table`)で見る ── 塊の器は近接発光の枠(透明な 2px)のぶん外へ出ている(Stage 2 PR-2)
+  const nt = await box('.pkc-md-block[data-pkc-md-block-kind="table"] table');
   // ⚠ 空振り防止 ── 器が読み幅より狭い状態にいることを、段落の余白 0 で確かめる
   expect(np.l, `器がまだ読み幅より広い(段落の左 ${np.l})── 狭い器を見ていない`).toBeLessThanOrEqual(2);
   expect(nt.l, `狭い器で表が左へはみ出している(左 ${nt.l})`).toBeGreaterThanOrEqual(0);

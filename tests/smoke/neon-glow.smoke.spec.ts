@@ -117,7 +117,13 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
         return Math.hypot(dx, dy);
       };
       const near = all.filter((e) => e.hasAttribute('data-pkc-glow-near'));
-      const far = all.filter((e) => !e.hasAttribute('data-pkc-glow-near') && e.getBoundingClientRect().height > 0);
+      // ⚠ 画面に出ていない(送る器の外へ切られている)カードは候補でない(IntersectionObserver で絞る)── 数えない
+      const sc = document.querySelector('[data-neon-scroller]')?.getBoundingClientRect();
+      const visible = (e: HTMLElement): boolean => {
+        const r = e.getBoundingClientRect();
+        return r.height > 0 && (sc === undefined || (r.bottom > sc.top && r.top < sc.bottom)) && r.bottom > 0 && r.top < innerHeight;
+      };
+      const far = all.filter((e) => !e.hasAttribute('data-pkc-glow-near') && visible(e));
       return {
         nearMax: Math.max(...near.map(dist)),
         farMin: Math.min(...far.map(dist)),
@@ -220,6 +226,13 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     });
     await page.waitForTimeout(100);
     expect(changed(restR, await pixels(page, edgeR)), `${kind}: 横スクロールで輪郭が消えた`).toBeGreaterThan(rows * 0.9);
+    // 🔴 ゾーンの入れ子: ポインタが**外から直接**器の上へ入っても(1 回の移動)、ログのゾーンが握り、器(ログのカード)が光る
+    await page.mouse.move(OUT_X, OUT_Y);
+    await expect(page.locator(NEAR)).toHaveCount(0);
+    await page.mouse.move(bb.x + 30, bb.y + bb.h / 2);
+    await expect
+      .poll(() => page.locator(`${BODY} > [data-pkc-log-card][data-pkc-glow-near]`).count(), { message: `${kind}: 器の上へ直接入ってもログのカードが光らない(内側のゾーンに奪われた)` })
+      .toBeGreaterThan(0);
     await page.mouse.move(OUT_X, OUT_Y);
   }
 
@@ -312,5 +325,468 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     await page.waitForTimeout(150);
   }
   await expect(page.locator(NEAR), 'スマホの幅で光った').toHaveCount(0);
+  expect(errors, `console / page error: ${errors.join(' | ')}`).toEqual([]);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 2 PR-2: 本文のブロック(コード・表・図・引用・折りたたみ)・入力欄の近接発光 / キーボードのフォーカスの静止線
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NOTE_BODY = [
+  '# 近接発光の確認',
+  '段落です。'.repeat(6),
+  WIDE_TABLE,
+  '```ts\nconst answer = 42;\nfunction f(x: number): number {\n  return x * answer;\n}\n```',
+  '```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```',
+  '> 引用の段落です。',
+  ':::details{summary="折りたたみの見出し" open}\n折りたたみの中身です。\n:::',
+].join('\n\n');
+
+type Box = { x: number; y: number; w: number; h: number };
+/** 画面の真ん中へ送って(⚠ `behavior: 'instant'` ── 本文は `scroll-behavior: smooth` で、送っている最中に撮ると静止の画素がずれる)矩形を返す。 */
+const boxOf = (page: Page, sel: string): Promise<Box> =>
+  page.locator(sel).first().evaluate(async (el) => {
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
+  });
+
+/** 近づけて(遠くから 2 段で)印が付くまで待ち、描画が落ち着くのを待つ。 */
+async function hoverNear(page: Page, sel: string, x: number, y: number): Promise<void> {
+  await page.mouse.move(x + 40, y + 24);
+  await page.mouse.move(x, y);
+  await expect.poll(() => page.locator(sel).first().evaluate((el) => el.hasAttribute('data-pkc-glow-near')), { message: `${sel} が光らない` }).toBe(true);
+  await page.waitForTimeout(150);
+}
+
+/** 縁の帯の画素が、光で変わったか(静止 → 近づけた)。`inner` は内側の地: 1 画素も変わらない。 */
+async function expectEdgeGlows(
+  page: Page,
+  name: string,
+  sel: string,
+  pick: (b: Box) => { pointer: { x: number; y: number }; edge: { x: number; y: number; width: number; height: number }; inner: { x: number; y: number; width: number; height: number }; minChanged: number },
+): Promise<void> {
+  await page.mouse.move(OUT_X, OUT_Y);
+  await expect(page.locator(NEAR), `${name}: ポインタを外しても光が残る`).toHaveCount(0);
+  const b = await boxOf(page, sel);
+  const p = pick(b);
+  const restE = await pixels(page, p.edge);
+  const restI = await pixels(page, p.inner);
+  await hoverNear(page, sel, p.pointer.x, p.pointer.y);
+  const litE = await pixels(page, p.edge);
+  const litI = await pixels(page, p.inner);
+  expect(changed(restE, litE), `${name}: 縁の画素が静止のときと同じ(光っていない)`).toBeGreaterThanOrEqual(p.minChanged);
+  expect(changed(restI, litI), `${name}: 内側の地まで変わった`).toBe(0);
+  const dir = process.env.PKC3_SHOT_DIR;
+  if (dir !== undefined && dir !== '') {
+    mkdirSync(dir, { recursive: true });
+    const clip = { x: Math.max(0, b.x - 24), y: Math.max(0, b.y - 24), width: Math.min(b.w + 48, 520), height: Math.min(b.h + 48, 320) };
+    await page.screenshot({ path: `${dir}/neon-${name}-${currentTheme}.png`, clip });
+  }
+  await page.mouse.move(OUT_X, OUT_Y);
+}
+let currentTheme = 'light';
+
+test('🔴 ネオン(本文のブロック・入力欄): コード・表・図・引用・折りたたみ・入力欄の縁が光り、内側は変わらない / スクロールする表の縁も (Stage 2 PR-2)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('近接発光');
+  await page.fill('[data-pkc-field="editor-body"]', NOTE_BODY);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await expect(page.locator(`${BODY} [data-pkc-mermaid-src]`)).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30_000 });
+  await page.mouse.move(OUT_X, OUT_Y);
+
+  const CODE = `${BODY} .pkc-md-block[data-pkc-md-block-kind="code"]:not([data-pkc-render-lang])`;
+  const TABLE = `${BODY} .pkc-md-block[data-pkc-md-block-kind="table"]`;
+  const CARD = `${BODY} .pkc-md-block[data-pkc-render-lang="mermaid"]`;
+  const QUOTE = `${BODY} blockquote`;
+  const DETAILS = `${BODY} .pkc-details`;
+
+  for (const theme of ['light', 'dark'] as const) {
+    if (theme === 'dark') {
+      await page.evaluate(() => {
+        document.documentElement.setAttribute('data-pkc-theme', 'dark');
+        document.documentElement.setAttribute('data-pkc-tone', 'dark');
+      });
+      // 配色の切り替えで地の色に 0.15s の transition が掛かる ── 落ち着いてから静止の画素を撮る(撮った後に動くと「内側が変わった」に見える)
+      await page.waitForTimeout(700);
+    }
+    currentTheme = theme;
+
+    // ① コード: 左の縁(枠のすぐ内側 2px)が光る。包み(`.pkc-md-block`)の疑似要素 ── 内側の地(字の無い右側)は変わらない
+    await expectEdgeGlows(page, 'code', CODE, (b) => ({
+      pointer: { x: b.x + 4, y: b.y + b.h / 2 },
+      edge: { x: b.x, y: b.y + 6, width: 3, height: b.h - 12 },
+      inner: { x: b.x + b.w - 260, y: b.y + 8, width: 180, height: b.h - 16 },
+      minChanged: (b.h - 12) * 2 * 0.8,
+    }));
+
+    // ② 表(横スクロールの器): 器自身の背景で描く。器の外側(透明な 2px の枠)の左の縁が切れ目なく光る
+    await expectEdgeGlows(page, 'table', TABLE, (b) => ({
+      pointer: { x: b.x + 1, y: b.y + b.h / 2 },
+      edge: { x: b.x, y: b.y + 6, width: 2, height: b.h - 12 },
+      inner: { x: b.x + 8, y: b.y + 6, width: 40, height: b.h - 12 },
+      minChanged: (b.h - 12) * 2 * 0.8,
+    }));
+
+    // ③ 図のカード: ヘアラインの角丸カード全体の縁(左)が光る
+    await expectEdgeGlows(page, 'diagram', CARD, (b) => ({
+      pointer: { x: b.x + 4, y: b.y + b.h / 2 },
+      edge: { x: b.x, y: b.y + 20, width: 3, height: b.h - 40 },
+      inner: { x: b.x + b.w - 90, y: b.y + b.h - 50, width: 60, height: 30 },
+      minChanged: (b.h - 40) * 2 * 0.8,
+    }));
+
+    // ④ 引用: 左の線(3px)だけ光る。字は変わらない
+    await expectEdgeGlows(page, 'quote', QUOTE, (b) => ({
+      pointer: { x: b.x + 1, y: b.y + b.h / 2 },
+      edge: { x: b.x, y: b.y, width: 3, height: b.h },
+      inner: { x: b.x + 24, y: b.y + 2, width: 80, height: b.h - 4 },
+      minChanged: b.h * 2 * 0.8,
+    }));
+
+    // ⑤ 折りたたみ: 左の縁
+    await expectEdgeGlows(page, 'details', DETAILS, (b) => ({
+      pointer: { x: b.x + 4, y: b.y + b.h / 2 },
+      edge: { x: b.x - 1, y: b.y + 10, width: 4, height: b.h - 20 },
+      inner: { x: b.x + b.w - 200, y: b.y + 10, width: 160, height: b.h - 20 },
+      minChanged: (b.h - 20) * 2 * 0.8,
+    }));
+
+    // ⑥ 入力欄(検索欄): 1px の枠そのものが薄く光る。上の縁(ポインタの下)の画素が変わり、内側は変わらない
+    await expectEdgeGlows(page, 'find', '[data-pkc-field="entry-filter"]', (b) => ({
+      pointer: { x: b.x + 60, y: b.y + 2 },
+      edge: { x: b.x + 20, y: b.y, width: 90, height: 2 },
+      inner: { x: b.x + b.w - 70, y: b.y + 8, width: 50, height: b.h - 16 },
+      minChanged: 90 * 2 * 0.3,
+    }));
+
+    // ⑦ 追記欄の枠
+    await expectEdgeGlows(page, 'append', '[data-pkc-field="append-form"]', (b) => ({
+      pointer: { x: b.x + 140, y: b.y + 2 },
+      edge: { x: b.x + 60, y: b.y - 1, width: 160, height: 3 },
+      inner: { x: b.x + b.w - 220, y: b.y + 10, width: 160, height: 30 },
+      minChanged: 160 * 2 * 0.4,
+    }));
+  }
+  currentTheme = 'light';
+  await page.evaluate(() => {
+    document.documentElement.setAttribute('data-pkc-theme', 'light');
+    document.documentElement.setAttribute('data-pkc-tone', 'light');
+  });
+
+  // ⑧ 🔴 横スクロールした表でも、輪郭は器に張り付いたまま(器自身の背景)
+  {
+    const blk = page.locator(TABLE).first();
+    const b = await boxOf(page, TABLE);
+    const edgeR = { x: b.x + b.w - 2, y: b.y + 8, width: 2, height: b.h - 16 };
+    await page.mouse.move(OUT_X, OUT_Y);
+    const rest = await pixels(page, edgeR);
+    await page.mouse.move(b.x + b.w - 40, b.y + b.h / 2);
+    await page.mouse.move(b.x + b.w - 2, b.y + b.h / 2);
+    await page.waitForTimeout(150);
+    const lit = await pixels(page, edgeR);
+    expect(changed(rest, lit), '表の右の縁が光らない').toBeGreaterThan((b.h - 16) * 2 * 0.8);
+    await blk.evaluate((el) => {
+      el.scrollLeft = 300;
+    });
+    await page.waitForTimeout(100);
+    expect(changed(rest, await pixels(page, edgeR)), '横スクロールで輪郭が消えた').toBeGreaterThan((b.h - 16) * 2 * 0.8);
+    await page.mouse.move(OUT_X, OUT_Y);
+  }
+
+  // ⑨ 🔴 版面が動かない: 表の器は光ってもいなくても同じ位置・大きさ(透明な 2px の枠は常にある)
+  {
+    await page.mouse.move(OUT_X, OUT_Y);
+    await page.locator(TABLE).first().evaluate((el) => {
+      el.scrollLeft = 0; // ⑧ で横へ送った
+    });
+    const rest = await boxOf(page, TABLE);
+    const tableLeft = await page.locator(`${TABLE} table`).first().evaluate((t) => t.getBoundingClientRect().x);
+    const para = await page.locator(`${BODY} > p`).first().evaluate((p) => p.getBoundingClientRect().x);
+    expect(Math.abs(tableLeft - para), `表の左端が段落とずれた(表 ${tableLeft} / 段落 ${para})`).toBeLessThanOrEqual(1.5);
+    await hoverNear(page, TABLE, rest.x + 1, rest.y + rest.h / 2);
+    const lit = await boxOf(page, TABLE);
+    expect(lit, '光ると表の器の位置・大きさが動いた').toEqual(rest);
+  }
+
+  // ⑩ 🔴 画面の外へ出た候補には印が付かない(IntersectionObserver で絞る): 本文を送って、画面の外にある器に光が残らない
+  {
+    await page.mouse.move(OUT_X, OUT_Y);
+    await page.evaluate((s) => {
+      let e = document.querySelector(s) as HTMLElement | null;
+      while (e && e.scrollHeight <= e.clientHeight + 2) e = e.parentElement;
+      e?.setAttribute('data-neon-scroller', '');
+    }, BODY);
+    const b = await boxOf(page, CODE);
+    await hoverNear(page, CODE, b.x + 4, b.y + b.h / 2);
+    await page.evaluate(() => {
+      const sc = document.querySelector('[data-neon-scroller]') as HTMLElement | null;
+      if (sc !== null) sc.scrollTop = sc.scrollHeight;
+    });
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            ([...document.querySelectorAll('[data-pkc-glow-near]')] as HTMLElement[]).filter((e) => {
+              const r = e.getBoundingClientRect();
+              return r.bottom < 0 || r.top > innerHeight;
+            }).length,
+          ),
+        { message: '画面の外の候補に光が残っている' },
+      )
+      .toBe(0);
+    await page.mouse.move(OUT_X, OUT_Y);
+  }
+
+  // ⑪ SQL の打つ欄(色分けの層を重ねた欄の包み): 縁が光り、フォーカス(欄そのもの)では全周の線が出て、包みの近接の光は出ない
+  {
+    await page.evaluate(() => {
+      location.hash = '#pkc?view=sql';
+    });
+    const input = page.locator('[data-pkc-view-pane="sql"] [data-pkc-field="sql-input"]');
+    await expect(input).toBeVisible({ timeout: 15_000 });
+    await input.blur(); // 開いた直後は打つ欄にフォーカスが入っている(フォーカスがあると近接の光は出ない = 仕様)
+    await page.mouse.move(OUT_X, OUT_Y);
+    await expectEdgeGlows(page, 'sql', '[data-pkc-field="sql-input-wrap"]', (b) => ({
+      pointer: { x: b.x + 200, y: b.y + 2 },
+      edge: { x: b.x + 80, y: b.y, width: 240, height: 2 },
+      inner: { x: b.x + b.w - 220, y: b.y + 12, width: 160, height: 30 },
+      minChanged: 240 * 2 * 0.5,
+    }));
+    const wb = await boxOf(page, '[data-pkc-field="sql-input-wrap"]');
+    const top = { x: wb.x + 80, y: wb.y, width: 240, height: 2 };
+    const restTop = await pixels(page, top);
+    await input.focus();
+    await page.waitForTimeout(150);
+    const focusTop = await pixels(page, top);
+    expect(changed(restTop, focusTop), 'SQL の欄のフォーカスの線が出ない').toBeGreaterThan(240 * 2 * 4 * 0.7);
+    expect(await input.evaluate((el) => getComputedStyle(el).outlineStyle), 'SQL の欄に outline が残っている').toBe('none');
+    await page.mouse.move(wb.x + 330, wb.y + 30);
+    await page.mouse.move(wb.x + 200, wb.y + 2);
+    await page.waitForTimeout(150);
+    expect(changed(focusTop, await pixels(page, top)), 'SQL の欄のフォーカス中に近接の光が重なった').toBe(0);
+  }
+  expect(errors, `console / page error: ${errors.join(' | ')}`).toEqual([]);
+});
+
+test('🔴 フォーカス: キーボード(Tab)で入力欄・追記欄の枠に全周の静止した線が出る(二重の outline なし)/ フォーカスが近接の光に勝つ / 動きを減らす・スマホ幅でも静止の線は残り、近接の光は出ない (Stage 2 PR-2)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await dismissAnnounce(page);
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('フォーカス');
+  await page.fill('[data-pkc-field="editor-body"]', '# 見出し\n\n本文です。\n\n```ts\nconst a = 1;\n```');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await page.mouse.move(OUT_X, OUT_Y);
+
+  /** 4 辺の帯(外周 2px。`out` なら 1px 外へずらす ── 追記欄の枠は線を外側へ 1px 足す)。 */
+  type Ring = { name: string; clip: { x: number; y: number; width: number; height: number } };
+  const ring = (b: Box, out = 0): Ring[] => [
+    { name: '上', clip: { x: b.x + 6, y: b.y - out, width: b.w - 12, height: 2 } },
+    { name: '下', clip: { x: b.x + 6, y: b.y + b.h - 2 + out, width: b.w - 12, height: 2 } },
+    { name: '左', clip: { x: b.x - out, y: b.y + 6, width: 2, height: b.h - 12 } },
+    { name: '右', clip: { x: b.x + b.w - 2 + out, y: b.y + 6, width: 2, height: b.h - 12 } },
+  ];
+  const sides = async (b: Box, out = 0): Promise<number[][]> => Promise.all(ring(b, out).map((r) => pixels(page, r.clip)));
+
+  // ① 検索欄 → Tab で並び順の選択欄へ(キーボードのフォーカス = `:focus-visible`)。全周の線 + 内側は変わらない + outline は無い
+  const sel = '[data-pkc-field="entry-sort"]';
+  await page.focus('[data-pkc-field="entry-filter"]');
+  const sb = await boxOf(page, sel);
+  await page.mouse.move(OUT_X, OUT_Y);
+  await page.locator('[data-pkc-field="entry-filter"]').blur();
+  const rest = await sides(sb);
+  const restInner = await pixels(page, { x: sb.x + 8, y: sb.y + 7, width: 40, height: sb.h - 14 });
+  await page.focus('[data-pkc-field="entry-filter"]');
+  await page.keyboard.press('Tab');
+  await expect(page.locator(sel)).toBeFocused();
+  expect(await page.locator(sel).evaluate((el) => el.matches(':focus-visible')), 'キーボードで入ったのに :focus-visible でない').toBe(true);
+  await page.waitForTimeout(150);
+  const f1 = await sides(sb);
+  ring(sb).forEach((r, i) => expect(changed(rest[i]!, f1[i]!), `選択欄のフォーカスの線が ${r.name} の辺に出ていない(全周でない)`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.7));
+  expect(changed(restInner, await pixels(page, { x: sb.x + 8, y: sb.y + 7, width: 40, height: sb.h - 14 })), 'フォーカスで内側の地が変わった').toBe(0);
+  // 静止: 時間が経っても動かない(アニメーションしない)
+  await page.waitForTimeout(400);
+  const f2 = await sides(sb);
+  ring(sb).forEach((r, i) => expect(changed(f1[i]!, f2[i]!), `フォーカスの線が ${r.name} の辺で動いている(静止でない)`).toBe(0));
+  // outline を二重に引かない(neon の線だけ)
+  const style = await page.locator(sel).evaluate((el) => {
+    const c = getComputedStyle(el);
+    return { outlineStyle: c.outlineStyle, outlineWidth: c.outlineWidth, shadow: c.boxShadow, border: c.borderTopColor };
+  });
+  expect(style.outlineStyle === 'none' || style.outlineWidth === '0px', `outline が残っている: ${JSON.stringify(style)}`).toBe(true);
+  expect(style.shadow, '全周の線(内側の影)が無い').toContain('inset');
+
+  // ② 🔴 フォーカスが勝つ: フォーカス中の欄の縁へポインタを近づけても、縁の画素は変わらない(近接の光は出ない)
+  const fb = await boxOf(page, sel);
+  const focusedOnly = await pixels(page, { x: fb.x + 10, y: fb.y, width: fb.w - 20, height: 2 });
+  await page.mouse.move(fb.x + fb.w / 2 + 30, fb.y + fb.h + 20);
+  await page.mouse.move(fb.x + fb.w / 2, fb.y + 2);
+  await expect.poll(() => page.locator(sel).evaluate((el) => el.hasAttribute('data-pkc-glow-near')), { message: '近接の印は付く(CSS が隠す)' }).toBe(true);
+  await page.waitForTimeout(150);
+  expect(changed(focusedOnly, await pixels(page, { x: fb.x + 10, y: fb.y, width: fb.w - 20, height: 2 })), 'フォーカス中の縁に近接の光が重なった(フォーカスが勝っていない)').toBe(0);
+  await page.mouse.move(OUT_X, OUT_Y);
+
+  // ③ 追記欄(`:focus-within` の包み): 枠の全周に線が出る。打つ欄は自分では線を引かない(二重にしない)
+  await page.locator(sel).blur();
+  const ab = await boxOf(page, '[data-pkc-field="append-form"]');
+  const aRest = await sides(ab, 1);
+  await page.focus('[data-pkc-field="append-input"]');
+  await page.waitForTimeout(150);
+  const aF = await sides(ab, 1);
+  ring(ab, 1).forEach((r, i) => expect(changed(aRest[i]!, aF[i]!), `追記欄のフォーカスの線が ${r.name} の辺に出ていない`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.6));
+  const inner = await page.locator('[data-pkc-field="append-input"]').evaluate((el) => {
+    const c = getComputedStyle(el);
+    return { shadow: c.boxShadow, outline: c.outlineStyle };
+  });
+  expect(inner.shadow, '打つ欄が自分でも線を引いている(枠と二重)').toBe('none');
+  expect(inner.outline).toBe('none');
+  const dir = process.env.PKC3_SHOT_DIR;
+  if (dir !== undefined && dir !== '') {
+    mkdirSync(dir, { recursive: true });
+    await page.screenshot({ path: `${dir}/neon-focus-append-light.png`, clip: { x: ab.x - 12, y: ab.y - 12, width: Math.min(ab.w + 24, 640), height: ab.h + 24 } });
+    await page.screenshot({ path: `${dir}/neon-focus-select-light.png`, clip: { x: sb.x - 12, y: sb.y - 12, width: sb.w + 24, height: sb.h + 24 } });
+  }
+  await page.locator('[data-pkc-field="append-input"]').blur();
+
+  // ④ 🔴 動きを減らす設定: 近接の光は付かない(印ゼロ)が、フォーカスの静止の線は残る
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const code = `${BODY} .pkc-md-block[data-pkc-md-block-kind="code"]`;
+  const cb = await boxOf(page, code);
+  for (let i = 0; i < 6; i += 1) await page.mouse.move(cb.x + 4 + i * 6, cb.y + cb.h / 2 + (i % 2));
+  await page.waitForTimeout(150);
+  await expect(page.locator(NEAR), '動きを減らす設定なのに近接の光が付いた').toHaveCount(0);
+  await page.focus('[data-pkc-field="entry-filter"]');
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(150);
+  const f3 = await sides(sb);
+  ring(sb).forEach((r, i) => expect(changed(rest[i]!, f3[i]!), `動きを減らす設定でフォーカスの線が ${r.name} の辺に出ない`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.7));
+  await page.locator(sel).blur();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.mouse.move(OUT_X, OUT_Y);
+
+  // ⑤ 🔴 スマホの幅: 近接の光は付かない・追記欄のフォーカスの線は残る
+  await page.setViewportSize({ width: 390, height: 800 });
+  await expect(page.locator('[data-pkc-region="shell"]')).toHaveAttribute('data-pkc-layout', 'phone');
+  const pcb = await boxOf(page, code);
+  for (let i = 0; i < 6; i += 1) await page.mouse.move(pcb.x + 4 + i * 6, pcb.y + pcb.h / 2 + (i % 2));
+  await page.waitForTimeout(150);
+  await expect(page.locator(NEAR), 'スマホの幅で近接の光が付いた').toHaveCount(0);
+  const pa = page.locator('[data-pkc-field="append-input"]');
+  await expect(pa).toBeVisible();
+  const pab = await boxOf(page, '[data-pkc-field="append-form"]');
+  const pRest = await sides(pab, 1);
+  await pa.focus();
+  await page.waitForTimeout(150);
+  const pF = await sides(pab, 1);
+  ring(pab, 1).forEach((r, i) => expect(changed(pRest[i]!, pF[i]!), `スマホ幅でフォーカスの線が ${r.name} の辺に出ない`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.6));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await pa.blur();
+
+  // ⑦ 🔴 輪郭を持たない型(checkbox / radio)は neon の規則から外れ、従来の outline で焦点が見える(焦点が消えない)
+  {
+    await page.evaluate(() => {
+      const box = document.createElement('div');
+      box.id = 'zz-native';
+      box.style.cssText = 'position:fixed;left:700px;top:300px;z-index:99999;background:#fff;padding:12px;display:flex;gap:24px';
+      box.innerHTML = '<button id="zz-before">before</button><input id="zz-cb" type="checkbox"><input id="zz-radio" type="radio" name="zz">';
+      document.body.append(box);
+    });
+    await page.locator('#zz-before').focus();
+    for (const id of ['zz-cb', 'zz-radio']) {
+      const r = await page.locator(`#${id}`).evaluate((el) => {
+        const b = el.getBoundingClientRect();
+        return { x: b.x, y: b.y, w: b.width, h: b.height };
+      });
+      const ringClip = { x: r.x - 6, y: r.y - 6, width: r.w + 12, height: r.h + 12 };
+      await page.mouse.move(OUT_X, OUT_Y);
+      const before = await pixels(page, ringClip);
+      await page.keyboard.press('Tab');
+      await expect(page.locator(`#${id}`)).toBeFocused();
+      await page.waitForTimeout(100);
+      const st = await page.locator(`#${id}`).evaluate((el) => {
+        const c = getComputedStyle(el);
+        return { fv: el.matches(':focus-visible'), style: c.outlineStyle, width: c.outlineWidth, shadow: c.boxShadow };
+      });
+      expect(st.fv, `${id}: キーボードで入ったのに :focus-visible でない`).toBe(true);
+      expect(st.style, `${id}: outline が消えている(焦点が見えない)`).not.toBe('none');
+      expect(parseFloat(st.width), `${id}: outline の太さが 0`).toBeGreaterThan(0);
+      expect(st.shadow, `${id}: neon の影を引いている(ネイティブの部品は従来の outline のまま)`).toBe('none');
+      // 画素で焦点の輪が見える(部品のまわり 6px の帯が、焦点前と変わる)
+      expect(changed(before, await pixels(page, ringClip)), `${id}: 焦点の輪が画素で見えない`).toBeGreaterThan(20);
+    }
+    await page.evaluate(() => document.getElementById('zz-native')?.remove());
+  }
+
+  // ⑧ 🔴 強制色(forced-colors: active): 入力欄(通常の欄・追記欄・SQL の欄)の焦点は outline で出る。影は無い(二重にならない)
+  {
+    await page.emulateMedia({ forcedColors: 'active' });
+    const info = (sel: string): Promise<{ outline: string; width: string; shadow: string }> =>
+      page.locator(sel).evaluate((el) => {
+        const c = getComputedStyle(el);
+        return { outline: c.outlineStyle, width: c.outlineWidth, shadow: c.boxShadow };
+      });
+    await page.focus('[data-pkc-field="entry-filter"]');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('[data-pkc-field="entry-sort"]')).toBeFocused();
+    const sortSel = await info('[data-pkc-field="entry-sort"]');
+    expect(sortSel.outline, '強制色で選択欄の焦点の outline が出ない').not.toBe('none');
+    expect(sortSel.shadow, '強制色で影が残っている(二重)').toBe('none');
+    await page.focus('[data-pkc-field="entry-filter"]');
+    const filter = await info('[data-pkc-field="entry-filter"]');
+    expect(filter.outline, '強制色で入力欄の焦点の outline が出ない(特異度で負けている)').not.toBe('none');
+    expect(filter.shadow).toBe('none');
+    // 追記欄: 枠(`append-form`)が outline を持ち、中の打つ欄は持たない(二重にしない)
+    await page.focus('[data-pkc-field="append-input"]');
+    const form = await info('[data-pkc-field="append-form"]');
+    const inner = await info('[data-pkc-field="append-input"]');
+    expect(form.outline, '強制色で追記欄の枠の outline が出ない').not.toBe('none');
+    expect(inner.outline, '強制色で追記欄の打つ欄にも outline がある(枠と二重)').toBe('none');
+    expect(inner.shadow).toBe('none');
+    await page.evaluate(() => {
+      location.hash = '#pkc?view=sql';
+    });
+    const sqlIn = page.locator('[data-pkc-view-pane="sql"] [data-pkc-field="sql-input"]');
+    await expect(sqlIn).toBeVisible({ timeout: 15_000 });
+    await sqlIn.focus();
+    const sql = await info('[data-pkc-view-pane="sql"] [data-pkc-field="sql-input"]');
+    expect(sql.outline, '強制色で SQL の欄の焦点の outline が出ない').not.toBe('none');
+    expect(sql.shadow).toBe('none');
+    await page.emulateMedia({ forcedColors: 'none' });
+    await sqlIn.blur();
+    await page.evaluate(() => {
+      location.hash = '#pkc';
+    });
+  }
+
+  // ⑥ 🔴 2 ペイン整理: 焦点のある側のペインに同じ全周の枠(内側の影)。焦点のない側には無い
+  await page.evaluate(() => {
+    location.hash = '#pkc?view=dual';
+  });
+  await expect(page.locator('[data-pkc-view-pane="dual"]')).toBeVisible({ timeout: 15_000 });
+  const panes = page.locator('[data-pkc-region="dual-pane"]');
+  await expect(panes).toHaveCount(2);
+  const st = await panes.evaluateAll((els) =>
+    els.map((el) => {
+      const c = getComputedStyle(el);
+      return { focused: el.hasAttribute('data-pkc-focused'), shadow: c.boxShadow, border: c.borderTopColor };
+    }),
+  );
+  const on = st.filter((s) => s.focused);
+  const off = st.filter((s) => !s.focused);
+  expect(on.length, '焦点のある側が 1 つでない').toBe(1);
+  expect(on[0]!.shadow, '焦点のある側に全周の線が無い').toContain('inset');
+  expect(off[0]!.shadow, '焦点のない側にも線がある').toBe('none');
+  expect(on[0]!.border).not.toBe(off[0]!.border);
   expect(errors, `console / page error: ${errors.join(' | ')}`).toEqual([]);
 });

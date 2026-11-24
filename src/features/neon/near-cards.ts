@@ -1,7 +1,7 @@
 /**
  * 🔴 **輪郭の近接発光(ネオン)の「どのカードが近いか」**(B2)── pure(DOM も browser API も触らない)。
  *
- * ポインタ(`x`, `y`)から**半径 `radius` 以内**にあるカードだけを返し、各カードの**局所座標**(カードの左上を原点とした px)を添える。
+ * ポインタ(`x`, `y`)から**半径 `radius`(矩形が自分の `radius` を持つならそちら)以内**にあるカードだけを返し、各カードの**局所座標**(カードの左上を原点とした px)を添える。
  * 局所座標は CSS の `radial-gradient(circle … at var(--gx) var(--gy))` の中心になる。
  *
  * - 距離は**矩形までの最短距離**(ポインタが矩形の中なら 0)。**ちょうど半径**は近い側に入る(境界は含む)。
@@ -15,6 +15,8 @@ export interface CardRect {
   readonly top: number;
   readonly right: number;
   readonly bottom: number;
+  /** この矩形だけの半径(px)。無ければ呼び手が渡す半径(同じゾーンに大きさの違う物が混ざるとき: 本文のブロックと入力欄)。 */
+  readonly radius?: number;
 }
 
 export interface NearCard {
@@ -26,7 +28,7 @@ export interface NearCard {
 }
 
 /** ゾーンごとの光の半径(px)。⚠ `app.css` の `--neon-r`(`circle` の半径)と揃える ── `tests/adapter/neon-glow.test.ts` が突き合わせる。 */
-export const NEON_RADIUS = { log: 160, inspector: 160, rail: 56 } as const;
+export const NEON_RADIUS = { log: 160, inspector: 160, rail: 56, block: 160, field: 96 } as const;
 
 /** ポインタから矩形までの最短距離の 2 乗。 */
 export function distanceSqToRect(r: CardRect, x: number, y: number): number {
@@ -38,10 +40,10 @@ export function distanceSqToRect(r: CardRect, x: number, y: number): number {
 /** 半径内のカードと局所座標。 */
 export function nearCards(rects: readonly CardRect[], x: number, y: number, radius: number): NearCard[] {
   const out: NearCard[] = [];
-  const rr = radius * radius;
   for (let index = 0; index < rects.length; index += 1) {
     const r = rects[index]!;
-    if (distanceSqToRect(r, x, y) > rr) continue;
+    const rad = r.radius ?? radius;
+    if (distanceSqToRect(r, x, y) > rad * rad) continue;
     out.push({ index, gx: Math.round(x - r.left), gy: Math.round(y - r.top) });
   }
   return out;

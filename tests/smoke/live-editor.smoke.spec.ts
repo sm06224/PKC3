@@ -1034,7 +1034,8 @@ test('🔴 表・コードの行を押しても編集欄が縮まず、左端も
   const tableW = await w('table');
   const codeW = await w('pre');
   const pLeft = await blockLeft('p');
-  const tLeft = await blockLeft('.pkc-md-block[data-pkc-md-block-kind="table"]');
+  // ⚠ 表の**見える左端**(中の `table`)で見る ── 塊の器は、近接発光の枠(透明な 2px)のぶん 2px 外へ出ている(Stage 2 PR-2)
+  const tLeft = await blockLeft('.pkc-md-block[data-pkc-md-block-kind="table"] table');
   // ⚠ 空振り防止 ── 左に余白が入っている状態でだけ、左端の揃いは判定になる
   expect(pLeft, '器と読み幅が同じで、左端の揃いを見ていない').toBeGreaterThan(20);
   expect(Math.abs(tLeft - pLeft), `表の塊が段落と違う左端に在る(表 ${tLeft} / 段落 ${pLeft})`).toBeLessThanOrEqual(2);

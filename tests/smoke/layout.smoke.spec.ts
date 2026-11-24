@@ -2109,14 +2109,27 @@ test('🔴 本文に読み幅の上限が効き、表と図は対象外である
    *   本当に守りたいのは「**読み幅の cap が図に掛かっていない**」ことなので、
    *   期待値を幾何で書く。
    */
-  const parentWidth = await page.evaluate(() => {
+  const geo = await page.evaluate(() => {
     const h = document.querySelector('[data-pkc-mermaid-src]');
-    return h?.parentElement?.clientWidth ?? -1;
+    const slot = h?.parentElement;
+    const card = h?.closest('.pkc-md-block');
+    const a = slot?.getBoundingClientRect();
+    const c = card?.getBoundingClientRect();
+    return { w: slot?.clientWidth ?? -1, top: a && c ? a.top - c.top : -1, bottom: a && c ? c.bottom - a.bottom : -1 };
   });
+  const parentWidth = geo.w;
+  // 上の帯(ラベルと保存ボタンの行)28px + 枠 1px / 下の余白 8px(`--s3`)+ 枠 1px(固定値。余白を変えると赤)
+  expect(Math.abs(geo.top - 29), `図のカードの上の余白が 28 + 枠 1 でない(${geo.top})`).toBeLessThanOrEqual(1);
+  expect(Math.abs(geo.bottom - 9), `図のカードの下の余白が 8 + 枠 1 でない(${geo.bottom})`).toBeLessThanOrEqual(1);
   const indent = Math.max(0, (m.body - m.p) / 2);
+  /**
+   * 図は 1 枚のカード(`.pkc-md-block`。Stage 2 PR-2)に収まる ── 親(`.pkc-render-slot`)の幅は、カードの左右の余白 8px(`--s3`)× 2 と枠 1px × 2 のぶん狭い。
+   * ⚠ **固定値で pin する**(実装の computed style から期待値を作ると、余白を変えても緑のまま ── 変異: カードの padding を 100px にすると赤になる)。
+   */
+  const CARD_CHROME = 8 * 2 + 1 * 2;
   expect(
-    Math.abs(parentWidth - (m.body - indent)),
-    `図の親の幅が幾何と合わない(実測 ${parentWidth} / 期待 ${m.body - indent} = 器 ${m.body} − 余白 ${indent})`,
+    Math.abs(parentWidth - (m.body - indent - CARD_CHROME)),
+    `図の親の幅が幾何と合わない(実測 ${parentWidth} / 期待 ${m.body - indent - CARD_CHROME} = 器 ${m.body} − 余白 ${indent} − カードの左右の余白と枠 ${CARD_CHROME})`,
   ).toBeLessThanOrEqual(2);
   expect(
     parentWidth,

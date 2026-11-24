@@ -14,9 +14,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createNeonGlow, GLOW_QUERY, NEAR_ATTR, NEON_ZONES, type NeonGlow } from '../../src/adapter/ui/render/neon-glow';
+import { createNeonGlow, GLOW_QUERY, NEAR_ATTR, NEON_FIELDS, NEON_ZONES, zoneOf, type NeonGlow } from '../../src/adapter/ui/render/neon-glow';
 import { NEON_RADIUS } from '../../src/features/neon/near-cards';
-import { atBlock, blocksFor, stripComments } from '../helpers/css-blocks';
+import { atBlock, blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
+
+/** `@media screen and (forced-colors: none)` の n 番目(1 始まり)の塊を、閉じの波括弧まで切り出す。 */
+function nthNoneBlock(css: string, n: number): string {
+  const head = '@media screen and (forced-colors: none)';
+  let at = -1;
+  for (let i = 0; i < n; i += 1) at = css.indexOf(head, at + 1);
+  expect(at, `${n} 番目の ${head} が無い`).toBeGreaterThanOrEqual(0);
+  return `${head} {${atBlock(css.slice(at), head).body}}`;
+}
 
 type Fn = () => void;
 function media(matches: boolean) {
@@ -331,9 +340,30 @@ describe('ゾーンの出入り', () => {
     expect(frames).toEqual([]);
   });
 
-  it('ゾーンの定義: 3 か所(ログ・情報ペイン・バー)。半径は NEON_RADIUS', () => {
-    expect(NEON_ZONES.map((z) => z.radius)).toEqual([NEON_RADIUS.log, NEON_RADIUS.inspector, NEON_RADIUS.rail]);
-    expect(NEON_ZONES.map((z) => z.zone).join(' ')).toMatch(/log-days.*inspector.*rail/);
+  it('ゾーンの定義: 7 か所(ログ・情報ペイン・バー・本文・追記欄・検索欄・SQL)。半径は NEON_RADIUS', () => {
+    expect(NEON_ZONES.map((z) => z.targets.map((t) => t.radius))).toEqual([
+      [NEON_RADIUS.log],
+      [NEON_RADIUS.inspector, NEON_RADIUS.field],
+      [NEON_RADIUS.rail],
+      [NEON_RADIUS.block],
+      [NEON_RADIUS.block],
+      [NEON_RADIUS.field],
+      [NEON_RADIUS.block],
+    ]);
+    expect(NEON_ZONES.map((z) => z.zone)).toEqual([
+      '[data-pkc-log-days]',
+      '[data-pkc-region="inspector"]',
+      '[data-pkc-region="rail"]',
+      '.pkc-md-rendered',
+      '[data-pkc-region="append"]',
+      '[data-pkc-region="find-bar"]',
+      '[data-pkc-field="sql-editor"]',
+    ]);
+  });
+
+  it('⚠ 本文のゾーンはログのゾーンより後ろ(ログの本文も `.pkc-md-rendered` のとき、先頭のログのゾーンが握る)', () => {
+    const order = NEON_ZONES.map((z) => z.zone);
+    expect(order.indexOf('[data-pkc-log-days]')).toBeLessThan(order.indexOf('.pkc-md-rendered'));
   });
 });
 
@@ -630,7 +660,7 @@ describe('測り直しの穴(自分の書き込み・外からの style・動い
     runFrame();
     expect(rig.cards[0]!.hasAttribute(NEAR_ATTR)).toBe(true);
     expect(inner.hasAttribute(NEAR_ATTR), '入れ子のカードへ書いた').toBe(false);
-    expect(NEON_ZONES.map((z) => z.direct)).toEqual([true, true, false]);
+    expect(NEON_ZONES.slice(0, 3).flatMap((z) => z.targets.map((t) => t.direct))).toEqual([true, true, false, false]);
   });
 });
 
@@ -667,7 +697,7 @@ describe('CSS(原文)', () => {
         expect(d, `${pseudo}: 背景の帯になっている`).not.toMatch(/(^|;)\s*background:/);
       }
     }
-    // 画面 + 強制色なしの外(印刷・強制色)には、光の規則が 1 つも無い(塊は 2 つ: 疑似要素の輪郭 / 横スクロールの器の背景)
+    // 画面 + 強制色なしの外(印刷・強制色)には、光の規則が 1 つも無い(塊は 3 つ: 疑似要素の輪郭 / ログの器の背景 / 本文のブロック・入力欄)
     let outside = css;
     let blocks = 0;
     while (outside.includes('@media screen and (forced-colors: none)')) {
@@ -675,7 +705,7 @@ describe('CSS(原文)', () => {
       outside = outside.replace(`@media screen and (forced-colors: none) {${b}}`, '');
       blocks += 1;
     }
-    expect(blocks, '光の塊が 2 つでない').toBe(2);
+    expect(blocks, '光の塊が 3 つでない(疑似要素の輪郭 / 横スクロールの器の背景 / 本文のブロック・入力欄)').toBe(3);
     expect(outside, '画面の外にも光の規則がある').not.toContain('[data-pkc-glow-near]');
   });
 
@@ -684,7 +714,7 @@ describe('CSS(原文)', () => {
     // 疑似要素の規則からは器を除く
     expect(body).toMatch(/\[data-pkc-log-card\]:not\(\.pkc-md-block, \.pkc-details\)/);
     // 器の 4 つの辺の型(途中 / 先頭 / 末尾 / 単独)すべてに光の層がある
-    const second = css.slice(css.indexOf('@media screen and (forced-colors: none)', css.indexOf('@media screen and (forced-colors: none)') + 10));
+    const second = nthNoneBlock(css, 2);
     for (const edge of ['first', 'last', 'solo']) expect(second, `器の ${edge} に光の層が無い`).toContain(`[data-pkc-log-card='${edge}'][data-pkc-glow-near]`);
     expect(second).toContain('var(--sf), var(--ng)');
     expect(second, '疑似要素で描いている').not.toMatch(/::before|::after/);
@@ -699,15 +729,20 @@ describe('CSS(原文)', () => {
   /** 近接発光の塊(末尾)。引用符は JS 側(二重)に揃える。 */
   const neon = raw.slice(raw.indexOf('輪郭の近接発光(ネオン。B2)── ここから末尾まで')).replace(/'/g, '"');
 
-  it.each(NEON_ZONES.map((z) => [z.zone, z] as const))('🔴 %s: `direct` は CSS の書き方(`ゾーン > カード` か、入れ子を許す `ゾーン カード` か)と一致する', (_n, z) => {
-    const child = neon.includes(`${z.zone} > ${z.cards}`);
-    const nested = neon.includes(`${z.zone} ${z.cards}`);
-    expect(child, `${z.zone}: CSS が直接の子で書いているかと direct(${String(z.direct)})が食い違う`).toBe(z.direct);
-    if (!z.direct) expect(nested, `${z.zone}: 入れ子を許すのに CSS が見つからない`).toBe(true);
-  });
+  it.each(NEON_ZONES.slice(0, 3).flatMap((z) => z.targets.map((t) => [`${z.zone} → ${t.cards.slice(0, 30)}`, z.zone, t] as const)))(
+    '🔴 %s: `direct` は CSS の書き方(`ゾーン > カード` か、入れ子を許す `ゾーン カード` か)と一致する',
+    (_n, zone, t) => {
+      // 入力欄(`NEON_FIELDS`)は要素名の並びで、ゾーンとの親子の書き方を持たない(疑似要素でなく枠そのものを描く)── 対象は直接の子のカードとバーのボタン
+      if (t.cards === NEON_FIELDS) return;
+      const child = neon.includes(`${zone} > ${t.cards}`);
+      const nested = neon.includes(`${zone} ${t.cards}`);
+      expect(child, `${zone}: CSS が直接の子で書いているかと direct(${String(t.direct)})が食い違う`).toBe(t.direct);
+      if (!t.direct) expect(nested, `${zone}: 入れ子を許すのに CSS が見つからない`).toBe(true);
+    },
+  );
 
   it('🔴 器の背景の輪郭を描く 5 規則(共通・途中・先頭・末尾・単独)は、全部 `.pkc-md-block` と `.pkc-details` の両方を対象にする', () => {
-    const second = neon.slice(neon.lastIndexOf('@media screen and (forced-colors: none)'));
+    const second = nthNoneBlock(neon, 2);
     const withBoth = second.match(/> :is\(\.pkc-md-block, \.pkc-details\)\[data-pkc-log-card\]/g) ?? [];
     expect(withBoth.length, '5 規則すべてが両方を対象にしていない').toBe(5);
     expect(second, '`.pkc-md-block` だけの規則が残っている').not.toMatch(/> \.pkc-md-block\[data-pkc-log-card\]/);
@@ -722,5 +757,374 @@ describe('CSS(原文)', () => {
   it('旧い灰色の光(G1)の規則・要素は残っていない', () => {
     expect(css).not.toContain('rail-glow');
     expect(css).not.toContain('data-pkc-glow]');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage 2 PR-2: 本文のブロック・入力欄のゾーン / 画面内の候補だけ(IntersectionObserver)/ フォーカス
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 観測器(画面に出ているか)の差し替え。`io.show(el, true|false)` で通知を撃つ。 */
+let ioInstances: FakeIO[] = [];
+class FakeIO {
+  observed = new Set<Element>();
+  disconnected = false;
+  constructor(private readonly cb: (entries: { target: Element; isIntersecting: boolean }[]) => void) {
+    ioInstances.push(this);
+  }
+  observe(el: Element): void {
+    this.observed.add(el);
+  }
+  unobserve(el: Element): void {
+    this.observed.delete(el);
+  }
+  disconnect(): void {
+    this.disconnected = true;
+    this.observed.clear();
+  }
+  show(el: Element, isIntersecting: boolean): void {
+    this.cb([{ target: el, isIntersecting }]);
+  }
+}
+
+const rectOf = (left: number, top: number, w: number, h: number): (() => DOMRect) => {
+  return () => ({ left, top, right: left + w, bottom: top + h, width: w, height: h, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+};
+
+/** 本文型のゾーン(`.pkc-md-rendered`)に、コードの枠・表の枠・引用を縦に並べる(高さ 50・間 10)。 */
+function makeBody(): { zone: HTMLElement; code: HTMLElement; table: HTMLElement; quote: HTMLElement; callout: HTMLElement } {
+  document.body.innerHTML = '';
+  const zone = document.createElement('div');
+  zone.className = 'pkc-md-rendered';
+  const code = document.createElement('div');
+  code.className = 'pkc-md-block';
+  code.getBoundingClientRect = rectOf(100, 100, 400, 50);
+  const table = document.createElement('div');
+  table.className = 'pkc-md-block';
+  table.setAttribute('data-pkc-md-block-kind', 'table');
+  table.getBoundingClientRect = rectOf(100, 160, 400, 50);
+  const quote = document.createElement('blockquote');
+  quote.getBoundingClientRect = rectOf(100, 220, 400, 50);
+  const callout = document.createElement('blockquote');
+  callout.className = 'pkc-section-callout';
+  callout.getBoundingClientRect = rectOf(100, 280, 400, 50);
+  zone.append(code, table, quote, callout);
+  document.body.append(zone);
+  return { zone, code, table, quote, callout };
+}
+
+describe('本文のブロックのゾーン(`.pkc-md-rendered`)', () => {
+  beforeEach(() => {
+    ioInstances = [];
+  });
+
+  it('🔴 コード・表・引用の枠が光り、注意書き(callout)は対象外。半径は NEON_RADIUS.block', () => {
+    const rig = makeBody();
+    glow = createNeonGlow(document, () => media(true));
+    rig.code.dispatchEvent(pointer('pointerover', 300, 125));
+    runFrame();
+    expect(glow.inZone()).toBe(true);
+    expect(rig.code.hasAttribute(NEAR_ATTR)).toBe(true);
+    expect(rig.table.hasAttribute(NEAR_ATTR)).toBe(true);
+    expect(rig.quote.hasAttribute(NEAR_ATTR)).toBe(true);
+    expect(rig.callout.hasAttribute(NEAR_ATTR), '注意書きまで光った').toBe(false);
+  });
+
+  it('🔴 同じゾーンの入力欄は小さい半径(NEON_RADIUS.field)で光る。⚠ 半径は物ごと(ブロックは遠くまで・欄は近くだけ)', () => {
+    document.body.innerHTML = '';
+    const zone = document.createElement('div');
+    zone.setAttribute('data-pkc-region', 'inspector');
+    const card = document.createElement('div');
+    card.setAttribute('data-pkc-card', '');
+    card.getBoundingClientRect = rectOf(100, 100, 400, 50);
+    const input = document.createElement('input');
+    input.getBoundingClientRect = rectOf(100, 500, 200, 26);
+    zone.append(card, input);
+    document.body.append(zone);
+    glow = createNeonGlow(document, () => media(true));
+    // ポインタ(300, 60): カードまで 40(半径 160 の内)/ 欄(top 500)まで 440(欄の半径 96 の外)
+    card.dispatchEvent(pointer('pointerover', 300, 60));
+    runFrame();
+    expect(card.hasAttribute(NEAR_ATTR)).toBe(true);
+    expect(input.hasAttribute(NEAR_ATTR), '欄が遠いのに光った').toBe(false);
+    // 欄の 96 の内へ
+    zone.dispatchEvent(pointer('pointermove', 300, 500 - NEON_RADIUS.field));
+    runFrame();
+    expect(input.hasAttribute(NEAR_ATTR), '欄の半径の内なのに光らない').toBe(true);
+    expect(card.hasAttribute(NEAR_ATTR), 'カードの半径(160)の外なのに光った').toBe(false);
+    // 欄の半径の 1px 外
+    zone.dispatchEvent(pointer('pointermove', 300, 500 - NEON_RADIUS.field - 1));
+    runFrame();
+    expect(input.hasAttribute(NEAR_ATTR)).toBe(false);
+  });
+
+  it('🔴 チェックボックス・ラジオ・隠し欄は欄の対象に入らない(NEON_FIELDS)', () => {
+    document.body.innerHTML = '';
+    const zone = document.createElement('div');
+    zone.setAttribute('data-pkc-region', 'find-bar');
+    const mk = (type: string): HTMLInputElement => {
+      const i = document.createElement('input');
+      i.type = type;
+      i.getBoundingClientRect = rectOf(100, 100, 100, 26);
+      return i;
+    };
+    const text = mk('text');
+    const cb = mk('checkbox');
+    const radio = mk('radio');
+    const hidden = mk('hidden');
+    zone.append(text, cb, radio, hidden);
+    document.body.append(zone);
+    glow = createNeonGlow(document, () => media(true));
+    text.dispatchEvent(pointer('pointerover', 150, 110));
+    runFrame();
+    expect(text.hasAttribute(NEAR_ATTR)).toBe(true);
+    for (const el of [cb, radio, hidden]) expect(el.hasAttribute(NEAR_ATTR), `${el.type} が光った`).toBe(false);
+  });
+});
+
+describe('🔴 ゾーンの入れ子: 外側のログ・情報ペイン・バーが、内側の本文のゾーンに優先する', () => {
+  it('ログの本文の中の `.pkc-md-rendered` のブロックへ直接ポインタが入っても、ログのゾーンに入りログのカードが光る(`closest` の最内に奪われない)', () => {
+    const rig = makeLog();
+    const inner = document.createElement('div');
+    inner.className = 'pkc-md-rendered';
+    const block = document.createElement('div');
+    block.className = 'pkc-md-block';
+    block.getBoundingClientRect = rectOf(100, 400, 400, 40);
+    inner.append(block);
+    rig.zone.append(inner);
+    expect(zoneOf(block)?.spec.zone, '優先順でログが先に当たらない').toBe('[data-pkc-log-days]');
+    glow = createNeonGlow(document, () => media(true));
+    block.dispatchEvent(pointer('pointerover', 300, 160)); // カード 1(top 160)の上
+    runFrame();
+    expect(rig.zone.isConnected && glow.inZone()).toBe(true);
+    expect(rig.cards[1]!.hasAttribute(NEAR_ATTR), 'ログのカードが光らない(内側の本文のゾーンに奪われた)').toBe(true);
+    expect(block.hasAttribute(NEAR_ATTR), 'ログのゾーンの中で本文のブロックを光らせた(二重)').toBe(false);
+  });
+
+  it('入れ子でない所は今までどおり(本文だけ → 本文のゾーン / 情報ペインの中の欄 → 情報ペイン)', () => {
+    document.body.innerHTML = '<div class="pkc-md-rendered"><div class="pkc-md-block" id="b"></div></div><div data-pkc-region="inspector"><input id="i"></div>';
+    expect(zoneOf(document.getElementById('b')!)?.spec.zone).toBe('.pkc-md-rendered');
+    expect(zoneOf(document.getElementById('i')!)?.spec.zone).toBe('[data-pkc-region="inspector"]');
+    expect(zoneOf(document.body)).toBeNull();
+  });
+});
+
+describe('🔴 画面に出ている候補だけ(IntersectionObserver)', () => {
+  beforeEach(() => {
+    ioInstances = [];
+    vi.stubGlobal('IntersectionObserver', FakeIO);
+  });
+
+  it('候補は観測器で見張り、ゾーンを出ると観測器ごと外れる(見張りが残らない)', () => {
+    const rig = makeBody();
+    glow = createNeonGlow(document, () => media(true));
+    rig.code.dispatchEvent(pointer('pointerover', 300, 125));
+    runFrame();
+    const io = ioInstances[0]!;
+    expect([...io.observed].sort((a, b) => (a === rig.code ? -1 : b === rig.code ? 1 : 0))).toEqual(expect.arrayContaining([rig.code, rig.table, rig.quote]));
+    expect(io.observed.has(rig.callout), '対象外の物まで見張っている').toBe(false);
+    rig.zone.dispatchEvent(pointer('pointerleave', 0, 0, false));
+    expect(io.disconnected).toBe(true);
+    expect(io.observed.size).toBe(0);
+  });
+
+  it('🔴 「画面に出ていない」と教えられた候補は測らず・書かない。出てきたら次のコマで光る', () => {
+    const rig = makeBody();
+    glow = createNeonGlow(document, () => media(true));
+    rig.code.dispatchEvent(pointer('pointerover', 300, 125));
+    runFrame();
+    const io = ioInstances[0]!;
+    expect(rig.table.hasAttribute(NEAR_ATTR)).toBe(true);
+    // 表が画面の外へ出た: 光が消え、次のコマでは測りもしない
+    const spy = vi.spyOn(rig.table, 'getBoundingClientRect');
+    io.show(rig.table, false);
+    expect(rig.table.hasAttribute(NEAR_ATTR), '画面の外へ出たのに光が残った').toBe(false);
+    runFrame();
+    expect(rig.table.hasAttribute(NEAR_ATTR)).toBe(false);
+    expect(spy, '画面に出ていない候補の矩形を測った').not.toHaveBeenCalled();
+    expect(rig.code.hasAttribute(NEAR_ATTR), '画面に出ている物は光り続ける').toBe(true);
+    // 戻ってきた
+    io.show(rig.table, true);
+    runFrame();
+    expect(rig.table.hasAttribute(NEAR_ATTR), '画面に戻ったのに光らない').toBe(true);
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('教えられるまでは「画面に出ている」として扱う(最初の通知が遅れても光り損ねない)', () => {
+    const rig = makeBody();
+    glow = createNeonGlow(document, () => media(true));
+    rig.code.dispatchEvent(pointer('pointerover', 300, 125));
+    runFrame();
+    expect(ioInstances[0]).toBeDefined();
+    expect(rig.code.hasAttribute(NEAR_ATTR)).toBe(true);
+  });
+
+  it('切り離された候補は見張りをやめる(次の測り直しで)', async () => {
+    const rig = makeBody();
+    glow = createNeonGlow(document, () => media(true));
+    rig.code.dispatchEvent(pointer('pointerover', 300, 125));
+    runFrame();
+    const io = ioInstances[0]!;
+    rig.quote.remove();
+    await microtasks();
+    runFrame();
+    expect(io.observed.has(rig.quote), '外れた候補を見張り続けている').toBe(false);
+  });
+
+  it('観測器が無い環境では、全部を候補にして動く(絞らない)', () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const rig = makeBody();
+    glow = createNeonGlow(document, () => media(true));
+    rig.code.dispatchEvent(pointer('pointerover', 300, 125));
+    runFrame();
+    expect(rig.code.hasAttribute(NEAR_ATTR)).toBe(true);
+    expect(rig.table.hasAttribute(NEAR_ATTR)).toBe(true);
+  });
+});
+
+describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () => {
+  const css = stripComments(readFileSync(join(__dirname, '../../src/styles/app.css'), 'utf-8'));
+  /** 規則の選択子を(空白を畳んで)丸ごと比べて宣言を返す。⚠ `blocksFor` は `,` で割るので、`:is(a, b)` を含む選択子は読めない。 */
+  const decls = (sel: string): string =>
+    [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => m[1]!.trim().replace(/\s+/g, ' ') === sel)
+      .map((m) => m[2]!)
+      .join('\n');
+  /** 強制色の規則(`forced-colors: active`)の中だけ / 外だけ。 */
+  const forced = atBlock(css, '@media (forced-colors: active)').body;
+  const outsideForced = css.replace(`@media (forced-colors: active) {${forced}}`, '');
+
+  /** 選択子の文字列を**含む**規則の宣言(`:not(a, b)` の `,` を含む選択子リストを読むため)。 */
+  const ruleHaving = (src: string, sel: string): string =>
+    [...src.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((m) => m[1]!.replace(/\s+/g, ' ').includes(sel))
+      .map((m) => m[2]!)
+      .join('\n');
+  const TYPES = "[type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']";
+  const FOCUS_INPUT = `input:not(${TYPES}):focus-visible`;
+
+  it('🔴 入力欄のフォーカスは `--neon` の線を全周に静止させる ── 既存の `outline` と二重にしない(outline は消す)', () => {
+    const d = ruleHaving(outsideForced, FOCUS_INPUT);
+    expect(d, '入力欄のフォーカスが neon の線でない').toMatch(/border-color:\s*var\(--neon\)/);
+    expect(d, '全周の線(内側の影)が無い').toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--neon\)/);
+    expect(d, 'outline が残っている(neon の線と二重になる)').toMatch(/outline:\s*none/);
+    expect(d).not.toMatch(/outline:\s*\d/);
+    // 強制色の外で、neon の規則と同じ対象に outline を引く規則は無い(輪郭を持たない型の規則は別の選択子)
+    expect(ruleHaving(outsideForced, 'select:focus-visible').match(/outline:\s*\d/), 'neon の規則に outline が混ざっている').toBeNull();
+    const forcedRule = ruleHaving(forced, ':is(input, textarea, select):not([data-pkc-field=\'append-input\']):focus-visible:focus-visible');
+    expect(forcedRule, '強制色で outline へ戻していない').toMatch(/outline:\s*2px solid var\(--accent\)/);
+    expect(forcedRule, '強制色で影を残している(二重)').toMatch(/box-shadow:\s*none/);
+  });
+
+  it('🔴 輪郭を持たない型(checkbox / radio / range / file / color)は neon の規則から除き、従来の outline のまま ── 除外は近接発光の入力欄(NEON_FIELDS)と同じ並び', () => {
+    const native = ruleHaving(outsideForced, `input:is(${TYPES}):focus-visible`);
+    expect(native, '除外型の焦点が outline でない(焦点が見えなくなる)').toMatch(/outline:\s*2px solid var\(--accent\)/);
+    expect(native).not.toMatch(/var\(--neon\)/);
+    const types = (src: string, head: string): string[] => {
+      const m = src.match(new RegExp(`${head}\\(([^)]*)\\)`));
+      return [...(m?.[1] ?? '').matchAll(/type=["']([a-z]+)["']/g)].map((x) => x[1]!).sort();
+    };
+    // ⚠ 実際の CSS の原文から読む(テスト側で組み立てた字を読むと、CSS が変わっても緑になる)
+    const actual = css.match(/input:not\([^)]*\):focus-visible/)?.[0] ?? '';
+    const css1 = types(actual, 'input:not');
+    const ts1 = types(NEON_FIELDS.split(', textarea')[0]!, 'input:not').filter((t) => t !== 'hidden');
+    expect(css1.length, '除外型が読めていない(空振り)').toBe(5);
+    expect(css1, 'CSS の除外と NEON_FIELDS の除外が食い違う').toEqual(ts1);
+  });
+
+  it('🔴 textarea / select も neon の規則(3 つが 1 つの選択子リスト)', () => {
+    for (const el of ['textarea:focus-visible', 'select:focus-visible']) expect(ruleHaving(outsideForced, el)).toMatch(/var\(--neon\)/);
+  });
+
+  it('🔴 追記欄の枠は `:focus-within` で neon の線 / 枠の中の打つ欄は線を重ねない(二重にしない)', () => {
+    expect(decls("[data-pkc-field='append-form']:focus-within")).toMatch(/border-color:\s*var\(--neon\)/);
+    expect(decls("[data-pkc-field='append-form']:focus-within")).not.toMatch(/var\(--accent\)/);
+    const inner = decls("[data-pkc-field='append-input'][data-pkc-field]:focus-visible");
+    expect(inner).toMatch(/outline:\s*none/);
+    expect(inner, '打つ欄が自分でも neon の線を引く(枠と二重)').toMatch(/box-shadow:\s*none/);
+    expect(inner).toMatch(/border-color:\s*transparent/);
+  });
+
+  it('🔴 2 ペイン整理の焦点のある側は、同じ neon の枠(内側の影)', () => {
+    const d = decls("[data-pkc-region='dual-pane'][data-pkc-focused]");
+    expect(d).toMatch(/border-color:\s*var\(--neon\)/);
+    expect(d).toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--neon\)/);
+    expect(forced).toContain("[data-pkc-region='dual-pane'][data-pkc-focused]");
+  });
+
+  it('🔴 フォーカスの枠は動きを減らす・指の端末などの問い(`GLOW_QUERY` / `prefers-reduced-motion` / `hover` / `pointer`)で外れない(静止の枠は残る)', () => {
+    expect(ruleHaving(outsideForced, FOCUS_INPUT).length).toBeGreaterThan(0);
+    // フォーカスの規則を包む `@media` は無い(強制色の外では常に効く)
+    const at = css.indexOf(FOCUS_INPUT);
+    expect(at).toBeGreaterThan(0);
+    const before = css.slice(Math.max(0, at - 400), at);
+    expect(before.lastIndexOf('@media'), '直前に開いた @media がある').toBeLessThan(before.lastIndexOf('}'));
+    for (const q of ['prefers-reduced-motion', '(hover', '(pointer']) expect(forced + css.slice(at, at + 300)).not.toContain(q);
+  });
+
+  it('🔴 フォーカスが勝つ: 入力欄の近接は `:not(:focus-visible)` / 包み(追記欄・SQL)の線は `:not(:focus-within)`', () => {
+    expect(css).toMatch(/:is\(input, textarea, select\)\[data-pkc-glow-near\]\[data-pkc-glow-near\]:not\(:focus-visible\)\s*\{/);
+    const at = css.indexOf("[data-pkc-glow-near][data-pkc-glow-near]::before");
+    const list = css.slice(css.lastIndexOf(':is(', at), at);
+    expect(list).toContain("[data-pkc-field='sql-input-wrap']:not(:focus-within)");
+    expect(css).toContain("[data-pkc-field='append-form'][data-pkc-glow-near][data-pkc-glow-near]:not(:focus-within)");
+  });
+
+  it('🔴 新しい対象(コードの枠・図のカード・折りたたみ・追記欄・SQL の包み)は共通の `::before` の線に入る(ログの器・ログの折りたたみは除く)', () => {
+    const at = css.indexOf("[data-pkc-glow-near][data-pkc-glow-near]::before");
+    const list = css.slice(css.lastIndexOf(':is(', at), at);
+    for (const t of [
+      '.pkc-details:not([data-pkc-log-card])',
+      ".pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card])",
+      ".pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card])",
+      "[data-pkc-field='sql-input-wrap']",
+    ])
+      expect(list, `${t} が共通の線に無い`).toContain(t);
+    // 追記欄の枠は疑似要素でなく背景 3 層(`position: relative` を足すと取っ手の押し所を覆う)
+    expect(list).not.toContain('append-form');
+    const form = decls("[data-pkc-field='append-form'][data-pkc-glow-near][data-pkc-glow-near]:not(:focus-within)");
+    expect(form).toMatch(/background-clip:\s*padding-box,\s*border-box,\s*border-box/);
+    expect(decls("[data-pkc-field='append-form']"), '追記欄の枠が位置づけ(取っ手の押し所を覆う)になった').not.toMatch(/position:\s*relative/);
+  });
+
+  it('🔴 横スクロールの表は透明な 2px の枠 + 器自身の背景(内側の地 → 光の放射)。疑似要素にしない・版面は動かさない', () => {
+    const table = ".pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card])";
+    const frame = decls(table);
+    expect(frame).toMatch(/border:\s*2px solid transparent/);
+    expect(frame, '枠のぶん版面が動く(上下)').toMatch(/margin-block:\s*-2px/);
+    expect(frame, '右へはみ出している(読む面が横スクロールする)').not.toMatch(/margin-inline-end:\s*-/);
+    expect(frame).toMatch(/margin-inline-start:\s*-2px/);
+    expect(decls("[data-pkc-prose]:not([data-pkc-writing='vertical']) > " + table.replace(/^/, '')), '読み幅の余白があるとき、その余白から 2px 引く').toMatch(/margin-inline-start:\s*calc\(var\(--prose-indent, 0px\) - 2px\)/);
+    const glowRule = decls(`${table}[data-pkc-glow-near]`);
+    expect(glowRule).toMatch(/background-clip:\s*padding-box,\s*border-box/);
+    expect(glowRule, '内側の地(線形)→ 光(放射)の順').toMatch(/linear-gradient\(var\(--surface\), var\(--surface\)\),\s*radial-gradient/);
+    expect(glowRule).not.toMatch(/::before|::after/);
+  });
+
+  it('🔴 引用は左の線だけ光る(幅 3px の疑似要素。他の辺には出ない)', () => {
+    const d = decls("blockquote:not(.pkc-section-callout)[data-pkc-glow-near][data-pkc-glow-near]::before");
+    expect(d).toMatch(/width:\s*3px/);
+    expect(d).toMatch(/inset-inline-start:\s*-3px/);
+    expect(d).toMatch(/pointer-events:\s*none/);
+  });
+
+  it('🔴 図のカード: 図 + ラベル + 保存ボタンが 1 つの角丸ヘアライン(--surface / --radius-lg / --hairline)。保存ボタンはカードの上の帯へ', () => {
+    const card = ".pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card])";
+    const d = decls(card);
+    expect(d).toMatch(/border:\s*1px solid var\(--hairline\)/);
+    expect(d).toMatch(/border-radius:\s*var\(--radius-lg\)/);
+    expect(d).toMatch(/background:\s*var\(--surface\)/);
+    expect(d, '幅を図に合わせて縮めている(図の焼き幅が親の幅を読むので循環する)').not.toMatch(/fit-content|max-content/);
+    expect(decls(`${card} [data-pkc-mermaid-src]`), '保存ボタンがカードでなく図の器に付いたまま').toMatch(/position:\s*static/);
+    expect(decls(`${card} [data-pkc-field='diagram-save']`)).toMatch(/left:\s*var\(--s3\)/);
+  });
+
+  it('🔴 印刷・強制色には光の規則も、カード・透明な枠の規則も出ない(画面だけ)', () => {
+    // カード・枠の規則は @media screen の中だけ
+    const screenOnly = [".pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table']", 'padding: 28px'];
+    const outside = withoutMedia(css);
+    for (const t of screenOnly) expect(outside, `${t} が画面の外(印刷)にもある`).not.toContain(t);
+    expect(withoutMedia(css), '画面の外にも光の規則がある').not.toContain('[data-pkc-glow-near]');
+    expect(outside).not.toContain('border: 2px solid transparent');
   });
 });
