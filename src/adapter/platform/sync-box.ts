@@ -26,6 +26,20 @@ export interface BoxEntry {
   readonly version?: string;
 }
 
+/** 書くファイルの端末 id と連番(暗号化の層がヘッダに入れる。⚠ 平文の保管先は使わない)。 */
+export interface WriteMeta {
+  readonly device: string;
+  readonly seq: number;
+}
+
+/** 読んだファイルが暗号化されていたときの、認証済みのヘッダの一部(連番の巻き戻しを見る)。 */
+export interface ReadMeta {
+  readonly device: string;
+  readonly seq: number;
+  /** 認証済みの中身の識別子(同じ連番の「同じファイルか」を見る)。 */
+  readonly contentId: string;
+}
+
 /** 同期の保管先。 */
 export interface RemoteBox {
   /** 画面に出す名前(フォルダ名 / バケット名)。⚠ 段 4a-4 の設定画面で使う(4a-1 では読む所が無い)。 */
@@ -43,7 +57,12 @@ export interface RemoteBox {
    * ⚠ 戻り値の `mtime` は、版の印(`version`)を返す保管先では比べに使わない(`sameFileVersion` は版を先に見る)── S3 は
    *   書いた後の日時を取り直さなくてよい(取れなければ 0)。
    */
-  write(name: string, blob: Blob, expect?: BoxEntry | null): Promise<BoxEntry>;
+  write(name: string, blob: Blob, expect?: BoxEntry | null, meta?: WriteMeta): Promise<BoxEntry>;
+  /**
+   * 読む(+ 暗号化したファイルなら認証済みのヘッダ)。暗号化の層(`EncryptedBox`)だけが持つ ── 無ければ `read` を使う。
+   * `meta` が `null` = 平文のファイル。
+   */
+  readWithMeta?(name: string): Promise<{ blob: Blob; meta: ReadMeta | null }>;
   remove(name: string): Promise<void>;
 }
 

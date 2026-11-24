@@ -19,7 +19,7 @@
  */
 import { EMPTY_SHA256, signV4, uriEncode, type SigCrypto } from '@features/sync/sigv4';
 import type { S3BoxConfig, S3BoxSecret } from './sync-keystore';
-import type { BoxEntry, RemoteBox } from './sync-box';
+import type { BoxEntry, RemoteBox, WriteMeta } from './sync-box';
 
 /** 条件付き書き込みで、相手が先に書き換えていた(412)。⚠ 書いていない。 */
 export class BoxConflictError extends Error {
@@ -84,6 +84,13 @@ export function parseListObjects(xml: string): { items: { key: string; size: num
   // ⚠ 続きが在ると言うのにトークンが無い応答は、途中までの一覧を全部と読まない(取りこぼしを黙って通さない)
   if (truncated && (next === null || next === '')) throw new Error('一覧を読む: 保管先の一覧の続きが読めません');
   return { items, next };
+}
+
+/** 名前から Content-Type を決める(暗号化の束 `keyring.json` は JSON、暗号化した差分は不透明なバイト列、平文の差分は zip)。 */
+export function contentTypeOf(name: string): string {
+  if (name.endsWith('.json')) return 'application/json';
+  if (name.endsWith('.enc')) return 'application/octet-stream';
+  return 'application/zip';
 }
 
 export class S3Box implements RemoteBox {
@@ -182,13 +189,14 @@ export class S3Box implements RemoteBox {
     return res.blob();
   }
 
-  async write(name: string, blob: Blob, expect?: BoxEntry | null): Promise<BoxEntry> {
+  async write(name: string, blob: Blob, expect?: BoxEntry | null, _meta?: WriteMeta): Promise<BoxEntry> {
+    void _meta; // 連番・端末は暗号化の層(`EncryptedBox`)が使う。ここは名前で中身の種類を決めるだけ
     const body = new Uint8Array(await blob.arrayBuffer());
     // 🔴 条件付き書き込み ── 前に書いた版が在ればその版のときだけ、無ければ無いときだけ書く(412 なら上書きしない)
     const cond: Record<string, string> =
       expect?.version !== undefined && expect.version !== '' ? { 'if-match': expect.version } : { 'if-none-match': '*' };
     const res = await this.send('自分のファイルを書く', 'PUT', this.path(name), {
-      headers: { ...cond, 'content-type': 'application/zip' },
+      headers: { ...cond, 'content-type': contentTypeOf(name) },
       body,
     });
     if (!res.ok) await this.fail('自分のファイルを書く', res);

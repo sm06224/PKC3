@@ -28,6 +28,7 @@ import { remoteUnavailableReason } from '../../src/adapter/platform/sync-remote'
 import { S3Box, webSigCrypto } from '../../src/adapter/platform/s3-box';
 import { SyncKeystore, type KeystoreBackend } from '../../src/adapter/platform/sync-keystore';
 import { folderFileName } from '../../src/features/sync/sync-folder';
+import { memKeystoreBackend } from '../helpers/mem-keystore-backend';
 import { fakeS3, type FakeS3 } from '../helpers/fake-s3';
 import { spawnDevice, type SyncDevice } from '../helpers/sync-device';
 
@@ -58,19 +59,7 @@ class MemStore implements SyncFolderStore {
   }
 }
 
-function memBackend(): KeystoreBackend {
-  let key: CryptoKey | null = null;
-  const boxes = new Map<string, unknown>();
-  return {
-    getKey: async () => key,
-    putKey: async (k) => void (key = k),
-    deleteKey: async () => void (key = null),
-    getBox: async (cid) => (boxes.get(cid) as never) ?? null,
-    putBox: async (cid, v) => void boxes.set(cid, structuredClone(v)),
-    deleteBox: async (cid) => void boxes.delete(cid),
-    countBoxes: async () => boxes.size,
-  };
-}
+const memBackend = memKeystoreBackend;
 
 /** 端末ごとの保管先の口(鍵の保管は本物の SyncKeystore + メモリの置き場、保管先は本物の S3Box + 作り物の S3)。 */
 function remoteDeps(s3: FakeS3, opts: { unavailable?: string | null; backend?: KeystoreBackend } = {}): SyncRemoteDeps & { ks: SyncKeystore } {

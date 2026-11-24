@@ -27,6 +27,11 @@ export interface S3BoxConfig {
   readonly region: string;
   /** バケットの中の置き場(`pkc3/` など)。空ならバケットの直下。 */
   readonly prefix: string;
+  /**
+   * 🔴 端末間の同期の暗号化(#2000 段 4b)を使うか。**S3 互換は既定オン**(`undefined` = オン)/ 同期フォルダは既定オフ(`SyncFolderSaved.encrypt`)。
+   * 秘密ではない(平文で置いてよい)。⚠ 暗号化キー(パスフレーズ・回復キー・データ鍵)はここに入れない。
+   */
+  readonly encrypt?: boolean;
 }
 
 /** 秘密(暗号化して置く)。 */
@@ -56,6 +61,16 @@ export interface KeystoreBackend {
   putBox(cid: string, v: SavedBox): Promise<void>;
   deleteBox(cid: string): Promise<void>;
   countBoxes(): Promise<number>;
+  /** 🔴 開いた暗号化キー(データ鍵。取り出せない CryptoKey)を接続ごとに(段 4b)。 */
+  getDataKey(cid: string): Promise<SavedDataKey | null>;
+  putDataKey(cid: string, v: SavedDataKey): Promise<void>;
+  deleteDataKey(cid: string): Promise<void>;
+}
+
+/** 置き場の暗号化キー。⚠ `key` は `extractable: false`(生の bytes はどこにも出ない)。 */
+export interface SavedDataKey {
+  readonly keyId: string;
+  readonly key: CryptoKey;
 }
 
 /** 鍵の保管の DB 名。⚠ この名前は**この file にしか書かない**(書き出しの経路がこの DB を読まないことを、名前の所在で固定する)。 */
@@ -195,9 +210,31 @@ export class SyncKeystore {
     }
   }
 
-  /** 🔴 接続を外す(片道にしない)── 接続情報と秘密を消す。全部の接続が無くなったら暗号の鍵も消す。 */
+  /**
+   * 🔴 **開いた暗号化キーをこの端末に置く**(段 4b・user 裁定 A「既定」)── 取り出せない鍵のまま置く(自動で同期できる)。
+   * 置かない(B「任意」)なら呼ばない ── 起動のたびにパスフレーズで開き直し、鍵はメモリにだけ置く。
+   * @throws 取り出せる鍵(`extractable: true`)は置かない
+   */
+  saveDataKey(cid: string, v: SavedDataKey): Promise<void> {
+    if (v.key.extractable) return Promise.reject(new Error('取り出せる暗号化キーは保存しません'));
+    return this.serial(() => this.backend.putDataKey(cid, { keyId: v.keyId, key: v.key }));
+  }
+
+  /** 置いた暗号化キー(無ければ `null`)。 */
+  async openDataKey(cid: string): Promise<SavedDataKey | null> {
+    const v = await this.backend.getDataKey(cid);
+    return v === null || v.key.extractable ? null : v;
+  }
+
+  /** 暗号化キーだけを消す(再び入力するまで同期は待つ)。 */
+  removeDataKey(cid: string): Promise<void> {
+    return this.serial(() => this.backend.deleteDataKey(cid));
+  }
+
+  /** 🔴 接続を外す(片道にしない)── 接続情報と秘密と暗号化キーを消す。全部の接続が無くなったら暗号の鍵も消す。 */
   remove(cid: string): Promise<void> {
     return this.serial(async () => {
+      await this.backend.deleteDataKey(cid);
       await this.backend.deleteBox(cid);
       if ((await this.backend.countBoxes()) === 0) await this.backend.deleteKey();
     });
@@ -212,6 +249,7 @@ export function idbKeystoreBackend(dbName = SYNC_KEYS_DB): KeystoreBackend {
   const KEYS = 'keys';
   const BOXES = 'boxes';
   const DEVICE_KEY = 'device';
+  const DATA_KEY_PREFIX = 'data:';
   const openAt = (version?: number): Promise<IDBDatabase> =>
     new Promise((resolve, reject) => {
       const req = version === undefined ? indexedDB.open(dbName) : indexedDB.open(dbName, version);
@@ -264,5 +302,9 @@ export function idbKeystoreBackend(dbName = SYNC_KEYS_DB): KeystoreBackend {
     putBox: async (cid, v) => void (await tx(BOXES, 'readwrite', (s) => s.put(v, cid))),
     deleteBox: async (cid) => void (await tx(BOXES, 'readwrite', (s) => s.delete(cid))),
     countBoxes: async () => await tx(BOXES, 'readonly', (s) => s.count()),
+    // 暗号化キーは鍵の棚(KEYS)に `data:<cid>` で置く(棚を増やさない ── 既存の棚の作り直しの手順がそのまま効く)
+    getDataKey: async (cid) => ((await tx(KEYS, 'readonly', (s) => s.get(`${DATA_KEY_PREFIX}${cid}`))) as SavedDataKey | undefined) ?? null,
+    putDataKey: async (cid, v) => void (await tx(KEYS, 'readwrite', (s) => s.put(v, `${DATA_KEY_PREFIX}${cid}`))),
+    deleteDataKey: async (cid) => void (await tx(KEYS, 'readwrite', (s) => s.delete(`${DATA_KEY_PREFIX}${cid}`))),
   };
 }
