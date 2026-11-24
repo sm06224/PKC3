@@ -76,6 +76,8 @@ export interface SeenFile {
  */
 export interface PeerSeq {
   seq: number;
+  /** 認証済みの中身の識別子(`decryptDiff` の `contentId`)。在れば、同じ連番の「同じファイルか」はこれだけで見る(更新日時・版は見ない)。 */
+  contentId?: string;
   size: number;
   mtime: number;
   version?: string;
@@ -123,7 +125,13 @@ export function normalizeFolderRecord(v: unknown): FolderSyncRecord {
       if (!isDeviceId(dev) || typeof s !== 'object' || s === null) continue;
       const r = s as Record<string, unknown>;
       if (typeof r.seq !== 'number' || !Number.isSafeInteger(r.seq) || r.seq < 0 || typeof r.size !== 'number' || typeof r.mtime !== 'number') continue;
-      out.peerSeq[dev] = { seq: r.seq, size: r.size, mtime: r.mtime, ...(typeof r.version === 'string' ? { version: r.version } : {}) };
+      out.peerSeq[dev] = {
+        seq: r.seq,
+        size: r.size,
+        mtime: r.mtime,
+        ...(typeof r.version === 'string' ? { version: r.version } : {}),
+        ...(typeof r.contentId === 'string' ? { contentId: r.contentId } : {}),
+      };
     }
   }
   return out;
@@ -137,19 +145,55 @@ export type PeerSeqVerdict = 'ok' | 'rollback' | 'replaced';
  * (古い暗号文の差し戻し)。**同じ連番で中身(版・大きさ・更新日時)が違う**ファイルも断る(差し替え)。
  * 記録が無い相手(初めて)は通す。
  */
-export function checkPeerSeq(rec: FolderSyncRecord, device: string, seq: number, file: { size: number; mtime: number; version?: string }): PeerSeqVerdict {
+export function checkPeerSeq(
+  rec: FolderSyncRecord,
+  device: string,
+  seq: number,
+  file: { size: number; mtime: number; version?: string },
+  contentId?: string,
+): PeerSeqVerdict {
   const prev = rec.peerSeq[device];
   if (prev === undefined) return 'ok';
   if (seq < prev.seq) return 'rollback';
-  if (seq === prev.seq && !sameFileVersion(prev, file)) return 'replaced';
+  if (seq === prev.seq) {
+    // 🔴 同じ連番の「同じファイルか」は、認証済みの中身の識別子で見る(クラウドドライブが更新日時だけ変えても、版だけ変わっても誤って断らない)
+    const same = prev.contentId !== undefined && contentId !== undefined ? prev.contentId === contentId : sameFileVersion(prev, file);
+    if (!same) return 'replaced';
+  }
   return 'ok';
 }
 
 /** 取り込めた相手の連番を記録する(下げない)。 */
-export function notePeerSeq(rec: FolderSyncRecord, device: string, seq: number, file: { size: number; mtime: number; version?: string }): void {
+export function notePeerSeq(rec: FolderSyncRecord, device: string, seq: number, file: { size: number; mtime: number; version?: string }, contentId?: string): void {
   const prev = rec.peerSeq[device];
   if (prev !== undefined && prev.seq > seq) return;
-  rec.peerSeq[device] = { seq, size: file.size, mtime: file.mtime, ...(file.version === undefined ? {} : { version: file.version }) };
+  rec.peerSeq[device] = {
+    seq,
+    size: file.size,
+    mtime: file.mtime,
+    ...(file.version === undefined ? {} : { version: file.version }),
+    ...(contentId === undefined ? {} : { contentId }),
+  };
+}
+
+/**
+ * 🔴 **相手の連番の記録を忘れる**(「この端末を受け入れ直す」── 相手が古いバックアップから戻したときの救済。画面は段 4b-B)。
+ * 忘れた相手のファイルは、次の回に(連番の比べ無しで)読み直す(控え `seen` も外す)。他の相手の記録は動かさない。
+ * @returns 記録を変えたか
+ */
+export function forgetPeerSeq(rec: FolderSyncRecord, device: string): boolean {
+  let changed = false;
+  if (rec.peerSeq[device] !== undefined) {
+    delete rec.peerSeq[device];
+    changed = true;
+  }
+  for (const name of Object.keys(rec.seen)) {
+    if (deviceOfFileName(name) === device) {
+      delete rec.seen[name];
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 export interface FolderRound {
@@ -222,6 +266,11 @@ export interface RoundFiles {
   files: FolderFile[];
   /** 自分の端末の、**もう片方の形**のファイルの名前(暗号化へ切り替えた後に消す平文 / 平文へ戻した後に消す暗号化)。無ければ `null`。 */
   ownCounterpart: string | null;
+  /**
+   * 🔴 暗号化している間は、**平文の差分ファイルを取り込まない**(置き場に書ける者が平文を差し込めないように)。
+   * 平文しか無い他の端末のファイルはここに入る(自分の平文は読まず、書き直したあとで消す) ── 回は控え(`seen`)だけ更新し、案内を出す。
+   */
+  skippedPlain: FolderFile[];
   /** 自分は暗号化している ── 平文しか置いていない他の端末(その端末でも暗号化をオンにしてもらう)。 */
   peersNeedEnc: string[];
   /** 自分は暗号化していない ── 暗号化したファイルを置いている他の端末(読めない。この端末でも暗号化をオンにしてもらう)。 */
@@ -230,7 +279,7 @@ export interface RoundFiles {
 
 /**
  * 🔴 **端末ごとに見るファイルを 1 つ選ぶ**(平文 / 暗号化の両方が在る端末の取り違えを 1 か所で決める)。
- * - 暗号化している(`encOn`): 暗号化したファイルを優先。無ければ平文(まだ切り替えていない相手 ── 読んだうえで案内を出す)
+ * - 暗号化している(`encOn`): **暗号化したファイルだけ**を取り込む。平文しか無い相手は取り込まない(`skippedPlain` + 案内)
  * - 暗号化していない: 平文だけを見る。暗号化したファイルしか無い相手は**読めない**(案内を出す)
  */
 export function chooseRoundFiles(entries: readonly FolderFile[], self: string, encOn: boolean): RoundFiles {
@@ -243,11 +292,12 @@ export function chooseRoundFiles(entries: readonly FolderFile[], self: string, e
     else g.plain = f;
     byDev.set(dev, g);
   }
-  const out: RoundFiles = { files: [], ownCounterpart: null, peersNeedEnc: [], peersEncOnly: [] };
+  const out: RoundFiles = { files: [], skippedPlain: [], ownCounterpart: null, peersNeedEnc: [], peersEncOnly: [] };
   for (const dev of [...byDev.keys()].sort()) {
     const g = byDev.get(dev)!;
-    const use = encOn ? (g.enc ?? g.plain) : g.plain;
+    const use = encOn ? g.enc : g.plain;
     if (use !== undefined) out.files.push(use);
+    if (encOn && g.enc === undefined && g.plain !== undefined && dev !== self) out.skippedPlain.push(g.plain);
     if (dev === self) {
       out.ownCounterpart = (encOn ? g.plain : g.enc)?.name ?? null;
     } else if (encOn && g.enc === undefined && g.plain !== undefined) out.peersNeedEnc.push(dev);

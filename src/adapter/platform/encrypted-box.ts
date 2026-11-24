@@ -65,13 +65,13 @@ export class EncryptedBox implements RemoteBox {
     const raw = await this.o.inner.read(name);
     if (!isEncFileName(name)) return { blob: raw, meta: null };
     const key = this.needKey();
-    const { plain, header } = await decryptDiff(this.o.crypto, raw, {
+    const { plain, header, contentId } = await decryptDiff(this.o.crypto, raw, {
       dataKey: key.dataKey,
       keyId: key.keyId,
       expectName: name,
       expectDevice: deviceOfFileName(name) as string,
     });
-    return { blob: plain, meta: { device: header.device, seq: header.seq } };
+    return { blob: plain, meta: { device: header.device, seq: header.seq, contentId } };
   }
 
   async read(name: string): Promise<Blob> {
@@ -94,6 +94,8 @@ export class EncryptedBox implements RemoteBox {
     const entries = await this.o.inner.list((n) => n === KEYRING_NAME);
     const e = entries.find((x) => x.name === KEYRING_NAME);
     if (e === undefined) return null;
+    // 🔴 読む前に大きさで断る(大きなファイルを束として読み込まない)
+    if (e.size > MAX_KEYRING_BYTES) throw new KeyringFormatError('暗号化キーの束(keyring.json)を読めません: 大きすぎます');
     let blob: Blob;
     try {
       blob = await this.o.inner.read(KEYRING_NAME);
@@ -128,14 +130,17 @@ export class EncryptedBox implements RemoteBox {
   }
 
   /**
-   * パスフレーズの変更・付け直し = 包み直した束で**置き換える**(同じ `keyId` だけ)。S3 は `If-Match: <読んだときの ETag>`。
-   * ⚠ 別の端末が先に変えていたら(412)**上書きせず** `KeyringConflictError`。別の `keyId` の束は置き換えない。
+   * パスフレーズの変更・付け直し = 包み直した束で**置き換える**(同じ `keyId` だけ)。
+   * @param baseVersion 🔴 `next` を作るもとにした束を**読んだときの版**(`loadKeyring` の `version`)。S3 は `If-Match: <baseVersion>` で書く
+   *   ── 読んでから包み直す間に別の端末が変えていたら(412)**上書きせず** `KeyringConflictError`。
+   *   ⚠ 書く直前に読み直した版を使わない(その版は `next` のもとではない)。フォルダは版が無い(`undefined`)ので条件なし。
    */
-  async rewrapKeyring(next: Keyring): Promise<{ keyring: Keyring; version?: string }> {
+  async rewrapKeyring(next: Keyring, baseVersion: string | undefined): Promise<{ keyring: Keyring; version?: string }> {
     const cur = await this.loadKeyring();
     if (cur === null) throw new E2EError('format', '置き場に暗号化キーの束がありません');
     if (cur.keyring.keyId !== next.keyId) throw new KeyringConflictError('置き場の暗号化キーの束は別の暗号化キーです(置き換えません)');
-    const expect: BoxEntry | null = cur.version === undefined ? null : { name: KEYRING_NAME, size: 0, mtime: 0, version: cur.version };
+    if (baseVersion !== undefined && cur.version !== baseVersion) throw new KeyringConflictError();
+    const expect: BoxEntry | null = baseVersion === undefined ? null : { name: KEYRING_NAME, size: 0, mtime: 0, version: baseVersion };
     try {
       const after = await this.o.inner.write(KEYRING_NAME, new Blob([serializeKeyring(next)], { type: 'application/json' }), expect);
       return { keyring: next, ...(after.version === undefined ? {} : { version: after.version }) };

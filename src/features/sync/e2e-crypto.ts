@@ -166,7 +166,7 @@ export interface DecryptOptions {
 }
 
 /** 復号する。どこか 1 つでも合わなければ `E2EError`(部分的な平文は返さない)。 */
-export async function decryptDiff(c: E2ECrypto, blob: Blob, o: DecryptOptions): Promise<{ plain: Blob; header: EncHeader }> {
+export async function decryptDiff(c: E2ECrypto, blob: Blob, o: DecryptOptions): Promise<{ plain: Blob; header: EncHeader; contentId: string }> {
   const { header, prefix } = await readEncHeader(blob);
   if (header.keyId !== o.keyId) throw new E2EError('key-mismatch', '別の暗号化キーで書かれたファイルです(この端末の暗号化キーでは開けません)');
   if (header.name !== o.expectName) throw new E2EError('mismatch', 'ファイル名がヘッダと違います(改名・差し替えの可能性があります)');
@@ -175,6 +175,9 @@ export async function decryptDiff(c: E2ECrypto, blob: Blob, o: DecryptOptions): 
   const nonce = b64urlDecode(header.nonce) as Uint8Array<ArrayBuffer>;
   const n = chunkCount(header.size);
   const out: BlobPart[] = [];
+  // 🔴 中身の識別子 = sha256(ヘッダ原文 ‖ 各塊の GCM タグ)。タグは塊の中身に結び付く(認証済み)ので、同じ連番で中身が違えば必ず違う。
+  //   全体を 2 つ持たずに(塊ごとに 16 bytes だけ控える)、保管先の版(ETag・更新日時)に依らず「同じファイルか」を見分ける
+  const tags: Uint8Array[] = [prefix];
   for (let i = 0; i < n; i += 1) {
     const last = i === n - 1;
     const start = prefix.length + i * (E2E_CHUNK + GCM_TAG_BYTES);
@@ -182,11 +185,13 @@ export async function decryptDiff(c: E2ECrypto, blob: Blob, o: DecryptOptions): 
     const buf = await blob.slice(start, end).arrayBuffer();
     try {
       out.push(await c.subtle.decrypt({ name: 'AES-GCM', iv: ivOf(nonce, i), additionalData: aadOf(prefix, i, last), tagLength: 128 }, o.dataKey, buf));
+      tags.push(new Uint8Array(buf.slice(buf.byteLength - GCM_TAG_BYTES)));
     } catch {
       throw new E2EError('auth', '暗号化したファイルが改ざんされているか、読めない状態です(開けません)');
     }
   }
-  return { plain: new Blob(out), header };
+  const contentId = b64urlEncode(new Uint8Array(await c.subtle.digest('SHA-256', concat(...tags))));
+  return { plain: new Blob(out), header, contentId };
 }
 
 // ───────────── 回復キー ─────────────
@@ -299,12 +304,21 @@ export async function createKeyMaterial(c: E2ECrypto, passphrase: string): Promi
   const salt = c.random(SALT_BYTES);
   const recovery = c.random(RECOVERY_BYTES);
   const raw = c.random(32);
-  const wrappedPassphrase = await wrapRaw(c, await derivePassphraseKek(c, passphrase, salt, PBKDF2_ITERATIONS), raw, keyId);
-  const wrappedRecovery = await wrapRaw(c, await deriveRecoveryKek(c, recovery, keyIdBytes), raw, keyId);
-  const dataKey = await importDataKey(c, raw);
-  const recoveryKey = formatRecoveryKey(recovery);
-  recovery.fill(0);
-  return { keyring: buildKeyring({ keyId: keyIdBytes, iterations: PBKDF2_ITERATIONS, salt, wrappedPassphrase, wrappedRecovery }), recoveryKey, dataKey };
+  let imported = false;
+  try {
+    const wrappedPassphrase = await wrapRaw(c, await derivePassphraseKek(c, passphrase, salt, PBKDF2_ITERATIONS), raw, keyId);
+    const wrappedRecovery = await wrapRaw(c, await deriveRecoveryKek(c, recovery, keyIdBytes), raw, keyId);
+    imported = true;
+    const dataKey = await importDataKey(c, raw); // raw はここで潰れる
+    return {
+      keyring: buildKeyring({ keyId: keyIdBytes, iterations: PBKDF2_ITERATIONS, salt, wrappedPassphrase, wrappedRecovery }),
+      recoveryKey: formatRecoveryKey(recovery),
+      dataKey,
+    };
+  } finally {
+    if (!imported) raw.fill(0);
+    recovery.fill(0);
+  }
 }
 
 async function unwrapWith(c: E2ECrypto, k: Keyring, via: { passphrase: string } | { recoveryKey: string }): Promise<Uint8Array<ArrayBuffer>> {
@@ -314,9 +328,12 @@ async function unwrapWith(c: E2ECrypto, k: Keyring, via: { passphrase: string } 
   }
   const r = parseRecoveryKey(via.recoveryKey);
   if (r === null) throw new E2EError('bad-recovery', '回復キーの字を読めません(32 文字・英数字。ハイフンは入れても省いても構いません)');
-  const kek = await deriveRecoveryKek(c, r, b64urlDecode(k.keyId) as Uint8Array<ArrayBuffer>);
-  r.fill(0);
-  return unwrapRaw(c, kek, k.wrapped.recovery, k.keyId);
+  try {
+    const kek = await deriveRecoveryKek(c, r, b64urlDecode(k.keyId) as Uint8Array<ArrayBuffer>);
+    return await unwrapRaw(c, kek, k.wrapped.recovery, k.keyId);
+  } finally {
+    r.fill(0);
+  }
 }
 
 /** パスフレーズまたは回復キーで暗号化キーを開く(違えば `wrong-secret`)。 */
@@ -332,8 +349,10 @@ export async function rewrapKeyring(c: E2ECrypto, k: Keyring, via: { passphrase:
   const raw = await unwrapWith(c, k, via);
   try {
     const salt = c.random(SALT_BYTES);
-    const wrappedPassphrase = await wrapRaw(c, await derivePassphraseKek(c, newPassphrase, salt, PBKDF2_ITERATIONS), raw, k.keyId);
-    return buildKeyring({ keyId: b64urlDecode(k.keyId) as Uint8Array, iterations: PBKDF2_ITERATIONS, salt, wrappedPassphrase, wrappedRecovery: k.wrapped.recovery });
+    // 回数は下げない(既に上げてあれば、その回数のまま)
+    const iterations = Math.max(k.kdf.iterations, PBKDF2_ITERATIONS);
+    const wrappedPassphrase = await wrapRaw(c, await derivePassphraseKek(c, newPassphrase, salt, iterations), raw, k.keyId);
+    return buildKeyring({ keyId: b64urlDecode(k.keyId) as Uint8Array, iterations, salt, wrappedPassphrase, wrappedRecovery: k.wrapped.recovery });
   } finally {
     raw.fill(0);
   }

@@ -20,7 +20,7 @@ export const KEYRING_VERSION = 1;
 export const PBKDF2_ITERATIONS = 600_000;
 export const PBKDF2_MIN_ITERATIONS = 600_000;
 /** 読む側の上限(悪意のある keyring で端末を固めない)。 */
-export const PBKDF2_MAX_ITERATIONS = 50_000_000;
+export const PBKDF2_MAX_ITERATIONS = 10_000_000;
 export const KEY_ID_BYTES = 16;
 export const SALT_BYTES = 16;
 /** 包んだデータ鍵 = IV(12) + 鍵(32) + タグ(16)。 */
