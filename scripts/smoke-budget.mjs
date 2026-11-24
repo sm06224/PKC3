@@ -161,7 +161,10 @@ import { join } from 'node:path';
  * - 2026-11-23(#1442 段① レビュー): **624**(そのときの実数 624)。`builtin-apps.smoke.spec.ts` の別ウィンドウの 1 本に、写した `#pkc?view=` のタブを開く確認で起動 1 つ足した。
  *   ⚠ 既存の道中には載せられない ── 見る相手は「PKC が開いた窓ではない」まっさらなタブ(`w=` の合図と sessionStorage の印が無い)で、開いた窓の続きでは作れない。
  */
-export const BOOT_BUDGET = 630;
+export const BOOT_BUDGET = 632;
+// 2026-11-24(Stage 2 PR-2): **632**(実数 632。PR-1 の 630 の上に 2 本)。`neon-glow.smoke.spec.ts` に 2 本足した(起動 2 つ。本文のブロック・入力欄の縁の画素 / キーボードのフォーカスの静止線)。
+//   ⚠ 既存の道中には載せられない ── 見る相手は、コード・表・図・引用・折りたたみを持つ「通常のノート」と実マウスの近接で光る縁の画素(ログの道中は別の画面・別のノート種)、
+//   および Tab で入るフォーカスの線・動きを減らす設定・スマホ幅・2 ペイン整理で、まっさらな起動から作る。
 // 2026-11-24(Stage 2 PR-1): **630**(実数 630)。`neon-perf.smoke.spec.ts`(起動 1 つ)・`visual-audit.smoke.spec.ts`(起動 2 つ。S3 の回復キーは作り物の S3 と別 context が要る)を新設。
 //   ⚠ 既存の道中には載せられない ── 見る相手は 1440×900・DPR 2 の実マウスの 600 コマと、明 / 暗の撮影で、まっさらな起動から作る(S3 は `pkc3.sync` を入れた別の context)。
 // 2026-11-22(A3 レビュー): **608**(実数 608)。`tooltip.smoke.spec.ts` に 1 本足した(起動 1 つ)。⚠ 既存の道中には載せられない ── `showModal()` で top layer に載せた
@@ -200,7 +203,7 @@ export const BOOT_BUDGET = 630;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 315;
+export const BOOT_FLOOR = 316;
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {

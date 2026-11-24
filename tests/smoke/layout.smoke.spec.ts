@@ -2109,14 +2109,23 @@ test('🔴 本文に読み幅の上限が効き、表と図は対象外である
    *   本当に守りたいのは「**読み幅の cap が図に掛かっていない**」ことなので、
    *   期待値を幾何で書く。
    */
-  const parentWidth = await page.evaluate(() => {
+  const parent = await page.evaluate(() => {
     const h = document.querySelector('[data-pkc-mermaid-src]');
-    return h?.parentElement?.clientWidth ?? -1;
+    // 図は 1 枚のカード(`.pkc-md-block`。Stage 2 PR-2)に収まる ── 親(`.pkc-render-slot`)の幅は、カードの内側の余白と枠のぶん狭い
+    const card = h?.closest('.pkc-md-block');
+    let chrome = 0;
+    if (card) {
+      const c = getComputedStyle(card);
+      chrome = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'].reduce((a, k) => a + parseFloat(c[k as 'paddingLeft']), 0);
+    }
+    return { w: h?.parentElement?.clientWidth ?? -1, chrome };
   });
+  const parentWidth = parent.w;
   const indent = Math.max(0, (m.body - m.p) / 2);
+  expect(parent.chrome, '図のカードの内側の余白と枠が測れない(前提が崩れている)').toBeGreaterThan(0);
   expect(
-    Math.abs(parentWidth - (m.body - indent)),
-    `図の親の幅が幾何と合わない(実測 ${parentWidth} / 期待 ${m.body - indent} = 器 ${m.body} − 余白 ${indent})`,
+    Math.abs(parentWidth - (m.body - indent - parent.chrome)),
+    `図の親の幅が幾何と合わない(実測 ${parentWidth} / 期待 ${m.body - indent - parent.chrome} = 器 ${m.body} − 余白 ${indent} − カードの余白と枠 ${parent.chrome})`,
   ).toBeLessThanOrEqual(2);
   expect(
     parentWidth,

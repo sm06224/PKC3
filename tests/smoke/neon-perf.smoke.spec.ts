@@ -80,7 +80,7 @@ test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
 });
 
-const FRAMES_PER_SCENE = 300; // 2 シーン × 300 = 600 コマ
+const FRAMES_PER_SCENE = 200; // 3 シーン × 200 = 600 コマ(ログ / 本文のブロック / 入力欄とブロックの縁)
 
 const LOG = Array.from({ length: 12 }, (_, i) => [
   `## 2026-10-${String(1 + Math.floor(i / 4)).padStart(2, '0')} ${String(8 + (i % 4) * 2).padStart(2, '0')}:00:00`,
@@ -94,6 +94,7 @@ const NOTE = [
   '```ts\nconst answer = 42;\nfunction f(x: number): number {\n  return x * answer;\n}\n```',
   '```mermaid\ngraph TD\n  A["始め"]-->B["終わり"]\n```',
   '> 引用の段落です。',
+  ':::details{summary="折りたたみの見出し" open}\n折りたたみの中身\n:::',
 ].join('\n\n');
 
 async function commitNew(page: Page, archetype: string, title: string, body: string): Promise<void> {
@@ -102,6 +103,42 @@ async function commitNew(page: Page, archetype: string, title: string, body: str
   await page.fill('[data-pkc-field="editor-body"]', body);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
+}
+
+/** 🔴 入力欄とブロックの縁(Stage 2 PR-2): 検索欄 → 本文のコード・表・図・引用・折りたたみの縁 → 追記欄 → 右のペインの欄 を n 点で結ぶ(縁の近くを通る)。 */
+async function routeFields(page: Page, n: number): Promise<{ x: number; y: number }[]> {
+  const way = await page.evaluate(() => {
+    const pts: { x: number; y: number }[] = [];
+    const edge = (sel: string, fx: number): void => {
+      const e = document.querySelector(sel);
+      if (e === null) return;
+      const r = e.getBoundingClientRect();
+      if (r.width === 0) return;
+      pts.push({ x: r.x + Math.min(r.width * fx, r.width - 4), y: r.y + r.height / 2 });
+    };
+    edge('[data-pkc-field="entry-filter"]', 0.3);
+    edge('[data-pkc-field="entry-sort"]', 0.3);
+    edge('.pkc-md-block[data-pkc-md-block-kind="table"]', 0.02);
+    edge('.pkc-md-block[data-pkc-md-block-kind="code"]:not([data-pkc-render-lang])', 0.02);
+    edge('.pkc-md-block[data-pkc-render-lang="mermaid"]', 0.03);
+    edge('blockquote', 0.01);
+    edge('.pkc-details', 0.02);
+    edge('[data-pkc-field="append-form"]', 0.1);
+    edge('[data-pkc-region="inspector"] input', 0.5);
+    edge('[data-pkc-region="inspector"] select', 0.5);
+    edge('.pkc-md-block[data-pkc-md-block-kind="table"]', 0.9);
+    return pts;
+  });
+  if (way.length < 2) throw new Error(`入力欄とブロックの縁の道筋が取れない(${way.length} 点)`);
+  const out: { x: number; y: number }[] = [];
+  const seg = way.length - 1;
+  for (let i = 0; i < n; i += 1) {
+    const t = (i / (n - 1)) * seg;
+    const k = Math.min(seg - 1, Math.floor(t));
+    const f = t - k;
+    out.push({ x: way[k]!.x + (way[k + 1]!.x - way[k]!.x) * f, y: way[k]!.y + (way[k + 1]!.y - way[k]!.y) * f });
+  }
+  return out;
 }
 
 async function selectByTitle(page: Page, title: string): Promise<void> {
@@ -177,10 +214,11 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
   // 群を切り替えた直後の再計算(change → 発光の付け外し)を測りに入れない: 2 コマ待ってから基準を取る
   await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
   const m0 = await metrics();
-  for (const title of scenes) {
+  for (const scene of scenes) {
+    const [title = '', kind] = scene.split('#');
     await selectByTitle(page, title);
     await page.mouse.move(150, 450);
-    const path = await route(page, FRAMES_PER_SCENE);
+    const path = kind === 'fields' ? await routeFields(page, FRAMES_PER_SCENE) : await route(page, FRAMES_PER_SCENE);
     for (const p of path) {
       await page.mouse.move(p.x, p.y);
       await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
@@ -223,7 +261,7 @@ test('🔴 ネオンの 600 コマ計測: 対照群(発光だけを外す)と通
   await expect(page.locator('[data-pkc-field="detail-body"] [data-pkc-mermaid-src]')).toHaveAttribute('data-pkc-mermaid-state', 'ready', { timeout: 30_000 });
   await commitNew(page, 'textlog', '計測用のログ', LOG);
   await expect(page.locator('[data-pkc-field="detail-body"] > [data-pkc-log-card]').first()).toBeAttached();
-  const scenes = ['計測用のログ', '計測用のノート'];
+  const scenes = ['計測用のログ', '計測用のノート', '計測用のノート#fields'];
 
   const runs: Run[] = [];
   const order: [string, boolean][] = [
@@ -260,8 +298,11 @@ test('🔴 ネオンの 600 コマ計測: 対照群(発光だけを外す)と通
   for (const r of runs) expect(r.frames, `${r.label}: コマが取れていない`).toBeGreaterThan(300);
   for (const r of control) expect(r.glowFrames, `${r.label}: 対照群で光っている(空振り)`).toBe(0);
   for (const r of glow) expect(r.glowFrames, `${r.label}: 通常で光ったコマが全体の 10% に満たない(空振り)`).toBeGreaterThanOrEqual(r.frames * 0.1);
-  // 緩い上限: 通常のコマ落ちは対照群の最大 + 5% を超えない(機械の揺れを許す。厳しい線は後の PR が数字を見て決める)
-  const worstControl = Math.max(...control.map((r) => r.dropped));
-  for (const r of glow) expect(r.dropped, `${r.label}: コマ落ちが対照群(${worstControl})より大きく増えた`).toBeLessThanOrEqual(worstControl + 30);
+  // 🔴 合格線(Stage 2 PR-2): 発光のコマ落ち − 対照群のコマ落ち(2 回ずつの平均)が 1 以下。
+  //   ⚠ 「発光ありで 600 コマ中 1 以下」の絶対値は、この機械では安定しない(同じ構成を 3 回測って、発光側の最大が 0〜3 に揺れた。
+  //   対照群(発光を外した側)ですら 0〜6 に揺れる)── だから**差**で縛る。絶対値の線を張るのは、揺れない機械が手に入ってから。
+  const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const gap = mean(glow.map((r) => r.dropped)) - mean(control.map((r) => r.dropped));
+  expect(gap, `発光でコマ落ちが増えた(発光 ${glow.map((r) => r.dropped).join(',')} / 対照 ${control.map((r) => r.dropped).join(',')})`).toBeLessThanOrEqual(1);
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });

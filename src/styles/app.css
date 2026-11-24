@@ -980,11 +980,15 @@ textarea {
   padding: var(--s3);
   line-height: 1.6;
 }
+/* 🔴 **キーボードのフォーカスは、`--neon` の線を全周に静止させる**(Stage 2 PR-2。末尾の「本文のブロック・入力欄の輪郭と、キーボードのフォーカス」の塊も参照)。
+ * ⚠ 既存の `outline` と二重にしない(`outline` は消す)。強制色(`forced-colors: active`)では枠も影も消えるので、末尾で `outline` へ戻す。
+ * 線は内側へ 1px(枠の 1px と合わせて 2px)。外へ出さないので、overflow に切られる枠でも全周が見える。 */
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
+  outline: none;
+  border-color: var(--neon);
+  box-shadow: inset 0 0 0 1px var(--neon);
 }
 /* 🔴 **いま打っている行**(#2001 段 4。`render/current-line.ts` が欄に印と変数 2 つを置く)。
  * 現在地は**形**で示す(§2-10): 左端の 3px の線(`--accent`。選択中の行の左端線と同じ)+ ごく薄い地(`--surface-hover`)。
@@ -2120,8 +2124,8 @@ tr[data-pkc-note-label] td:first-child {
   min-width: 0;
 }
 [data-pkc-field='append-form']:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--neon);
+  box-shadow: 0 0 0 1px var(--neon);
 }
 /* 下段。⚠ 狭いとき(スマホ幅)は折り返す ── 本文を覆わないよう、伸びるのは 1 段ぶんだけ */
 [data-pkc-field='append-bar'] {
@@ -2178,6 +2182,9 @@ tr[data-pkc-note-label] td:first-child {
 }
 [data-pkc-field='append-input']:focus-visible {
   outline: none;
+  /* 枠(`append-form`)が全周の線を持つ ── 共通の入力欄の線(`--neon`)を重ねて二重にしない */
+  border-color: transparent;
+  box-shadow: none;
 }
 /* ロックの帯 ── 理由と出口を同じ行に出す(「押せない」だけにしない) */
 [data-pkc-field='append-lock'] {
@@ -10667,7 +10674,9 @@ mark[data-pkc-diff-char='del'] {
  *   しかも**面の端から端まで**届くので、視野の隅でも「どちらが元か」が読める。
  * ⚠ 印(`marked`)も地の明度を使うが、**別の器**(行 / 帯)なので衝突しない。 */
 [data-pkc-region='dual-pane'][data-pkc-focused] {
-  border-color: var(--muted);
+  border-color: var(--neon);
+  /* 入力欄のフォーカスと同じ全周の線(内側へ。`overflow: hidden` の器でも切れない) */
+  box-shadow: inset 0 0 0 1px var(--neon);
 }
 [data-pkc-region='dual-pane'][data-pkc-focused] [data-pkc-region='dual-tabs'] {
   background: var(--surface-2);
@@ -16042,7 +16051,15 @@ h6:hover > .pkc-heading-anchor,
 }
 @media screen and (forced-colors: none) {
   /* 線(芯の明るい 2px) */
-  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details), [data-pkc-region='inspector'] > [data-pkc-card], [data-pkc-region='rail'] button)[data-pkc-glow-near][data-pkc-glow-near]::before {
+  :is(
+      [data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details),
+      [data-pkc-region='inspector'] > [data-pkc-card],
+      [data-pkc-region='rail'] button,
+      .pkc-details:not([data-pkc-log-card]),
+      .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]),
+      .pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]),
+      [data-pkc-field='sql-input-wrap']:not(:focus-within)
+    )[data-pkc-glow-near][data-pkc-glow-near]::before {
     content: '';
     position: absolute;
     inset: calc(-1 * var(--nb-t)) calc(-1 * var(--nb-r)) calc(-1 * var(--nb-b)) calc(-1 * var(--nb-l));
@@ -16138,6 +16155,164 @@ h6:hover > .pkc-heading-anchor,
       1px 100%, 1px 100%, 100% 1px, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl), var(--rl) var(--rl);
     background-position: 2px var(--rl), var(--rl) 2px, left var(--rl) bottom 2px, left top, right top, left bottom, right bottom, 0 0,
       left top, right top, left top, left bottom, left top, right top, left bottom, right bottom;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ * 本文のブロック・入力欄の輪郭と、キーボードのフォーカス(Stage 2 PR-2)
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+/**
+ * 🔴 **本文のブロック(コード・表・図・引用・折りたたみ)と入力欄にも、同じ近接発光を広げる**。
+ * 方式は 1 つ(`render/neon-glow.ts` が近い物に局所座標と印を書き、ここが描く)。物の形で描き方だけが 3 つに割れる:
+ *
+ * - **疑似要素の線**: 自分の輪郭の上で `overflow` に切られない物 ── 折りたたみ(`.pkc-details`)/ 図のカード / コードの枠 / SQL の打つ欄の包み。
+ *   上の共通の `::before`(2px)をそのまま使う。コードの枠と SQL の包みは**枠を持たない包み**で、中の `pre` / 欄の枠が包みの縁にあるので、`margin: 1px` で線を内側へ寄せる(縁から 2px)。
+ * - **器自身の背景**: 横スクロールする表(`.pkc-md-block` の表・csv)── 疑似要素は器の外へはみ出すと切られる。器に**透明な 2px の枠**を取り(版面は動かさない)、
+ *   背景の 2 層(内側の地 → 光の放射)で枠の 2px だけを光らせる。ログの器と同じ考え方で、スクロールしても輪郭は器に張り付いたまま。
+ * - **入力欄の枠そのもの**: `input` / `textarea` / `select` と追記欄の枠(`position: relative` を足すと境目の取っ手の押し所を覆う)は、1px の枠を透明にして、背景の 3 層(内側の地 → 光の放射 → 静止の線)で描く。
+ * - 引用(`blockquote`)は**左の線(3px)だけ**を光らせる。
+ *
+ * 🔴 **図(Mermaid・グラフなど)は「図 + ラベル + 保存ボタン」を 1 つの角丸ヘアラインのカード**にする(§2-10 のカード: `--surface` / `--radius-lg` / `--hairline`)。
+ *   直す前は、ラベル(MERMAID)が枠のない器の右端、「図を保存」が図の上の帯に浮き、図の周りに囲みが無かった。いまは 1 枚のカードの上の帯に、保存ボタン(左)とラベル(右)が収まる。
+ * 🔴 **フォーカスは同じ線(`--neon`)を全周に静止させる**(既存の `outline` と二重にしない)。入力欄は `:focus-visible`、包み(追記欄・SQL)は `:focus-within`、
+ *   2 ペイン整理は焦点のある側。近接の光はフォーカスのある物には出さない(フォーカスが勝つ)。強制色(`forced-colors: active`)では枠が消えるので `outline` へ戻す。
+ */
+@media screen {
+  .pkc-details:not([data-pkc-log-card]),
+  .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]),
+  .pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]),
+  [data-pkc-field='sql-input-wrap'] {
+    --neon-r: 160px;
+    --nb-t: 1px;
+    --nb-b: 1px;
+    --nb-l: 1px;
+    --nb-r: 1px;
+    position: relative;
+  }
+  /* 図のカード: 図 + ラベル + 保存ボタンを 1 枚に収める */
+  .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) {
+    box-sizing: border-box;
+    /* ⚠ 幅は今までどおり(本文の幅いっぱい)。`fit-content` にしない ── 図を焼く幅(`mermaid-hydrate`)は親の `clientWidth` を読むので、
+     *   カードが図に合わせて縮むと焼き幅が循環して細くなる(実測 254px) */
+    padding: 28px var(--s3) var(--s3);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-lg);
+  }
+  /* 段組みのとき、縦に長い図はカードの余白(上 28 + 下 12 + 枠 2)のぶん低くする(`[data-pkc-columns-on]` の図の高さの頭打ち(−30px)に重ねる) ── でないと段をまたいで割れる */
+  [data-pkc-view-pane='detail'][data-pkc-columns-on] [data-pkc-field='detail-body'] .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) img {
+    max-height: calc(var(--pkc-col-h, 100vh) - 48px);
+  }
+  /* 保存ボタンは器(`display: table`)でなくカードに対して置く ── 上の帯(カードの余白)の左。ラベルは右(既定のまま) */
+  .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) [data-pkc-mermaid-src] {
+    position: static;
+    padding-top: 0;
+  }
+  .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) [data-pkc-field='diagram-save'] {
+    top: 4px;
+    right: auto;
+    left: var(--s3);
+  }
+  /* 原文に切り替えたときの `pre` は、カードの枠の中で二重の枠にしない */
+  .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]) > pre.pkc-render-source {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  /* 横スクロールの表は、光のための透明な 2px の枠を取る(外へ 2px 出して、本文の並びは動かさない) */
+  .pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card]) {
+    border: 2px solid transparent;
+    /* 枠のぶん、外へ 2px 出す(上下・左)── 表の中身の左端と高さは、枠が無いときと同じ。
+     * ⚠ 右へは出さない ── 負の `margin-inline-end` で右へ 2px はみ出すと、読む面が 2px 横スクロールする(実測 scroll 899 / client 897)。
+     *   代わりに器は右の端で止まり、使える幅が 2px 狭くなる(幅いっぱいの表は、右の線が 2px 内側から始まる) */
+    margin-block: -2px;
+    margin-inline-start: -2px;
+  }
+  /* csv の表は読み幅で止まる(`max-width: var(--read-w)`)── 枠(4px)は箱の幅に含まれるので、そのぶん足して表の中身の右端が段落の右端に揃ったままにする。
+   * 読み幅が無い(`none`)ときは `calc` が成り立たず宣言ごと捨てられ、上限は無いまま(同じ) */
+  [data-pkc-prose] > .pkc-md-block.pkc-md-block.pkc-md-block[data-pkc-render-lang='csv']:not([data-pkc-log-card]) {
+    max-width: calc(var(--read-w) + 4px);
+  }
+  /* 読み幅の左の余白(`--prose-indent`)があるときは、その余白から 2px 引く(散文の規則 `.pkc-md-rendered[data-pkc-prose] > .pkc-md-block`(0,4,0)より強くする) */
+  [data-pkc-prose]:not([data-pkc-writing='vertical']) > .pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card]) {
+    margin-inline-start: calc(var(--prose-indent, 0px) - 2px);
+  }
+  /* 読み幅の上限が無い紙面(「フル HD」= `--read-w: none`)では `--prose-indent` の `calc` が成り立たず、上の宣言も捨てられる(余白 0 に戻る)── 枠のぶんだけ 2px 左へ */
+  [data-pkc-page-format='fullhd'] [data-pkc-prose]:not([data-pkc-writing='vertical']) > .pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card]) {
+    margin-inline-start: -2px;
+  }
+  /* 引用は左の線だけ光る(線の上に重ねる) */
+  blockquote:not(.pkc-section-callout) {
+    position: relative;
+  }
+}
+@media screen and (forced-colors: none) {
+  /* 枠を持たない包み(コードの枠・SQL の包み)── 線を縁から 2px 内へ。角丸は中の `pre` / 欄と同じ */
+  :is(.pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]), [data-pkc-field='sql-input-wrap']:not(:focus-within))[data-pkc-glow-near][data-pkc-glow-near][data-pkc-glow-near]::before {
+    margin: 1px;
+    border-radius: var(--radius);
+    z-index: 2;
+  }
+  /* 横スクロールの表: 器自身の背景(内側の地 → 光の放射)。枠(透明な 2px)だけが光る */
+  .pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card])[data-pkc-glow-near] {
+    --neon-r: 160px;
+    background-image: linear-gradient(var(--surface), var(--surface)), radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), var(--neon-core), var(--neon) 34%, color-mix(in srgb, var(--neon) 70%, transparent) 66%, transparent);
+    background-clip: padding-box, border-box;
+    background-origin: border-box;
+    background-repeat: no-repeat;
+  }
+  /* 引用: 左の線(3px)だけ */
+  blockquote:not(.pkc-section-callout)[data-pkc-glow-near][data-pkc-glow-near]::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: -3px;
+    width: 3px;
+    background: radial-gradient(circle 160px at var(--gx, -500px) var(--gy, -500px), var(--neon-core), var(--neon) 34%, color-mix(in srgb, var(--neon) 70%, transparent) 66%, transparent);
+    pointer-events: none;
+  }
+  /* 追記欄の枠(`append-form`。地は `--surface`)── 入力欄と同じ背景 3 層。⚠ 疑似要素にしない(位置づけの `position: relative` が、境目の取っ手の押し所(#701)を覆う)。
+   * フォーカスが枠の中にある間は出さない(`:focus-within` の全周の線が勝つ) */
+  [data-pkc-field='append-form'][data-pkc-glow-near][data-pkc-glow-near]:not(:focus-within) {
+    --neon-r: 160px;
+    border-color: transparent;
+    background-image:
+      linear-gradient(var(--surface), var(--surface)),
+      radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), var(--neon-core), var(--neon) 34%, color-mix(in srgb, var(--neon) 70%, transparent) 66%, transparent),
+      linear-gradient(var(--border), var(--border));
+    background-clip: padding-box, border-box, border-box;
+    background-origin: border-box;
+    background-repeat: no-repeat;
+  }
+  /* 入力欄: 1px の枠そのものが光る(薄く)。⚠ フォーカスのある欄は出さない(フォーカスの全周の線が勝つ) */
+  :is(input, textarea, select)[data-pkc-glow-near][data-pkc-glow-near]:not(:focus-visible) {
+    --neon-r: 96px;
+    border-color: transparent;
+    background-image:
+      linear-gradient(var(--surface), var(--surface)),
+      radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), color-mix(in srgb, var(--neon-core) 85%, transparent), color-mix(in srgb, var(--neon) 60%, transparent) 40%, transparent),
+      linear-gradient(var(--border), var(--border));
+    background-clip: padding-box, border-box, border-box;
+    background-origin: border-box;
+    background-repeat: no-repeat;
+  }
+}
+
+/* ── キーボードのフォーカス: 同じ線(`--neon`)を全周に静止させる(入力欄の `:focus-visible` は上の共通の規則。SQL の打つ欄もその枠が線) ── */
+/* 2 ペイン整理: 焦点のある側(`data-pkc-focused`)にも同じ枠 */
+@media (forced-colors: active) {
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+    box-shadow: none;
+  }
+  [data-pkc-field='append-form']:focus-within,
+  [data-pkc-region='dual-pane'][data-pkc-focused] {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
   }
 }
 

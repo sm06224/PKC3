@@ -39,6 +39,18 @@ describe('nearCards', () => {
     expect(nearCards([], 0, 0, 160)).toEqual([]);
   });
 
+  it('🔴 矩形が自分の半径を持てば、渡した半径より優先する(1 つのゾーンにブロックと入力欄が混ざる)', () => {
+    const rects = [
+      { left: 0, top: 0, right: 100, bottom: 20, radius: NEON_RADIUS.field },
+      { left: 0, top: 0, right: 100, bottom: 20, radius: NEON_RADIUS.block },
+      { left: 0, top: 0, right: 100, bottom: 20 },
+    ];
+    // 点は矩形の右へ 120(欄の半径 96 の外 / ブロックの半径 160 の内)。半径を持たない矩形は渡した半径(100)の外
+    const hit = nearCards(rects, 220, 10, 100).map((n) => n.index);
+    expect(hit).toEqual([1]);
+    expect(nearCards(rects, 220, 10, 130).map((n) => n.index), '渡した半径が使われていない').toEqual([1, 2]);
+  });
+
   it('ゾーンごとの半径は正の数で、バーは本文より小さい', () => {
     for (const v of Object.values(NEON_RADIUS)) expect(v).toBeGreaterThan(0);
     expect(NEON_RADIUS.rail).toBeLessThan(NEON_RADIUS.log);
