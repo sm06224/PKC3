@@ -182,14 +182,14 @@ export class ScheduleRenderer {
     groups: HTMLElement;
     /** 「一覧 / 日 / 週」の 3 つ(#855 段 A-1 / A-2)。 */
     modes: HTMLButtonElement[];
-    /** 「予定を足す」の日付の欄(「日」では見ている日に合わせる)。 */
+    /** 「予定を追加」の日付の欄(「日」では見ている日に合わせる)。 */
     quickDate: HTMLInputElement;
     /** 🔴 週の始まり(日曜 / 月曜。#1163 の依頼 191)。 */
     weekStart: HTMLSelectElement;
     /** 🔴 担当で絞る(#283)。担当を書いた予定が 1 件も無い間は隠す。 */
     owner: HTMLSelectElement;
   } | null = null;
-  /** 「予定を足す」の日付を最後に合わせた日(`null` = 合わせていない)。 */
+  /** 「予定を追加」の日付を最後に合わせた日(`null` = 合わせていない)。 */
   private quickDay: string | null = null;
   /** 「日」の描き手(#855 段 A-1)。一覧のときは隠すだけで捨てない(札と位置を使い回す)。 */
   private readonly day = new ScheduleDay(DROP_DATE);
@@ -460,7 +460,7 @@ export class ScheduleRenderer {
     this.monthView.el.hidden = !monthMode;
     this.board.el.hidden = !boardMode;
     /**
-     * 🔴 **「日」では、「予定を足す」の日付を見ている日に合わせる**(#499 の「見ているところに足したら、
+     * 🔴 **「日」では、「予定を追加」の日付を見ている日に合わせる**(#499 の「見ているところに足したら、
      *   見ているところに出る」を「日」でも保つ。動線レビューの指摘)。⚠ 合わせるのは**日が変わったときだけ** ──
      *   描き直しのたびに入れ直すと、user が欄を直した字(空にする = 日付なしで足す、も含む)を奪う。
      */
@@ -683,8 +683,8 @@ export class ScheduleRenderer {
     )
       return '片付けたノートの予定は隠れています。「出すもの」で「片付けたもの」を出すと見えます。';
     if (dated === 0 && !state.showUndatedTasks)
-      // ⚠ 書式バーは編集中にしか無い ── 予定の画面で使える入口(「予定を足す」)を言う(#1087)
-      return '日付を書いた予定がまだありません。「- [ ] やること @2026-08-25」のように書くか、上の「予定を足す」で日付を選んで足してください。';
+      // ⚠ 書式バーは編集中にしか無い ── 予定の画面で使える入口(「予定を追加」)を言う(#1087)
+      return '日付を書いた予定がまだありません。「- [ ] やること @2026-08-25」のように書くか、上の「予定を追加」で日付を選んで追加してください。';
     if (groups === 0) return '絞り込みに当てはまる予定がありません。';
     return '';
   }
@@ -908,8 +908,8 @@ export class ScheduleRenderer {
        *   `今日(1)+` になった)。
        * 🔑 印は **CSS の `::before`**、名前は `aria-label` に置く。
        */
-      plus.setAttribute('aria-label', 'この日の予定を足す');
-      plus.title = 'この日の予定を足します(上の欄に日付が入ります)';
+      plus.setAttribute('aria-label', 'この日に予定を追加');
+      plus.title = 'この日に予定を追加します(上の欄に日付が入ります)';
       head.append(plus);
     }
     const host = document.createElement('div');
@@ -1072,9 +1072,9 @@ export class ScheduleRenderer {
     const qText = document.createElement('input');
     qText.type = 'text';
     qText.setAttribute('data-pkc-field', 'schedule-quick-text');
-    // 🔴 欄・ボタン・断り文の呼び名を「予定」にそろえた(#1163 の依頼 57-3。以前は「やること」「予定を足す」「予定の字」の 3 通り)
+    // 🔴 欄・ボタン・断り文の呼び名を「予定」にそろえた(#1163 の依頼 57-3。以前は「やること」「予定を追加」「予定の字」の 3 通り)
     qText.placeholder = '予定(例: 打ち合わせ)';
-    qText.setAttribute('aria-label', '足す予定');
+    qText.setAttribute('aria-label', '追加する予定');
     const qDate = document.createElement('input');
     qDate.type = 'date';
     qDate.setAttribute('data-pkc-field', 'schedule-quick-date');
@@ -1114,7 +1114,7 @@ export class ScheduleRenderer {
     const qAdd = document.createElement('button');
     qAdd.type = 'button';
     qAdd.setAttribute('data-pkc-action', 'schedule-quick-add');
-    qAdd.textContent = '予定を足す';
+    qAdd.textContent = '予定を追加';
     // ⚠ **どこへ書くか**と**どの日に出るか**を両方言う(#499)── 日付の欄が
     //    何を決めているのかが読めないと、「足したのに出てこない」になる
     qAdd.title =

@@ -1,13 +1,13 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **「打っている場所に入れる」操作を「操作を探す」から呼ぶ**(#582 段③ 第 3 群。第 1・2 群は
+ * 🔴 **「カーソルの位置に入れる」操作を「操作を探す」から呼ぶ**(#582 段③ 第 3 群。第 1・2 群は
  * `palette-scene-batch.test.ts` / `palette-scene-batch2.test.ts`、同じ作法)。
  *
  * ## 何が起きていたか
  *
  * 一覧を閉じた直後の本文の欄は、器が焦点を返す瞬間に選択が `0,0` へ戻っている。画面のボタン(日付 / ノートリンク /
  * テンプレート / 図 / アイコン)は**押した瞬間の `selectionStart` を読む**ので、戻さずに押すと**本文の先頭**に入る。
- * 実ブラウザで `hello world` の 5 字目から「日付を入れる」を呼ぶと `@2026-10-12hello world` になった
+ * 実ブラウザで `hello world` の 5 字目から「日付を挿入」を呼ぶと `@2026-10-12hello world` になった
  * (1 面の行・2 列の欄とも。`insert-date` / `insert-snippet` は第 1 群から登記済みで、同じ穴を持っていた)。
  *
  * ## 守るもの(どれも「壊れたら鳴る」形にしてある)
@@ -151,9 +151,9 @@ describe('④ 登記:2 件が一覧に居る(押しボタン = 命令 id、鍵�
     }
   });
 
-  it('「打っている場所に入れる」5 つは全部 CARET_TOOLS に居て、範囲を戻す門(CARET_INSERT_TOOLS)はその 5 つだけ(全文の道具と登記の無い format-text は入らない)', () => {
+  it('「カーソルの位置に入れる」5 つは全部 CARET_TOOLS に居て、範囲を戻す門(CARET_INSERT_TOOLS)はその 5 つだけ(全文の道具と登記の無い format-text は入らない)', () => {
     for (const id of ALL5) expect(CARET_TOOLS.has(id), `${id} が CARET_TOOLS に無い`).toBe(true);
-    // ⚠ 2026-10-17(#1640 ④): 書式の帯の「添付を入れる」(`insert-attachment`)が CARET_TOOLS に居るので +1(「操作を探す」には登記が無い = 範囲を戻す門に入っても呼ばれない)
+    // ⚠ 2026-10-17(#1640 ④): 書式の帯の「添付を挿入」(`insert-attachment`)が CARET_TOOLS に居るので +1(「操作を探す」には登記が無い = 範囲を戻す門に入っても呼ばれない)
     // ⚠ 2026-10-26(#766 D-3): 書式バーの「この行を計算する」(`calc-line`)も caret を読むので +1(同じく登記は無い)
     // ⚠ 2026-10-29(#425): 書式バーの「注意書きを入れる」(`insert-callout`)は登記済み(操作を探すから呼べる)で caret を読むので +1
     expect([...CARET_INSERT_TOOLS].sort()).toEqual(
@@ -195,7 +195,7 @@ describe('④ 登記:2 件が一覧に居る(押しボタン = 命令 id、鍵�
 });
 
 describe('① 範囲を戻してから押す(焦点が返る瞬間に選択が 0,0 になっても、開いたときの位置へ入る)', () => {
-  it('🔴 アイコンを入れる:caret が途中 → そこへ入る(小窓をまたいでも先頭に入らない)', async () => {
+  it('🔴 アイコンを挿入:caret が途中 → そこへ入る(小窓をまたいでも先頭に入らない)', async () => {
     const { root } = setup();
     const ta = editing(root, 'hello world', 5, 5);
     await pickFromPalette(root, ta, 'insert-icon');
@@ -210,7 +210,7 @@ describe('① 範囲を戻してから押す(焦点が返る瞬間に選択が 0
     expect(ta.value, '先頭に入っている(範囲を戻していない)').toBe(`hello:${name}: world`);
   });
 
-  it('🔴 図を入れる:選んだ範囲があれば、一覧を出さずにその範囲を図の囲みにする(他の字は動かない)', async () => {
+  it('🔴 図を挿入:選んだ範囲があれば、一覧を出さずにその範囲を図の囲みにする(他の字は動かない)', async () => {
     const { root } = setup();
     const ta = editing(root, 'あいうえお', 1, 4);
     await pickFromPalette(root, ta, 'insert-diagram');
@@ -220,7 +220,7 @@ describe('① 範囲を戻してから押す(焦点が返る瞬間に選択が 0
     expect(ta.value, '選んだ範囲が図の囲みの中に無い').toMatch(/```mermaid\nいうえ\n```/u);
   });
 
-  it('🔴 図を入れる:caret が途中なら、種類を選んだあとそこへ入る', async () => {
+  it('🔴 図を挿入:caret が途中なら、種類を選んだあとそこへ入る', async () => {
     const { root } = setup();
     const ta = editing(root, 'hello world', 5, 5);
     await pickFromPalette(root, ta, 'insert-diagram');
@@ -248,7 +248,7 @@ describe('① 範囲を戻してから押す(焦点が返る瞬間に選択が 0
     expect(ta.value.endsWith('world') || ta.value.endsWith('world\n'), '後ろの字が動いた').toBe(true);
   });
 
-  it('🔴 日付を入れる(前から登記済み・同じ穴):caret が途中 → そこへ入る', async () => {
+  it('🔴 日付を挿入(前から登記済み・同じ穴):caret が途中 → そこへ入る', async () => {
     const { root } = setup();
     const ta = editing(root, 'hello world', 5, 5);
     await pickFromPalette(root, ta, 'insert-date');
@@ -261,7 +261,7 @@ describe('① 範囲を戻してから押す(焦点が返る瞬間に選択が 0
     expect(ta.value, '先頭に入っている(範囲を戻していない)').toMatch(/^hello @\d{4}-\d{2}-\d{2} world$/u);
   });
 
-  it('🔴 ノートリンクを入れる(前から登記済み・同じ穴):caret が途中 → そこへ入る', async () => {
+  it('🔴 ノートリンクを挿入(前から登記済み・同じ穴):caret が途中 → そこへ入る', async () => {
     const { root } = setup();
     const ta = editing(root, 'hello world', 5, 5);
     await pickFromPalette(root, ta, 'insert-entry-link');

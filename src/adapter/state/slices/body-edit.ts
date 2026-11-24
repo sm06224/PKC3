@@ -166,7 +166,7 @@ export function reduceBodyEdit(state: AppState, action: BodyEditAction): ReduceR
      */
     case 'SET_CSV_CELL': {
       const blocked = bodyWriteBlockReason(state, action.lid);
-      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `表を打ってください`) }, events: [] };
+      if (blocked !== null) return { state: { ...state, error: blockedWithSuffix(blocked, `表を入力してください`) }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta) return { state, events: [] };
       return {
@@ -242,7 +242,7 @@ export function reduceBodyEdit(state: AppState, action: BodyEditAction): ReduceR
       };
     }
     /**
-     * 🔴 **表の行・列を足す / 消す**(#418 段①)。⚠ `SET_CSV_CELL` と同じ形。
+     * 🔴 **表の行・列を追加す / 消す**(#418 段①)。⚠ `SET_CSV_CELL` と同じ形。
      * ⚠ 断りも同じ(C6 / #1043、lid で判定)。
      */
     case 'SET_CSV_SHAPE': {

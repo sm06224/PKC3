@@ -159,7 +159,7 @@ describe('2 ペインの reducer(#241 段⑥-a)', () => {
     expect(paneOf(s.dual, 'left').selection).toEqual([]);
   });
 
-  it('タブを足す / 開く / 閉じる', () => {
+  it('タブを追加 / 開く / 閉じる', () => {
     let s = reduce(booted(), { type: 'DUAL_SET_SCOPE', side: 'left', lid: 'f1' }).state;
     s = reduce(s, { type: 'DUAL_TAB_ADD', side: 'left' }).state;
     expect(paneOf(s.dual, 'left').tabs).toHaveLength(2);
@@ -2487,7 +2487,7 @@ describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
     expect(mark('right')?.textContent, '右の帯が右と言っていない').toBe('右');
     // ⚠ 読み上げは器の aria-label が言う ── 2 度読ませない
     expect(mark('left')?.getAttribute('aria-hidden')).toBe('true');
-    // 🔴 タブを足すと帯は丸ごと組み直す ── そのときも先頭に残る
+    // 🔴 タブを追加と帯は丸ごと組み直す ── そのときも先頭に残る
     s = reduce(s, { type: 'DUAL_TAB_ADD', side: 'left' }).state;
     r.render(s);
     expect(paneOf(s.dual, 'left').tabs.length, '前提が崩れている(タブが増えていない)').toBe(2);

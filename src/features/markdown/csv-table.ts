@@ -460,7 +460,7 @@ export function rowsToHtml(
   };
 
   /**
-   * 🔴 **行・列を足す / 消す口**(#418 段①)。
+   * 🔴 **行・列を追加す / 消す口**(#418 段①)。
    *
    * 🔑 **打てるだけでは動線が元に戻る** ── 5 列で足りなくなった瞬間に
    *   CSV の原文へ帰ることになる。⚠ そして足せるなら**消せる**
@@ -498,7 +498,7 @@ export function rowsToHtml(
         `<th${attrs}${c.title}>${c.body}` +
           // 🔴 見出しは 1 回押すと並べ替えなので、編集の入口は ✎(と 2 回押し)に分ける(#1240)
           (attrs === '' ? '' : cellEditButtonHtml()) +
-          shapeBtn(0, col, 'col', 'add', 'この列の右に列を足す') +
+          shapeBtn(0, col, 'col', 'add', 'この列の右に列を追加す') +
           shapeBtn(0, col, 'col', 'remove', 'この列を消す') +
           `</th>`,
       );
@@ -513,16 +513,16 @@ export function rowsToHtml(
       pad(rows[i]!).forEach((cell, col) => {
         /**
          * ⚠ 見出しが無い表(`noheader`)では**列の口が 1 行目に要る** ──
-         *   `<thead>` が出ないので、そこへ置かないと**列を足す道が無くなる**。
+         *   `<thead>` が出ないので、そこへ置かないと**列を追加す道が無くなる**。
          */
         const colBtns =
           !withHeader && i === bodyStart
-            ? shapeBtn(i, col, 'col', 'add', 'この列の右に列を足す') +
+            ? shapeBtn(i, col, 'col', 'add', 'この列の右に列を追加す') +
               shapeBtn(i, col, 'col', 'remove', 'この列を消す')
             : '';
         const rowBtns =
           col === 0
-            ? shapeBtn(i, col, 'row', 'add', 'この行の下に行を足す') +
+            ? shapeBtn(i, col, 'row', 'add', 'この行の下に行を追加す') +
               shapeBtn(i, col, 'row', 'remove', 'この行を消す')
             : '';
         const c = cellHtml(cell);

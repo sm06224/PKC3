@@ -2,7 +2,7 @@
 /**
  * 🔴 **編集中、右ペインの口が「押せるのに無言で捨てる」形にならないこと**(#513)。
  *
- * 直す前:操作の帯(`this.buttons`)だけが disabled になり、**つながりを足す帯・
+ * 直す前:操作の帯(`this.buttons`)だけが disabled になり、**つながりを追加帯・
  * 日付・関係の ×** は押せる見た目のまま ── reducer が `phase !== 'ready'` で
  * 黙って捨て、add-relation は**欄まで空にして成功と同じ見た目**になっていた。
  *
@@ -79,7 +79,7 @@ describe('編集中の右ペインの口(#513)', () => {
     const s = mounted({ date: '2026-08-28', withRelation: true });
     s.d.dispatch({ type: 'START_EDIT' });
     const add = s.q<HTMLButtonElement>('[data-pkc-action="add-relation"]');
-    expect(add.disabled, 'つながりを足すが押せる').toBe(true);
+    expect(add.disabled, 'つながりを追加が押せる').toBe(true);
     expect(add.title, '理由が出ていない').toContain(REASON);
     expect(s.q<HTMLInputElement>('[data-pkc-field="relation-target"]').disabled).toBe(true);
     expect(s.q<HTMLSelectElement>('[data-pkc-field="relation-kind"]').disabled).toBe(true);
@@ -119,7 +119,7 @@ describe('編集中の右ペインの口(#513)', () => {
     add.click();
     expect(s.d.getState().error ?? '', '理由が出ていない').toContain('編集を保存するか');
     // ⚠ 文言は押した場所と対で pin する(取り違え変異を殺す)
-    expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('つながりを足');
+    expect(s.d.getState().error ?? '', '押した場所と文言が合っていない').toContain('つながりを追加');
     expect(s.d.getState().relations, '編集中に関係が作られた').toHaveLength(0);
     expect(input.value, '打った字が捨てられた(成功と同じ見た目になる)').toBe('い');
   });

@@ -11,7 +11,7 @@
  *   (`/usr/bin` を打つ人の邪魔をしない)。日本語入力オンの `／` と、`・`(`・` は箇条書きに普通に使うので
  *   **字が続いたときだけ**)も引き金にする。
  * - `(asset:` … 添付の参照(`![名前](asset:…)` / `[名前](asset:…)` / 裸の `(asset:`)を打ち始めたとき(#2001 段 4)。
- *   コードの中では出さない。表の行の中では出す(セルに添付を入れる)。
+ *   コードの中では出さない。表の行の中では出す(セルに添付を挿入)。
  * - `@` … **行頭か空白の直後だけ**。直後が数字(`@2026-…` の予定記法)・`[`(`@[card](…)`)のときは出さない。
  *
  * ⚠ **pure module**。DOM も state も知らない(候補の元は呼び手が渡す)。
@@ -127,10 +127,10 @@ export interface SlashTool {
 }
 
 export const SLASH_TOOLS: readonly SlashTool[] = [
-  { action: 'insert-date', label: '日付を入れる', keys: ['date', 'today', 'hizuke'] },
-  { action: 'insert-entry-link', label: 'ノートリンクを入れる', keys: ['notelink', 'link', 'wikilink'] },
-  { action: 'insert-attachment', label: '添付を入れる', keys: ['attach', 'attachment', 'file', 'image', 'tenpu'] },
-  { action: 'insert-icon', label: 'アイコンを入れる', keys: ['icon'] },
+  { action: 'insert-date', label: '日付を挿入', keys: ['date', 'today', 'hizuke', '日付を入れる', '入れる'] },
+  { action: 'insert-entry-link', label: 'ノートリンクを挿入', keys: ['notelink', 'link', 'wikilink', 'ノートリンクを入れる', '入れる'] },
+  { action: 'insert-attachment', label: '添付を挿入', keys: ['attach', 'attachment', 'file', 'image', 'tenpu', '添付を入れる', '入れる'] },
+  { action: 'insert-icon', label: 'アイコンを挿入', keys: ['icon', 'アイコンを入れる', '入れる'] },
 ];
 
 /** `/` の語に当たる道具。⚠ 語が空なら 0 件(上の注記)。字は含む・綴りは前方一致。 */

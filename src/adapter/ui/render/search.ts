@@ -184,14 +184,14 @@ export class SearchRenderer {
    * ⚠ **切ったことは必ず言う**(左の列の「ほかにもあります」と同じ向き)。
    */
   private noteText(page: SearchPageState): string {
-    if (page.query.trim() === '') return '語を打つと、題名と本文から探します。行を押すと、そのノートが別のウィンドウで開きます';
+    if (page.query.trim() === '') return '語を入力すると、題名と本文から探します。行を押すと、そのノートが別のウィンドウで開きます';
     if (page.failed === 'stale') return 'このタブの PKC3 が古いままのため、探せません。再読み込みしてください';
     // ⚠ 古いタブと決めつけない(#1087)── 打ち直すと、もう一度探す
-    if (page.failed === 'error') return '探せませんでした(探している途中で失敗しました)。語を打ち直すと、もう一度探します';
+    if (page.failed === 'error') return '探せませんでした(探している途中で失敗しました)。語を入力し直すと、もう一度探します';
     // 🔴 除く語(-メモ)だけでは探す物が無い(`planSearch` は 'none')── 「一致するノートはありません」と言うと、
     //   ノートが無いように読める。語を足す案内を出す
     const terms = parseSearchTerms(page.query);
-    if (terms.include.length === 0 && terms.exclude.length > 0) return '除く語だけでは探せません。探す語も打ってください';
+    if (terms.include.length === 0 && terms.exclude.length > 0) return '除く語だけでは探せません。探す語も入力してください';
     if (page.rowsQuery !== page.query) return 'ノートを探しています…';
     if (page.rows.length === 0) {
       // 🔴 除く語として読んだ語があるなら、字のまま探す書き方を添える(依頼 259 A。`-m` → `"-m"`)

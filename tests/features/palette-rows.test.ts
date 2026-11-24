@@ -414,3 +414,33 @@ describe('普通の言い方で探す(#1087)', () => {
     expect(idsOf(q)).toContain(id);
   });
 });
+
+describe('言葉の統一(足す→追加 / 入れる→挿入)のあとも、旧い言い方で探せる', () => {
+  // ⚠ 画面の字は「追加」「挿入」へ揃えたが、これまでの言い方(足す・入れる)で探す人の動線は残す。
+  //   別の行が偶然当たって緑にならないよう、**その 1 行が先頭に出る**ことまで見る。
+  const OLD_WORDS: ReadonlyArray<readonly [string, string, string]> = [
+    ['タグを足す', 'add-tag', 'タグを追加'],
+    ['つながりを足す', 'add-relation', 'つながりを追加'],
+    ['予定を足す', 'schedule-quick-add', '予定を追加'],
+    ['タブを足す', 'dual-tab-add', 'タブを追加'],
+    ['連絡先を足す', 'contacts-quick-add', '連絡先を追加'],
+    ['リンクを足す', 'add-url-tile', 'リンクを追加'],
+    ['日付を入れる', 'insert-date', '日付を挿入'],
+    ['ノートリンクを入れる', 'insert-entry-link', 'ノートリンクを挿入'],
+    ['テンプレートを入れる', 'insert-snippet', 'テンプレートを挿入'],
+    ['図を入れる', 'insert-diagram', '図を挿入'],
+    ['アイコンを入れる', 'insert-icon', 'アイコンを挿入'],
+    ['いまの時刻を入れる', 'insert-now-time', 'いまの時刻を挿入'],
+    ['いまの日時を入れる', 'insert-now-datetime', 'いまの日時を挿入'],
+  ];
+  it.each(OLD_WORDS)('「%s」で %s が見つかり、画面の字は新しい言い方', (word, id, newLabel) => {
+    expect(idsOf(word)).toContain(id);
+    expect(findCommand(id)?.label).toBe(newLabel);
+    // 画面の字には旧い言い方が残っていない(alias だけが持つ)
+    expect(findCommand(id)?.label).not.toMatch(/足す|入れる/);
+  });
+  it('「足す」「入れる」の 1 語でも、改名した行へ届く', () => {
+    expect(idsOf('足す')).toEqual(expect.arrayContaining(['add-tag', 'add-relation', 'schedule-quick-add']));
+    expect(idsOf('入れる')).toEqual(expect.arrayContaining(['insert-date', 'insert-diagram', 'insert-icon']));
+  });
+});

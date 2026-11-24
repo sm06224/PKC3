@@ -3,7 +3,7 @@
  * 🔴 **タグを「その場で打つ」**(#494)── 押した所から disk まで。
  *
  * > user 指摘 2026-08-27:「**タグの設定が Apple のメモアプリと違い、直感的に
- * > ここにタグを打つ!って感じの動作じゃなくて yamlfrontmatter なのは問題だ。
+ * > ここにタグを入力!って感じの動作じゃなくて yamlfrontmatter なのは問題だ。
  * > しかも設定動線がよくわからん**」
  *
  * ## ⚠ 「無い」のではなく「ここに無い」だった(着手前に全数で数えた)
@@ -162,7 +162,7 @@ describe('タグをその場で打つ(#494)', () => {
   });
 
   /**
-   * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを打つ人は毎回踏む。
+   * ⚠ **変換中の Enter では撃たない** ── 日本語のタグを入力人は毎回踏む。
    * 🔑 対照群は上の test(変換中でない Enter は通る)。
    *
    * ⚠ **守っているのは `binder` の入口の 1 行**(`if (ke.isComposing) return;`)である ──
@@ -251,7 +251,7 @@ describe('打っている間に編集が始まった(#1087)', () => {
     const s = setup('本文\n');
     freezeAndEdit(s);
     type(s, '買い物');
-    expect(s.d.getState().error ?? '', '理由が出ていない').toContain('タグを足して');
+    expect(s.d.getState().error ?? '', '理由が出ていない').toContain('タグを追加して');
     expect(s.q<HTMLInputElement>('[data-pkc-field="tag-add-input"]')!.value, '打った字が消えた').toBe('買い物');
     await tick();
     expect(readTags(s.disk['n1']!)).toEqual([]);

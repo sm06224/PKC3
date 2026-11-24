@@ -76,7 +76,7 @@ export interface ExtDeliveredEntry extends ExtEntry {
  * `EntryMeta` と本文から、渡す 1 件を組む。⚠ **口はここ 1 つ**(§7)。
  *
  * ⚠ 段① の列は `extEntryOf` を**呼んで**作る ── 写し直すと、
- *   段① に列を足した日に**こちらだけ古くなる**(同じ問いに答える口が 2 つ)。
+ *   段① に列を追加した日に**こちらだけ古くなる**(同じ問いに答える口が 2 つ)。
  */
 export function deliveredEntryOf(meta: EntryMeta, body: string): ExtDeliveredEntry {
   return {

@@ -68,7 +68,7 @@ describe('BOM つきの本文(#1087)', () => {
     expect(readTags(body)).toEqual(['a']);
   });
 
-  it('🔴 タグを足しても 2 つ目の囲みを前置せず、BOM は先頭のまま', () => {
+  it('🔴 タグを追加しても 2 つ目の囲みを前置せず、BOM は先頭のまま', () => {
     const body = `${BOM}---\ntags: [a]\n---\n本文`;
     const out = applyTagsToBody(body, ['b'], 'add').body!;
     expect(out).toBe(`${BOM}---\ntags: [a, b]\n---\n本文`);

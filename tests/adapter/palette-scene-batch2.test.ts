@@ -59,7 +59,7 @@ const BATCH2: readonly Row[] = [
   { id: 'replace-all', source: R + 'shell.ts', scene: '置換の欄を開いているとき', field: 'replace-find' },
   { id: 'search-jump-next', source: R + 'search-jump.ts', scene: '一致した所を巡っているとき' },
   { id: 'search-jump-prev', source: R + 'search-jump.ts', scene: '一致した所を巡っているとき' },
-  { id: 'dual-tab-add', source: R + 'dual-filer.ts', screenText: 'にタブを足す', scene: '2 ペインを開いていて' },
+  { id: 'dual-tab-add', source: R + 'dual-filer.ts', screenText: 'にタブを追加', scene: '2 ペインを開いていて' },
   { id: 'clear-kind-filter', source: R + 'kind-bar.ts', scene: '種類で絞っているとき' },
   { id: 'toggle-filer-flatten', source: R + 'filer.ts', scene: 'フォルダの一覧を開いているとき' },
   { id: 'db-check', source: R + 'commands.ts', screenText: 'textContent = DB_CHECK_LABEL', scene: '「保存領域」を開いているとき' },
@@ -430,7 +430,7 @@ describe('⑥ 特例 2 件', () => {
     expect(scroll, 'お知らせの節へ送っていない').toHaveBeenCalledTimes(1);
   });
 
-  it('タブを足す:焦点の在る側のボタンを押す(左右に同じボタンが居ても、いつも左にならない)', () => {
+  it('タブを追加:焦点の在る側のボタンを押す(左右に同じボタンが居ても、いつも左にならない)', () => {
     const env = setup();
     const mk = (side: 'left' | 'right', focused: boolean): HTMLButtonElement => {
       const pane = document.createElement('div');

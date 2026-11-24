@@ -136,7 +136,7 @@ test('🔴 何も選ばずに押したら、理由が画面に出る', async ({ 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
-test('🔴 タブを足して、別の場所を 1 つのペインに持てる', async ({ page }) => {
+test('🔴 タブを追加して、別の場所を 1 つのペインに持てる', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -428,9 +428,9 @@ test('🔴 パンくず・タブをマウスで押しても、焦点がペイン
   await page.locator(`${PANE('left')} [data-pkc-action="dual-crumb"]`).first().click();
   expect(await focusedSide(), 'パンくずを押した直後に焦点が外れた').toBe('left');
 
-  // ③ タブを足して切り替える(マウス)── 帯は指紋が変わるたび組み直される
+  // ③ タブを追加して切り替える(マウス)── 帯は指紋が変わるたび組み直される
   await clickReal(page, `${PANE('left')} [data-pkc-action="dual-tab-add"]`);
-  expect(await focusedSide(), 'タブを足した直後に焦点が外れた').toBe('left');
+  expect(await focusedSide(), 'タブを追加した直後に焦点が外れた').toBe('left');
   await page.locator(`${PANE('left')} [data-pkc-action="dual-tab-activate"]`).first().click();
   expect(await focusedSide(), 'タブを切り替えた直後に焦点が外れた').toBe('left');
 

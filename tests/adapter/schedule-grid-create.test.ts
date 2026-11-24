@@ -257,7 +257,7 @@ describe('入力欄の Enter / Esc / 空', () => {
     dragEmpty(s.lanes()[0]!, minPx(600), minPx(690));
     const x = s.qa(`${BOX} ${CANCEL}`);
     expect(x, '枠の中に × が無い').toHaveLength(1);
-    expect(x[0]!.getAttribute('aria-label')).toBe('予定を作るのをやめる');
+    expect(x[0]!.getAttribute('aria-label')).toBe('予定の作成をやめる');
     s.input()!.value = '消える';
     await tick(); // 離した直後の click は飲まれる(ここで押すのは、その後の別の click)
     x[0]!.click();
@@ -507,7 +507,7 @@ describe('書き口は予定の面の「足す」と同じ 1 本', () => {
     expect(d.getState().phase).not.toBe('ready');
     const ok = addScheduleItem(d, { text: 'x', date: '2026-08-23', time: '10:00', timeEnd: '11:00' });
     expect(ok).toBe(false);
-    expect(d.getState().error ?? '').toContain('足してください');
+    expect(d.getState().error ?? '').toContain('追加してください');
   });
 
   it('🔴 断られたとき(今日のノートが無いのに編集中)は打った字を残す', async () => {

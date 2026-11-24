@@ -405,7 +405,7 @@ export function promptInApp(
      * 🔴 **戻しにくい操作の受けボタンを危険色にする**(#986 段③で足した)。
      *
      * ⚠ 直す前は `confirmInApp` にだけ在り、ここに無かった ── その結果
-     *   **入れ物ごと捨てる「捨てる」**が、日付を入れる小窓の「入れる」と
+     *   **入れ物ごと捨てる「捨てる」**が、日付を挿入小窓の「入れる」と
      *   **見た目で 1 ドットも区別が付かなかった**(1 件消すより重い操作のほうが、
      *   警告が弱いという逆転)。
      * 🔑 「地は無彩色、色は情報にだけ使う」(不可侵指示)── いちばん情報として
@@ -580,7 +580,7 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
 }
 
 /**
- * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+ * 🔴 **日付を挿入道具**(user 指示 2026-08-23)。
  *
  * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
  * > ついてくるツールとか用意されてもいいかも。アイデアはすごくいいと思うけど足りない**」
@@ -647,7 +647,7 @@ export function pickDateInApp(
      */
     readonly initialTime?: string;
     /**
-     * 日付を空にして「日付を入れる」を押したとき、`null`(やめた)ではなく**空の日付**を返すか。
+     * 日付を空にして「日付を挿入」を押したとき、`null`(やめた)ではなく**空の日付**を返すか。
      * ⚠ 予定の「日付なしで足す」道を、この小窓を通っても残すため(片道にしない)。既定 `false`。
      */
     readonly allowEmpty?: boolean;
@@ -656,7 +656,7 @@ export function pickDateInApp(
   const withTime = opts.withTime !== false;
   return enqueue(async () => {
     const f = ensureFrame(host);
-    f.title.textContent = '日付を入れる';
+    f.title.textContent = '日付を挿入';
     // ⚠ 前の中身は捨てる(確認は `textContent` を上書きするので、逆向きも要る)
     f.body.textContent = '';
 
@@ -699,7 +699,7 @@ export function pickDateInApp(
       f.body.append(timeLabel);
     }
 
-    f.ok.textContent = '日付を入れる';
+    f.ok.textContent = '日付を挿入';
     f.ok.removeAttribute('data-pkc-danger');
     f.cancel.textContent = 'やめる';
     f.cancel.hidden = false;
@@ -741,7 +741,7 @@ export function pickSnippetInApp(
   note: string,
 ): Promise<SnippetChoice | null> {
   return pickRowInApp(host, {
-    title: 'テンプレートを入れる',
+    title: 'テンプレートを挿入',
     field: 'pick-snippet',
     indexAttr: 'data-pkc-snippet-index',
     note,
@@ -817,7 +817,7 @@ export function pickDiagramInApp(
   choices: readonly { readonly id: string; readonly label: string }[],
 ): Promise<string | null> {
   return pickRowInApp(host, {
-    title: '図を入れる',
+    title: '図を挿入',
     field: 'pick-diagram',
     indexAttr: 'data-pkc-diagram-index',
     note: '',
@@ -943,7 +943,7 @@ function pickIconFrom(host: HTMLElement, spec: IconPickSpec): Promise<string | n
     f.dialog.addEventListener('keydown', onArrow);
     f.dialog.addEventListener('click', onOutside);
 
-    f.ok.textContent = 'アイコンを入れる';
+    f.ok.textContent = 'アイコンを挿入';
     f.ok.removeAttribute('data-pkc-danger');
     f.ok.hidden = true;
     f.cancel.textContent = 'やめる';
@@ -1051,7 +1051,7 @@ export function pickAppGroupIconInApp(
  */
 export function pickBodyIconInApp(host: HTMLElement): Promise<string | null> {
   return pickIconFrom(host, {
-    title: 'アイコンを入れる',
+    title: 'アイコンを挿入',
     field: 'pick-body-icon',
     ariaLabel: '本文へ入れるアイコンを選ぶ',
     current: '',
@@ -1059,7 +1059,7 @@ export function pickBodyIconInApp(host: HTMLElement): Promise<string | null> {
     notes: [
       {
         field: 'pick-body-icon-note',
-        text: '選ぶと、いま打っている場所に入ります。本文には :home: のような字で入るので、次からは手でも打てます。',
+        text: '選ぶと、いまカーソルの位置に入ります。本文には :home: のような字で入るので、次からは手でも打てます。',
       },
     ],
   });
@@ -1763,7 +1763,7 @@ export function pickCommandInApp(
       /**
        * 🔴 **空欄の Enter が実行するのは「最近使った操作」だけ**(#1966 3-2 の着地前レビュー 🔴1)。
        * ⚠ 一覧は空欄でも「いまの場面の操作」を上に寄せるので、最近使った操作が無いと先頭は「ノートを閉じる」
-       *   「画面を閉じる」「いまの時刻を入れる」などになる ── 開いて Enter を押しただけで、選んでもいない操作が走る。
+       *   「画面を閉じる」「いまの時刻を挿入」などになる ── 開いて Enter を押しただけで、選んでもいない操作が走る。
        * 🔑 最近使った操作が無い空欄では、先頭の行へ焦点を移すだけにする(左の `>` の一覧と同じ作法)。
        *   名前を 1 字でも打ったら今までどおり先頭を実行する(絞り込んで即実行の速さは残す)。
        */
@@ -1802,7 +1802,7 @@ export function pickCommandInApp(
  *
  * @param rows 探し語を受けて「一覧」と「下に出す 1 行」を返す関数。
  *   ⚠ **打つたびに呼ぶ**(開いた瞬間で固めない)
- * @param opts.title 器の題名。⚠ 省けば「ノートリンクを入れる」── 同じ器を
+ * @param opts.title 器の題名。⚠ 省けば「ノートリンクを挿入」── 同じ器を
  *   「移す…」(#215)が入れ先のフォルダを選ぶのに、スタック(#633 段②)が開く 1 枚を選ぶのに
  *   使うので、**何を選んでいるか**を題名で言う(題は押した物の名前でなければ user は別の操作を開いたと思う)
  * @returns 選んだノートの lid。`Escape` / 「やめる」なら `null`
@@ -1814,7 +1814,7 @@ export function pickEntryInApp(
 ): Promise<string | null> {
   return enqueue(async () => {
     const f = ensureFrame(host);
-    f.title.textContent = opts.title ?? 'ノートリンクを入れる';
+    f.title.textContent = opts.title ?? 'ノートリンクを挿入';
     f.body.textContent = '';
 
     const input = document.createElement('input');

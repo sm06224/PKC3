@@ -101,7 +101,7 @@ describe('追記欄を空のまま押す', () => {
     d.dispatch({ type: 'BODY_LOADED', lid: 'n1', body: '本文' });
     input.value = '  \n ';
     btn.click();
-    expect(said).toContain('追記する内容を打ってから、もう一度押してください');
+    expect(said).toContain('追記する内容を入力してから、もう一度押してください');
     expect(document.activeElement).toBe(input);
     expect(d.getState().error, '注意であってエラーではない').toBeNull();
   });

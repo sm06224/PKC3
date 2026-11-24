@@ -357,15 +357,15 @@ describe('「図」を押すと 5 種から選ぶ(#528 案 B)', () => {
    * ⚠ 位置ごと pin する ── 末尾へ足す実装だと、表とコードブロックの間に在った
    *   ボタンが右へ飛ぶ(「同じものが常に同じ場所にある」)。
    */
-  it('🔴 「図を入れる」は「その他 ▾」の元に在り、一覧を開くボタンになっている(#1982 段 3)', async () => {
+  it('🔴 「図を挿入」は「その他 ▾」の元に在り、一覧を開くボタンになっている(#1982 段 3)', async () => {
     const { d, q, root } = setup([meta('a')], { a: 'x' });
     d.dispatch({ type: 'SELECT_ENTRY', lid: 'a' });
     await tick();
     q('[data-pkc-action="start-edit"]')!.click();
     const btn = root.querySelector<HTMLElement>('[data-pkc-region="format-bar"] [data-pkc-action="insert-diagram"]');
-    expect(btn, '帯に「図を入れる」が無い').not.toBeNull();
+    expect(btn, '帯に「図を挿入」が無い').not.toBeNull();
     expect(btn!.closest('[data-pkc-field="format-more-source"]'), '「その他 ▾」の元の中に居ない').not.toBeNull();
-    expect(btn!.querySelector('[data-pkc-field="label"]')?.textContent).toBe('図を入れる');
+    expect(btn!.querySelector('[data-pkc-field="label"]')?.textContent).toBe('図を挿入');
     expect(btn!.hasAttribute('data-pkc-format'), 'まだ format-text の口が残っている').toBe(false);
     // ⚠ 対照群 ── `format-text` の側には `mermaid` のボタンが**居ない**
     expect(root.querySelector('[data-pkc-format="mermaid"]')).toBeNull();
@@ -720,7 +720,7 @@ describe('書式パネル ── live の 1 面(2026-08-08)', () => {
 });
 
 /**
- * 🔴 **日付を入れる道具**(user 指示 2026-08-23)。
+ * 🔴 **日付を挿入道具**(user 指示 2026-08-23)。
  *
  * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
  * > ついてくるツールとか用意されてもいいかも。アイデアはすごくいいと思うけど足りない**」
@@ -733,7 +733,7 @@ describe('書式パネル ── live の 1 面(2026-08-08)', () => {
  * ⚠ 観測点を textarea の `value` だけにしない ── それだと「書き戻したが state に
  * 届いていない」実装が緑で通り、**保存すると日付が消える**。
  */
-describe('日付を入れる道具(user 指示 2026-08-23)', () => {
+describe('日付を挿入道具(user 指示 2026-08-23)', () => {
   beforeEach(() => {
     localStorage.setItem('pkc3.editor-mode', 'split');
     resetAppDialogForTest();
@@ -944,10 +944,10 @@ describe('「図案」を押すと絵の表から選ぶ(#853 段①)', () => {
     const { q, root } = await openPicker();
     const buttons = [...root.querySelectorAll('[data-pkc-region="format-bar"] button')];
     const labels = buttons.map((b) => b.querySelector('[data-pkc-field="label"]')?.textContent);
-    const at = labels.indexOf('アイコンを入れる');
-    expect(at, '帯に「アイコンを入れる」が無い').toBeGreaterThan(0);
+    const at = labels.indexOf('アイコンを挿入');
+    expect(at, '帯に「アイコンを挿入」が無い').toBeGreaterThan(0);
     // ⚠ **入れる道具の並びの末尾**(日付 / ノート / 雛形 の後)── 既に在る 3 つを動かさない
-    expect(labels[at - 1], '「アイコンを入れる」がテンプレートの隣に居ない').toBe('テンプレートを入れる');
+    expect(labels[at - 1], '「アイコンを挿入」がテンプレートの隣に居ない').toBe('テンプレートを挿入');
     expect(buttons[at]!.hasAttribute('data-pkc-format'), 'format-text の口が付いている').toBe(false);
     expect(q('[data-pkc-action="insert-icon"]')).not.toBeNull();
   });

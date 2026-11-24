@@ -21,7 +21,7 @@
  * - `COPY 表の名前 TO 'ファイル名.csv' [(オプション, …)]`(`SELECT * FROM 表の名前` と同じ)
  * - 形式は **FORMAT の指定 → なければ拡張子**(`.csv` / `.tsv` / `.parquet` / `.json` / `.ndjson` / `.jsonl`)
  * - オプションは**許したものだけ**(`COPY_OPTIONS`)。`PARTITION_BY` / `FILE_SIZE_BYTES` のような**複数ファイルを作る**ものは断る
- * - `COPY … FROM`(取り込み)は断る(取り込みは画面の「ファイルを足す」)
+ * - `COPY … FROM`(取り込み)は断る(取り込みは画面の「ファイルを追加」)
  *
  * ⚠ 中の問い合わせは**読む文だけ**(`checkDuckDbSql`)── `COPY (DELETE …)` や `EXPLAIN` は断る。
  *
@@ -198,7 +198,7 @@ export function userCopyOf(input: string): UserCopy | null {
   }
   const tail = s.slice(rest);
   if (/^\s*from\b/iu.test(tail)) {
-    return refuse('COPY … FROM(取り込み)は打てません。ファイルを調べるときは画面の「ファイルを足す」から選びます');
+    return refuse('COPY … FROM(取り込み)は打てません。ファイルを調べるときは画面の「ファイルを追加」から選びます');
   }
   const m = /^\s*to\s+('(?:[^']|'')*')\s*(?:\(([\s\S]*)\))?$/iu.exec(tail);
   if (m === null) return refuse(`COPY は ${FORM} の形で打ちます(書き先はクォートで囲んだファイル名です)`);

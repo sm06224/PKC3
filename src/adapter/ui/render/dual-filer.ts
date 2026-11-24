@@ -1389,7 +1389,7 @@ export class DualFilerRenderer {
       add.type = 'button';
       add.setAttribute('data-pkc-action', 'dual-tab-add');
       add.setAttribute('data-pkc-side', side);
-      add.setAttribute('aria-label', `${SIDE_LABEL[side]}にタブを足す`);
+      add.setAttribute('aria-label', `${SIDE_LABEL[side]}にタブを追加`);
       add.title = 'いまの場所を、もう 1 枚のタブで開きます';
       add.textContent = '+';
       host.append(add);

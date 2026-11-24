@@ -43,7 +43,7 @@ export interface MoveLines {
   readonly lines: readonly string[];
   /**
    * 🔴 **落とし先の行(`toBefore` 行目)の、落とした時点の中身**(#1087)。`null` = 末尾(その行が無い)。
-   * ⚠ 掴んだ塊(`lines`)だけを突き合わせると、**落とし先**は番号のままで、別の窓が上へ行を足していれば
+   * ⚠ 掴んだ塊(`lines`)だけを突き合わせると、**落とし先**は番号のままで、別の窓が上へ行を追加していれば
    *   塊は**違う所**へ入る(`insert-lines` の `anchor` と同じ穴)。disk 側の `toBefore` 行目が byte 一致しなければ書かない。
    */
   readonly toBeforeLine: string | null;
@@ -137,7 +137,7 @@ export type InsertPlace =
  * ⚠ 差し込みだけが**錨を持っていなかった**(`move-lines` は掴んだ行、`place-move` は
  *   `openLine`、`undo-append` は行の並びで突き合わせる)。段②(一覧の行)は落とした
  *   その場で撃つので実害が小さかったが、**段④は落としてから書くまでに待つ**
- *   (縮める / bytes を置く / 添付のノートを作る)── その間に別の書換が行を足すと、
+ *   (縮める / bytes を置く / 添付のノートを作る)── その間に別の書換が行を追加すと、
  *   行番号だけでは**段落の途中へ黙って刺さる**。
  */
 export interface InsertAnchor {
@@ -186,7 +186,7 @@ export function insertLines(
   lines: readonly string[],
   /**
    * 🔴 **落とした時の目印**(#684 段④)。⚠ 合わなければ**書かない** ── 落としてから
-   *   書くまでに別の書換が行を足していたら、同じ番号は**別の行**を指す
+   *   書くまでに別の書換が行を追加していたら、同じ番号は**別の行**を指す
    *   (`moveLinesWithInverse` の byte 一致・`place-move` の `openLine` と同じ作法)。
    * ⚠ 省略 = これまでどおり(段②:落としたその場で撃つので待ち時間が無い)。
    */

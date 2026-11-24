@@ -2010,7 +2010,7 @@ describe('確定 → 着弾の窓(非同期の描き直し)', () => {
 });
 
 /**
- * 🔴 **探す欄へ焦点を渡して消えた行を、caret ごと開き直す**(#582。左の `>` から「打っている場所に入れる」操作を呼ぶ道)。
+ * 🔴 **探す欄へ焦点を渡して消えた行を、caret ごと開き直す**(#582。左の `>` から「カーソルの位置に入れる」操作を呼ぶ道)。
  *
  * 守るもの:① 開いた行が `data-pkc-row-line` を運ぶ(binder が行番号を控える材料)② 控えた行を開き直して選択を戻す
  * (event 経由 = binder が使う口)③ **控えの原文と違う行が開くなら、書かずに閉じて `done(false)`**(別の行の先頭へ入れない)
@@ -2260,7 +2260,7 @@ describe('ライブの行で Esc ── 打った字があれば聞く(E5)', () 
     expect(box(r.host)).toBeNull();
   });
 
-  it('🔴 打っていたら「打った内容を捨てますか」と聞き、答えるまで開いたまま', async () => {
+  it('🔴 打っていたら「入力した内容を捨てますか」と聞き、答えるまで開いたまま', async () => {
     const r = rig();
     openClick(findByText(r.host, 'p', '最初の段落。'));
     const ta = box(r.host)!;
@@ -2268,7 +2268,7 @@ describe('ライブの行で Esc ── 打った字があれば聞く(E5)', () 
     press(ta);
     await new Promise((res) => setTimeout(res, 0));
     expect(dialogEl(), '聞いていない').not.toBeNull();
-    expect(document.querySelector('[data-pkc-field="dialog-body"]')?.textContent).toBe('打った内容を捨てますか');
+    expect(document.querySelector('[data-pkc-field="dialog-body"]')?.textContent).toBe('入力した内容を捨てますか');
     expect(box(r.host), '答える前に閉じた').toBe(ta);
     expect(ta.value, '打った字が消えた').toBe('打った字');
     await answerDialog('dialog-cancel');
