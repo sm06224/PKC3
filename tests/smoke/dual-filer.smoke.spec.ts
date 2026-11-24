@@ -11,6 +11,7 @@ import {
   useSplitEditor,
   transitionsSettled,
   openBrowse,
+  openBarMenu,
 } from './helpers';
 
 /**
@@ -474,6 +475,8 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
   await expect(page.locator('[data-pkc-field="dual-delete"]'), 'ゴミ箱へ入れるボタンの字').toContainText('ゴミ箱へ');
   for (const field of ['dual-move', 'dual-copy', 'dual-rename-begin', 'dual-delete']) {
     await statusText.evaluate((el) => (el.textContent = ''));
+    // 🔴 名前の変更は「その他 ▾」の奥(#1442 S3-2)
+    if (field === 'dual-rename-begin') await openBarMenu(page, 'dual-more');
     await clickReal(page, `[data-pkc-field="${field}"]`);
     await expect(
       statusText,
@@ -483,6 +486,7 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
 
   /** 選んだ状態で、壊さない口(名前を変える)が本当に開く。 */
   await page.locator(ROWS('left')).first().click();
+  await openBarMenu(page, 'dual-more');
   await clickReal(page, '[data-pkc-field="dual-rename-begin"]');
   await expect(
     page.locator(`${PANE('left')} [data-pkc-field="dual-rename"]`),
@@ -492,6 +496,7 @@ test('🔴 2 ペインの押せる口に、無反応が 1 つも無い (#273)', 
 
   /** 新しいフォルダ ── 押したら**行が増える**(押しても何も起きない、にしない)。 */
   const before = await page.locator(ROWS('left')).count();
+  await openBarMenu(page, 'dual-more');
   await clickReal(page, '[data-pkc-field="dual-mkdir"]');
   await expect(page.locator(ROWS('left')), 'フォルダが増えていない').toHaveCount(before + 1);
 
@@ -613,7 +618,7 @@ test('🔴 操作行は下端の全幅・等分割で、名前の列がいちば
   expect(Math.abs(cmds.width - body.width), '操作行が全幅でない').toBeLessThanOrEqual(1);
 
   const widths = await page
-    .locator('[data-pkc-region="dual-commands"] button')
+    .locator('[data-pkc-region="dual-commands"] > button')
     .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width));
   /**
    * ⚠ **実数で pin する**(下限にしない)── 1 本足すたびに**ここを見に来る**のが
@@ -622,7 +627,12 @@ test('🔴 操作行は下端の全幅・等分割で、名前の列がいちば
    * 🔑 6 本目は「ノート」(#273、2026-08-24)。
    */
   // 🔑 7 本目は「下見」(#273 残件、2026-08-25)
-  expect(widths.length, 'ボタンが 7 つ出ていない').toBe(7);
+  // 🔴 #1442 S3-2: 帯に出すのは 4 つ(コピー・移す・ゴミ箱へ・プレビュー)。名前・フォルダ・ノートは「その他 ▾」の奥(字の見える行)── 合計 7 は変わらない
+  expect(widths.length, 'タイルが 4 つ出ていない').toBe(4);
+  expect(
+    await page.locator('[data-pkc-region="dual-commands"] button').count(),
+    '奥へ回した 3 つを含めて 7 つの操作が揃っていない(消した物がある)',
+  ).toBe(7);
   expect(
     Math.max(...widths) - Math.min(...widths),
     `ボタンの幅が揃っていない(等分割になっていない): ${widths.join(' / ')}`,
@@ -997,6 +1007,7 @@ test('🔴 ペインごとに絞れて、絞った欄から行へ降りられる
    */
   await box.fill('あいう');
   await expect(page.locator(ROWS('left'))).toHaveCount(1);
+  await openBarMenu(page, 'dual-more');
   await clickReal(page, '[data-pkc-field="dual-mkdir"]');
   await expect(
     page.locator(ROWS('left')),

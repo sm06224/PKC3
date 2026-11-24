@@ -57,7 +57,8 @@ import { paintRowMark } from './selection-mark';
 import { appDualPrefs, DualPrefsStore } from './dual-prefs';
 import { appPhone } from './phone-layout';
 import { archetypeLabel } from '@features/flavor/archetype-label';
-import { ACTION_ICONS, ARCHETYPE_ICONS, iconSpan, markBarTile, setActionIcon } from './icons';
+import { ACTION_ICONS, ARCHETYPE_ICONS, iconSpan, markBarTile, markVariant, setActionIcon } from './icons';
+import { makeBarMenu } from './bar-menu';
 // 🔴 タブの名乗りは左の列と同じ関数(#720)
 import { markTab, markTablist } from './tabs-a11y';
 // 🔴 表を送って見てから離れ、戻ると同じ所(C10 / #1045)。左右で**別々に**覚える
@@ -199,6 +200,13 @@ const COMMAND_ITEMS: readonly {
    *   (CLAUDE.md §1)。
    */
   readonly empty: string | null;
+  /**
+   * 🔴 **帯に出さず「その他 ▾」の 1 段奥へ回す物の、一覧での字**(#1442 S3-2。SQL 画面と同じ方針)。
+   * ⚠ 帯のタイルは図案だけで名前を持たない(`title` と長押し)が、一覧は字が見えるので動詞で書く。
+   *   基準は「使う頻度と取り消せるか」── コピー・移す・ゴミ箱へ・プレビューは常用で帯に残し、名前の変更と作る 2 つを奥へ。
+   *   ⚠ 空 = 帯に出す。⚠ 操作の口(`action`)・鍵(`command`)は変えない(押した先も鍵も同じ)。
+   */
+  readonly menuLabel?: string;
 }[] = [
   {
     action: 'dual-copy',
@@ -229,6 +237,7 @@ const COMMAND_ITEMS: readonly {
     directed: false,
     command: 'dual-rename',
     label: '名前',
+    menuLabel: '名前を変える',
     hint: () => '選んだ 1 件の名前を、その場で打ち替えます',
     empty: null,
   },
@@ -237,6 +246,7 @@ const COMMAND_ITEMS: readonly {
     directed: false,
     command: 'dual-new-folder',
     label: 'フォルダ',
+    menuLabel: 'フォルダを作る',
     hint: (from) => `${from}のペインが開いている場所に、新しいフォルダを作ります`,
     empty: null,
   },
@@ -249,6 +259,7 @@ const COMMAND_ITEMS: readonly {
     directed: false,
     command: 'dual-new-note',
     label: 'ノート',
+    menuLabel: 'ノートを作る',
     hint: (from) => `${from}のペインが開いている場所に、新しいノートを作ります`,
     empty: null,
   },
@@ -1673,7 +1684,15 @@ export class DualFilerRenderer {
     this.lastCommands = sig;
     const to = SIDE_LABEL[otherSide(from)];
     host.textContent = '';
+    /**
+     * 🔴 **帯の並び**(#1442 S3-2。SQL 画面と同じ方針 ── 常用は出す・副次は 1 段奥)。
+     * 出す(左): コピー / 移す / ゴミ箱へ(**危険**)/ プレビュー。奥(そのすぐ右の「その他 ▾」): 名前を変える / フォルダを作る / ノートを作る。
+     * ⚠ 主の操作は置かない(2 ペインは**選んだ物を動かす**面で、主の候補が状況で変わる ── 1 つに決めると嘘をつく)。
+     * ⚠ 帯の最下段なので、メニューは**上へ**開く。⚠ 並びは固定(焦点・選択数で入れ替えない)。
+     */
+    const rare: HTMLElement[] = [];
     COMMAND_ITEMS.forEach((it, i) => {
+      const inMenu = it.menuLabel !== undefined;
       const b = document.createElement('button');
       b.type = 'button';
       b.setAttribute('data-pkc-action', it.action);
@@ -1682,8 +1701,11 @@ export class DualFilerRenderer {
        * 🔴 **図案だけの均一なタイルにする**(#1054 段②)。⚠ 名前は
        *   `cmd-label` のまま残す(見た目だけ隠す ── `app.css` の
        *   `[data-pkc-bar-tile] [data-pkc-field='cmd-label']`)。
+       * ⚠ 奥へ回した物(`menuLabel`)はタイルにしない ── 一覧は字が見える行である(隠すと読めない)。
        */
-      markBarTile(b);
+      if (!inMenu) markBarTile(b);
+      // 🔴 消す操作は危険の型(帯のタイル・長押しの一覧のどちらでも赤)
+      if (it.action === 'dual-delete') markVariant(b, 'danger');
       const iconName = ACTION_ICONS[it.action] ?? 'dot';
       const icon = iconSpan(iconName);
       setActionIcon(icon, it.action, iconName);
@@ -1694,7 +1716,7 @@ export class DualFilerRenderer {
        * ⚠ 相手のペインが**画面に居ない**ので、「写す」だけでは
        *   どこへ行くのか読めない(パソコンは 2 枚見えているので入れない)。
        */
-      label.textContent = solo && it.directed ? `${to}へ${it.label}` : it.label;
+      label.textContent = inMenu ? (it.menuLabel ?? it.label) : solo && it.directed ? `${to}へ${it.label}` : it.label;
       b.append(icon, label);
       /**
        * 🔴 **鍵は `title` の末尾に括弧で足す**(#1054 段②。⚠ 直す前は語の隣に
@@ -1710,7 +1732,10 @@ export class DualFilerRenderer {
       // 🔑 出し入れの口は**押している状態**を出す(点いているか、字だけでは読めない)
       if (it.action === 'dual-preview-toggle')
         b.setAttribute('aria-pressed', state.dual.previewOn ? 'true' : 'false');
-      host.append(b);
+      if (inMenu) rare.push(b);
+      else host.append(b);
     });
+    // ⚠ 帯の**左**(ボタンのすぐ右)に置く ── 右端は浮き札(消せる通知)が出る場所で、「その他 ▾」を覆ってしまう。一覧は左の端から上へ開く
+    host.append(makeBarMenu('dual-more', 'その他', '名前を変える / フォルダを作る / ノートを作る', rare, { up: true, align: 'start' }));
   }
 }

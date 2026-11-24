@@ -313,27 +313,46 @@ describe('2 ペインの面(描画)', () => {
       b.hasAttribute('data-pkc-bar-tile'),
       b.querySelector('[data-pkc-field="cmd-label"]')?.textContent,
     ]);
+    /**
+     * 🔴 **帯の並び**(#1442 S3-2。SQL 画面と同じ「常用は出す・副次は 1 段奥」)。
+     *   出す(タイル): コピー / 移す / ゴミ箱へ / プレビュー。奥(ボタンのすぐ右の「その他 ▾」。字の見える行): 名前を変える / フォルダを作る / ノートを作る。
+     *   ⚠ 操作の口(`data-pkc-action`)と鍵は変えていない ── 奥へ移しただけで、消した物は無い。
+     */
     expect(rows).toEqual([
       ['dual-copy', true, 'コピー'],
       ['dual-move', true, '移す'],
-      ['dual-rename-begin', true, '名前'],
-      ['dual-mkdir', true, 'フォルダ'],
-      // 🔴 **入れ物だけでなく中身も作れる**(#273)── `F7` と隣り合わない鍵にしてある
-      //    (隣り合わせると、押し間違いで**別の種類**ができる)
-      ['dual-mknote', true, 'ノート'],
       ['dual-delete', true, 'ゴミ箱へ'],
       // 🔴 **プレビュー**(#273 残件)── 開かずに中身を確かめる(印は要らない)
       ['dual-preview-toggle', true, 'プレビュー'],
+      ['dual-rename-begin', false, '名前を変える'],
+      ['dual-mkdir', false, 'フォルダを作る'],
+      // 🔴 **入れ物だけでなく中身も作れる**(#273)── `F7` と隣り合わない鍵にしてある
+      //    (隣り合わせると、押し間違いで**別の種類**ができる)
+      ['dual-mknote', false, 'ノートを作る'],
     ]);
+    // ⚠ 奥の 3 つは「その他 ▾」の中に居る(帯のタイルの並びに混ざらない)・上へ開く・消す操作は危険の型
+    const more = cmds.querySelector<HTMLDetailsElement>('details[data-pkc-field="dual-more"]')!;
+    expect(more.querySelector('summary')?.textContent).toBe('その他');
+    expect([...more.querySelectorAll('button')].map((b) => b.getAttribute('data-pkc-action'))).toEqual([
+      'dual-rename-begin',
+      'dual-mkdir',
+      'dual-mknote',
+    ]);
+    expect(more.querySelector('[data-pkc-bar-menu-list]')?.getAttribute('data-pkc-bar-menu-list')).toBe('up');
+    // 🔴 左寄せの帯の中なので、一覧は左の端から右へ開く(右端は浮き札が出る場所。右端へ揃えると左の画面外へ出る)
+    expect(more.querySelector('[data-pkc-bar-menu-list]')?.getAttribute('data-pkc-bar-menu-align')).toBe('start');
+    expect(cmds.lastElementChild, '「その他 ▾」が帯の末尾(ボタンのすぐ右)に居ない').toBe(more);
+    expect(cmds.querySelector('[data-pkc-action="dual-delete"]')?.getAttribute('data-pkc-variant')).toBe('danger');
+    expect(cmds.querySelectorAll('[data-pkc-variant="primary"]').length, '2 ペインに主は置かない').toBe(0);
     const keys = [...cmds.querySelectorAll<HTMLButtonElement>('button')].map((b) => b.title);
     expect(keys, '鍵が title の末尾に無い').toEqual([
       expect.stringContaining('(F5)'),
       expect.stringContaining('(F6)'),
+      expect.stringContaining('(F8)'),
+      expect.stringContaining('(F9)'),
       expect.stringContaining('(F2)'),
       expect.stringContaining('(F7)'),
       expect.stringContaining('(Shift + F4)'),
-      expect.stringContaining('(F8)'),
-      expect.stringContaining('(F9)'),
     ]);
   });
 

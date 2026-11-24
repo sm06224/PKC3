@@ -1586,6 +1586,31 @@ img[data-pkc-action='view-big']:focus-visible {
   ) {
   flex: none;
 }
+/**
+ * 🔴 **ファイラー以外のタブでは、左のペインの上の「ファイラー用の頭」のうち効かない部分を畳む**(#1442 S3-2。user 指示 2026-11-24)。
+ * 頭 = 探す欄(`search`。種類のチップ・保存した検索も)/ 並び順・⇅(`sort`)/ 作る帯(`create`)で、約 110px。印(`data-pkc-filer-fold`)は
+ * `BrowseRouter.render` が畳む部分を空白区切りで書く(判定と表は `browse-mode.ts` の `filerHeaderFold`。フォルダは印なし = 何も畳まない)。
+ * ⚠ 畳むのは**見た目だけ**(`display: none`)── DOM に残すので、鍵(`Alt+←`・`Ctrl+N`・操作を探す)の受け手のボタンは生きたまま。
+ *   探す欄を畳んでいるとき、探す欄への焦点(`focus-search`)はフォルダのタブへ移ってから入れる。
+ * ⚠ スマホ幅の一覧のページでは、メッセージの入口が作る帯の末尾に居る(`rail.ts` の `placeMessageEntry`)── 他の子だけ畳み、入口は残す
+ *   (どの画面からも届く常設の入口 ── CLAUDE.md §2-3)。入口の居ない帯(PC)は空になるので丸ごと畳む。
+ */
+[data-pkc-region='sidebar'][data-pkc-filer-fold~='search'] > :is(
+    [data-pkc-region='find-bar'],
+    [data-pkc-region='kind-bar'],
+    [data-pkc-region='saved-searches']
+  ),
+[data-pkc-region='sidebar'][data-pkc-filer-fold~='sort'] > [data-pkc-region='find-bar'] > :is(
+    [data-pkc-field='entry-sort'],
+    [data-pkc-field='entry-sort-reverse']
+  ),
+[data-pkc-region='sidebar'][data-pkc-filer-fold~='create'] > :is(
+    [data-pkc-region='create-menu'],
+    [data-pkc-region='create-bar']:not(:has(> [data-pkc-field='message-entry']))
+  ),
+[data-pkc-region='sidebar'][data-pkc-filer-fold~='create'] > [data-pkc-region='create-bar'] > :not([data-pkc-field='message-entry']) {
+  display: none;
+}
 [data-pkc-region='find-bar'] input,
 [data-pkc-region='create-bar'] select {
   /* 入力欄・選び所は枠を持つ(規則 ⑤: 枠は入力欄だけ)── 机の上でも見えるよう紙の地を敷く */
@@ -7561,12 +7586,10 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   content: '\25b6';
   font-size: 0.8em;
 }
-[data-pkc-field='sql-more'],
-[data-pkc-field='sql-out'] {
+[data-pkc-bar-menu] {
   position: relative;
 }
-[data-pkc-field='sql-more'] > summary,
-[data-pkc-field='sql-out'] > summary {
+[data-pkc-bar-menu] > summary {
   list-style: none;
   display: inline-flex;
   align-items: center;
@@ -7579,24 +7602,20 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   cursor: pointer;
   user-select: none;
 }
-[data-pkc-field='sql-more'] > summary::-webkit-details-marker,
-[data-pkc-field='sql-out'] > summary::-webkit-details-marker {
+[data-pkc-bar-menu] > summary::-webkit-details-marker {
   display: none;
 }
-[data-pkc-field='sql-more'] > summary::after,
-[data-pkc-field='sql-out'] > summary::after {
+[data-pkc-bar-menu] > summary::after {
   content: '\25be';
 }
-[data-pkc-field='sql-more'] > summary:hover,
-[data-pkc-field='sql-out'] > summary:hover {
+[data-pkc-bar-menu] > summary:hover {
   background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
-[data-pkc-field='sql-more'] > summary:focus-visible,
-[data-pkc-field='sql-out'] > summary:focus-visible {
+[data-pkc-bar-menu] > summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-[data-pkc-field='sql-menu-list'] {
+[data-pkc-bar-menu-list] {
   position: absolute;
   right: 0;
   top: calc(100% + 2px);
@@ -7610,13 +7629,36 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
 }
-[data-pkc-field='sql-menu-list'] button {
+/* 🔴 **帯の「書き出す ▾」「その他 ▾」は全部これ**(`bar-menu.ts`。SQL・集計・差分マージ・計算・テキスト整形・2 ペイン ── #1442 S3-2)。
+ *   ⚠ 左 = 常用 / 右 = 書き出す・その他(`bar-spacer` が右へ寄せる)。最下段の帯は上へ開く(`data-pkc-bar-menu-list='up'`) */
+[data-pkc-bar-menu-list='up'] {
+  top: auto;
+  bottom: calc(100% + 2px);
+}
+/* 左寄せの帯の中のメニュー(2 ペインの下の帯)は、左の端から右へ開く(右端へ揃えると左の画面外へ出る) */
+[data-pkc-bar-menu-list][data-pkc-bar-menu-align='start'] {
+  right: auto;
+  left: 0;
+}
+[data-pkc-bar-menu-list] button {
   justify-content: flex-start;
   background: transparent;
   border-color: transparent;
 }
-[data-pkc-field='sql-menu-list'] button:hover:not(:disabled) {
+[data-pkc-bar-menu-list] button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+/* 帯の右端へ寄せる詰め物(SQL の `sql-bar-spacer` と同じ。1 行に収まらない幅では 0 幅で折り返す) */
+[data-pkc-field='bar-spacer'] {
+  flex: 1 1 0;
+}
+/* 帯の 1 行(`bar-menu.ts` を使う帯)。⚠ 折り返す(狭い幅で右へはみ出さない) */
+[data-pkc-bar-row] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  row-gap: var(--s1);
 }
 /* 使い方と例は 1 段奥(開くと欄の下に出る。出すぎるなら中で転がる) */
 [data-pkc-field='sql-help'] {
@@ -9369,13 +9411,35 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
   gap: var(--s1);
   padding: 0 var(--s2);
 }
+/* 🔴 **欄は「+ リンクを追加」で開閉する**(#1442 S3-2)。既定は閉じて、組み込みアプリの一覧が最上段から見える。
+ *   閉じている間の非表示は `hidden` 属性(文書全体の `[hidden] { display: none !important }` が効く)── ここに規則は足さない。 */
+[data-pkc-region='launcher-add-wrap'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  padding: var(--s2) 0 0;
+}
+[data-pkc-field='launcher-add-open'] {
+  align-self: flex-start;
+  margin-inline-start: var(--s2);
+}
+/* 開いている間は押している状態を形(太字 + 淡い強調の地)で示す(もう一度押すと閉じる) */
+[data-pkc-field='launcher-add-open'][aria-expanded='true'] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-color: var(--accent-dim-fg);
+  font-weight: 600;
+}
+[data-pkc-field='launcher-add-cancel'] {
+  margin-inline-start: auto;
+}
 [data-pkc-field='launcher-add-name'],
 [data-pkc-field='launcher-add-url'] {
   flex: 1 1 100%;
   min-width: 0;
 }
 [data-pkc-field='launcher-add-go'] {
-  margin-inline-start: auto;
+  margin-inline-start: 0;
 }
 /* 🔴 「アプリは 2 回続けて押すと開きます」の上下の間を余白の段に揃える(#1442)── 直す前は p の既定(1em ≒ 13px)が
  *   上下に付いて、欄と見出しの間だけが広く空いていた */

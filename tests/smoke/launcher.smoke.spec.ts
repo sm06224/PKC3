@@ -2812,6 +2812,8 @@ test('🔴 リンクを追加して、リンク先の印を取り込む (#856 �
 
   // ① 「リンクを追加」── 足し先はこのアプリ自身(外へ出ない)
   const here = new URL(page.url()).origin + new URL(page.url()).pathname;
+  // 🔴 欄は「+ リンクを追加」で畳んでいる(#1442 S3-2)── 実クリックで開いてから
+  await clickReal(page, '[data-pkc-field="launcher-add-open"]');
   await page.locator('[data-pkc-field="launcher-add-name"]').fill('じぶん');
   await page.locator('[data-pkc-field="launcher-add-url"]').fill(here);
   await clickReal(page, '[data-pkc-field="launcher-add-go"]');

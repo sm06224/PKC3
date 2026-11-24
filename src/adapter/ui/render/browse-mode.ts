@@ -74,6 +74,45 @@ export function kindFilterApplies(mode: BrowseMode): boolean {
   return KIND_FILTER_MODES.includes(mode);
 }
 
+/**
+ * 🔴 **左のペインの上の「ファイラー用の頭」のうち、タブごとに畳む部分**(#1442 S3-2。user 指示 2026-11-24)。
+ *
+ * 頭 = ① 探す欄(戻る・進む・最近 + 本文ごと探す)と種類のチップ・保存した検索 ② 並び順・⇅ ③ 作る帯(約 110px)。
+ * ファイラー(フォルダ)の道具で、予定・アプリ・グラフ・シェル・連絡先などを開いているときは場所を取るだけなので畳み、各タブの領域を広げる。
+ * ファイラーへ戻れば元どおり出る(双方向)。
+ *
+ * ⚠ **全部を一律に畳まない** ── user が「検索欄がファイラー以外でも意味を持つ部分は判断して報告」と指示した。実装を読んで決めた(推測ではない):
+ * | 部分 | 効く(= 畳まない)タブ | 根拠 |
+ * |---|---|---|
+ * | 探す欄 | フォルダ・アプリ・予定・連絡先・音/動画・時間 | `launcher.ts` / `schedule.ts` / `contacts.ts` / `captures.ts` / `timers.ts` が `state.filterQuery` で中身を絞る |
+ * | 種類のチップ・保存した検索 | 探す欄と同じ(チップは `kindFilterApplies` が予定とフォルダだけに出す) | 予定は `kindFilter` / `labelFilter` も読む |
+ * | 並び順・⇅ | フォルダだけ | `entrySort` を読むのはフォルダ(と 2 ペイン)だけ |
+ * | 作る帯 | フォルダ・音/動画・時間 | 音/動画・時間のタブは**録音・画面録画・時間を計る**の押し口が作る帯の「その他 ▾」にしか無い(マウスだけで完結させる) |
+ * ⚠ 絞りが効く面で探す欄を畳むと、「予定が出ない」の原因(探す欄の語)が画面のどこにも無くなり、外す手も無くなる(連絡先の「絞りを外す」の行き止まり)。
+ * ⚠ グラフ・PC・シェル・手書きは絞りを読まない ── 全部畳む。
+ * ⚠ 判定は**この 1 関数**(`BrowseRouter.render` が `data-pkc-filer-fold` に書き、CSS が畳む)。面ごとに書かない。
+ */
+export type FilerHeaderPart = 'search' | 'sort' | 'create';
+
+/** 畳む部分を書く印(空白区切りの語)。⚠ `app.css` と `binder.ts` の `focus-search` が読む ── 綴りはここ 1 か所。 */
+export const FILER_FOLD_ATTR = 'data-pkc-filer-fold';
+
+export function filerHeaderFold(mode: BrowseMode): readonly FilerHeaderPart[] {
+  switch (mode) {
+    case 'filer':
+      return [];
+    case 'launcher':
+    case 'schedule':
+    case 'contacts':
+      return ['sort', 'create'];
+    case 'captures':
+    case 'timers':
+      return ['sort'];
+    default:
+      return ['search', 'sort', 'create'];
+  }
+}
+
 export function isBrowseMode(v: string): v is BrowseMode {
   return (BROWSE_MODES as readonly string[]).includes(v);
 }

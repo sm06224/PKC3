@@ -25,6 +25,7 @@
  */
 import type { AppState } from '@adapter/state/app-state';
 import { QUERY_LIMITS, TAGS_KEY, UNSET } from '@features/query/group-by';
+import { makeBarSpacer } from './bar-menu';
 
 /** 未設定の組の表示名。⚠ features は字を持たない(層規約)ので adapter が決める。 */
 const UNSET_LABEL = '(未設定)';
@@ -169,7 +170,12 @@ export class QueryRenderer {
     refresh.setAttribute('data-pkc-action', 'refresh-query');
     refresh.textContent = '集計を数え直す';
     refresh.title = '書き換えた後の中身で数え直します';
-    head.append(title, label, refresh);
+    /**
+     * 🔴 **帯の並び**(#1442 S3-2。SQL 画面と同じ方針)。左 = 項目を選ぶ(常用)/ 右端 = 数え直し。
+     * ⚠ 数え直しは**この面にある操作の全部**(1 つだけ)なので、「その他 ▾」の 1 段奥へ回すと中身 1 件のメニューになる ──
+     *   奥へ回すのは「出している物の中で副次の物」であって、**唯一の操作を隠さない**。位置は右端に固定する。
+     */
+    head.append(title, label, makeBarSpacer(), refresh);
 
     const note = document.createElement('p');
     note.setAttribute('data-pkc-field', 'query-note');

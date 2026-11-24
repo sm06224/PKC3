@@ -37,7 +37,7 @@ import type { AssetLender } from './detail';
 
 // 🔑 型と既定は `browse-mode.ts` が持つ(#240 段⑤)── 既定が 4 か所に散っていた
 export type { BrowseMode } from './browse-mode';
-import { DEFAULT_BROWSE_MODE, type BrowseMode } from './browse-mode';
+import { DEFAULT_BROWSE_MODE, FILER_FOLD_ATTR, filerHeaderFold, type BrowseMode } from './browse-mode';
 import { KindBarRenderer } from './kind-bar';
 import { SavedSearchBar } from './saved-searches';
 import { NotePinBar } from './note-pins';
@@ -220,6 +220,10 @@ export class BrowseRouter {
   /** 押せない理由を探す範囲(左の列 / 面の器)。 */
   private readonly roots: readonly HTMLElement[];
   private last: BrowseMode;
+  /** 🔴 左のペイン(ファイラー用の頭を畳む印の付け先。#1442 S3-2)。 */
+  private readonly sidebarEl: HTMLElement;
+  /** 🔴 いま印に書いてある「畳む部分」(変わったときだけ書く)。 */
+  private headerFold: string | null = null;
 
   /**
    * @param initial 最初に出す探し方(#240 段⑤)。⚠ **器の hidden も同じ値で組む** ──
@@ -254,6 +258,7 @@ export class BrowseRouter {
     folderSync: FolderSync | null = null,
   ) {
     this.last = initial;
+    this.sidebarEl = sidebar;
     this.host = host;
     this.commandList = sidebar.querySelector<HTMLElement>('[data-pkc-region="command-list"]');
     this.sortSelect = sidebar.querySelector<HTMLSelectElement>('select[data-pkc-field="entry-sort"]');
@@ -377,6 +382,19 @@ export class BrowseRouter {
     // 🔴 連絡先が 0 件と分かっている間は、左のタブを「⋯」の下へ回す(#475 項目 5)
     const doc = this.roots[0]?.ownerDocument;
     if (doc !== undefined) markContactsTabEmpty(doc, contactsKnownEmpty(state));
+    /**
+     * 🔴 **ファイラー以外のタブでは、ファイラー用の頭(探す欄・並び順・種類・作る帯)のうち効かない部分を畳む**(#1442 S3-2)。
+     * ⚠ 隠すのは CSS(`data-pkc-filer-fold` の語)── `hidden` 属性は `>` の間の出し入れ(下の `hideWhileCommand`)が使うので、
+     *   同じ属性を 2 か所で書き換えて上書きし合わない。どの部分を畳むかは `filerHeaderFold` の 1 本(表は `browse-mode.ts`)。
+     * ⚠ 畳んでいる間は帯の幅が 0 で測れない(`fitBar` は幅 0 なら何もしない)が、戻したときは帯の幅が 0 → 実寸に変わるので
+     *   `ResizeObserver`(`bar-overflow.ts`)が測り直す ── 明示の測り直しは要らない(`toolbar-fold.smoke` が往復後に 1 段のままを見る)。
+     */
+    const fold = filerHeaderFold(mode).join(' ');
+    if (fold !== this.headerFold) {
+      this.headerFold = fold;
+      if (fold === '') this.sidebarEl.removeAttribute(FILER_FOLD_ATTR);
+      else this.sidebarEl.setAttribute(FILER_FOLD_ATTR, fold);
+    }
     // 🔴 並び順の選択欄を state に合わせる(2 ペインの列見出しで変えたとき、欄が古いままだった)
     if (this.sortSelect !== null && this.sortSelect.value !== state.entrySort) {
       this.sortSelect.value = state.entrySort;

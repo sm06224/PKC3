@@ -20,6 +20,8 @@ import {
 } from '@features/calc/sheet';
 import { appCalcDraft, CALC_DRAFT_MAX_CHARS, type CalcDraftStore } from './calc-draft-store';
 import { setTipTitle } from './tooltip';
+import { makeBarMenu, makeBarSpacer } from './bar-menu';
+import { markPrimary, markVariant } from './icons';
 
 function field<T extends HTMLElement>(pane: HTMLElement, name: string): T | null {
   return pane.querySelector<T>(`[data-pkc-field="${name}"]`);
@@ -180,7 +182,18 @@ export class CalcRenderer {
     clear.setAttribute('data-pkc-field', 'calc-clear');
     clear.textContent = '消す';
     clear.title = '書いた式をすべて消します';
-    tools.append(toTable, toText, copy, clear);
+    /**
+     * 🔴 **帯の並び**(#1442 S3-2。SQL 画面と同じ方針 ── 常用は出す・副次は 1 段奥・主は 1 つ)。
+     * - 出す: 結果をコピー(**主**。式を打って結果を持ち出す、が一番の使い方)
+     * - 「書き出す ▾」: ノートにする(表)/ ノートにする(テキスト)(新しいノートを作る ── 使うが、コピーほど頻繁ではない)
+     * - 「その他 ▾」: 消す(**危険**。書いた式が全部消え、元に戻せない ── 基準は「取り消せるか」)
+     * ⚠ `data-pkc-action` / `data-pkc-field` は変えない。⚠ 消した物は無い(奥へ移しただけ)。
+     */
+    markPrimary(copy);
+    markVariant(clear, 'danger');
+    const out = makeBarMenu('calc-out', '書き出す', 'ノートにする(表 / テキスト)', [toTable, toText]);
+    const more = makeBarMenu('calc-more', 'その他', '書いた式を消す', [clear]);
+    tools.append(copy, makeBarSpacer(), out, more);
 
     const input = document.createElement('textarea');
     input.setAttribute('data-pkc-field', 'calc-input');
