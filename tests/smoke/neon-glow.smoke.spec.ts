@@ -13,7 +13,7 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, dismissAnnounce } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, dismissAnnounce, pixels, changed } from './helpers';
 
 test.use({ deviceScaleFactor: 2 });
 
@@ -51,33 +51,6 @@ async function openLog(page: Page): Promise<void> {
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   await expect(page.locator(`${BODY} > [data-pkc-log-card]`).first()).toBeAttached();
 }
-
-/** clip の画素(RGB)を、実ブラウザの canvas で読む(スクリーンショット → デコード)。 */
-async function pixels(page: Page, clip: { x: number; y: number; width: number; height: number }): Promise<number[]> {
-  const png = await page.screenshot({ clip });
-  return page.evaluate(async (b64) => {
-    const img = new Image();
-    img.src = `data:image/png;base64,${b64}`;
-    await img.decode();
-    const cv = document.createElement('canvas');
-    cv.width = img.width;
-    cv.height = img.height;
-    const g = cv.getContext('2d')!;
-    g.drawImage(img, 0, 0);
-    const d = g.getImageData(0, 0, img.width, img.height).data;
-    const out: number[] = [];
-    for (let i = 0; i < d.length; i += 4) out.push(d[i]!, d[i + 1]!, d[i + 2]!);
-    return out;
-  }, png.toString('base64'));
-}
-/** 2 つの画素列の「違う画素の数」(1 チャンネルでも 24 以上違えば違うと数える)。 */
-const changed = (a: number[], b: number[]): number => {
-  let n = 0;
-  for (let i = 0; i < a.length; i += 3) {
-    if (Math.abs(a[i]! - b[i]!) + Math.abs(a[i + 1]! - b[i + 1]!) + Math.abs(a[i + 2]! - b[i + 2]!) >= 24) n += 1;
-  }
-  return n;
-};
 
 const rectOf = (page: Page, sel: string, nth = 0): Promise<{ x: number; y: number; width: number; height: number }> =>
   page.locator(sel).nth(nth).evaluate((el) => {
