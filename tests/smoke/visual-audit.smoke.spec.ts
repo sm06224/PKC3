@@ -10,7 +10,7 @@
  * | 01 | ふつうのノート | 本文 |
  * | 02 | カードログ | `[data-pkc-log-card]` |
  * | 03 | 表・コード・図・グラフ入りのノート | 図(`mermaid` / `chart` の img) |
- * | 04 | 情報ペインのカード | `[data-pkc-card]` |
+ * | 04 | 情報ペインのカードが主役の画面(02 と同じ画面で、情報ペインのカードを撮る意図の名前) | `[data-pkc-card]` |
  * | 05 | SQL の 3 ペイン / ER 図のタブ | `sql-tree` / `sql-er` |
  * | 06 | 予定表 | `schedule` のタブ |
  * | 07 | 設定 / 端末間の同期の E2E 暗号化の欄 | `settings-body` / `sync-e2e-setup` |
@@ -34,6 +34,7 @@ import {
   openTile,
   clickInspectorMoreItem,
 } from './helpers';
+import { THEMES } from '../../src/adapter/ui/render/theme';
 import { SECRET, PASS, startMockS3 } from './mock-s3';
 
 test.use({ deviceScaleFactor: 2 });
@@ -51,13 +52,40 @@ async function shoot(page: Page, name: string): Promise<void> {
   mkdirSync(DIR, { recursive: true });
   // ポインタは発光・吹き出しの出ない所(左のペインの一覧の上)へ逃がす。スマホ幅は触らない
   if ((page.viewportSize()?.width ?? 0) > 700) await page.mouse.move(150, 450);
-  for (const theme of ['light', 'dark']) {
-    await page.evaluate((t) => document.documentElement.setAttribute('data-pkc-theme', t), theme);
-    await page.waitForTimeout(120); // 色の移り変わり(transition)が済むのを待つ
+  for (const theme of ['light', 'dark'] as const) {
+    await applyThemeLikeApp(page, theme);
     await page.screenshot({ path: `${DIR}/${name}-${theme}.png` });
   }
-  await page.evaluate(() => document.documentElement.setAttribute('data-pkc-theme', 'light'));
+  await applyThemeLikeApp(page, 'light');
 }
+
+/**
+ * 🔴 配色は製品の `applyTheme`(`src/adapter/ui/render/theme.ts`)と同じく **`data-pkc-theme` と `data-pkc-tone` の 2 つ**を立てる
+ * (`data-pkc-tone` がアクセントの色の明暗を決める。theme だけだと暗い撮影の半分が明のまま)。tone は製品と同じく THEMES の `dark` から引く。
+ * ⚠ 切り替えるたびに、地の色が実際に変わったこと・tone が合っていることを assert する(撮影しない実行でも呼べる)。
+ */
+async function applyThemeLikeApp(page: Page, theme: 'light' | 'dark'): Promise<void> {
+  const tone = THEMES.find((t) => t.id === theme)?.dark === true ? 'dark' : 'light';
+  const before = await bodyBg(page);
+  await page.evaluate(
+    ([t, tn]) => {
+      document.documentElement.setAttribute('data-pkc-theme', t!);
+      document.documentElement.setAttribute('data-pkc-tone', tn!);
+    },
+    [theme, tone],
+  );
+  await page.waitForTimeout(150); // 色の移り変わり(transition)が済むのを待つ
+  expect(await page.locator('html').getAttribute('data-pkc-tone'), `${theme} の tone`).toBe(tone);
+  const after = await bodyBg(page);
+  if (lastTheme.get(page) !== undefined && lastTheme.get(page) !== theme) expect(after, `${theme} へ切り替えても地の色が変わらない(${before})`).not.toBe(before);
+  lastTheme.set(page, theme);
+  seenBg.set(`${theme}`, after);
+  const other = seenBg.get(theme === 'light' ? 'dark' : 'light');
+  if (other !== undefined) expect(after, '明と暗の地の色が同じ').not.toBe(other);
+}
+const lastTheme = new WeakMap<Page, string>();
+const seenBg = new Map<string, string>();
+const bodyBg = (page: Page): Promise<string> => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
 async function commitNew(page: Page, archetype: string, title: string, body: string): Promise<void> {
   await createEntry(page, archetype);
@@ -122,7 +150,7 @@ test('🔴 撮影台帳: 通常の 12 画面のうち S3 を使わないもの(0
 
   // 04 情報ペインのカード
   await expect(page.locator('[data-pkc-region="inspector"] [data-pkc-card]').first()).toBeVisible();
-  await shoot(page, '04-inspector-cards');
+  await shoot(page, '04-note-with-inspector-cards');
 
   // 06 予定表(左のペインのタブ)
   await openBrowse(page, 'schedule');
@@ -185,7 +213,8 @@ test('🔴 撮影台帳: 通常の 12 画面のうち S3 を使わないもの(0
   await expect(pop).toBeHidden();
 
   // 12 スマホ幅(一覧・本文・追記・メッセージ)── 前の知らせが写り込まないよう、消えるまで待つ
-  await expect(page.locator('[data-pkc-region="status"]'), '浮き札が残っている').toBeHidden({ timeout: 20_000 });
+  // 知らせが出ている間だけ、消えるのを待つ(出ていなければ何もしない)
+  if (await page.locator('[data-pkc-region="status"]').isVisible()) await expect(page.locator('[data-pkc-region="status"]')).toBeHidden({ timeout: 20_000 });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('[data-pkc-region="shell"]')).toHaveAttribute('data-pkc-layout', 'phone');
   const toList = async (): Promise<void> => {
