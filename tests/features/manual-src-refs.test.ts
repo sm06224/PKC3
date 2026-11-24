@@ -32,7 +32,7 @@ const heads = (() => {
   return hs;
 })();
 
-const RE = /マニュアル(?:の|中の)?\s*「([^」]+)」/gu;
+const RE = /マニュアル(?:の|中の)?\s*[「『]([^」』]+)[」』]/gu;
 
 describe('src が引くマニュアルの節の名前', () => {
   const found: { file: string; line: number; name: string; user: boolean }[] = [];
@@ -46,7 +46,10 @@ describe('src が引くマニュアルの節の名前', () => {
   }
 
   it('空振り防止 ── 画面の字の引きと注釈の引きの両方を拾えている', () => {
-    expect(found.some((x) => x.user), '画面の字の引きが 0 件').toBe(true);
+    // 画面の字で節を引いている 2 か所は名指しで在ることを見る(1 件でも緑になる床を避ける)
+    const userFiles = found.filter((x) => x.user).map((x) => x.file);
+    expect(userFiles.some((f) => f.endsWith('sql-to-note.ts')), 'sql-to-note.ts の引きが拾えていない').toBe(true);
+    expect(userFiles.some((f) => f.endsWith('filer.ts')), 'filer.ts の引きが拾えていない').toBe(true);
     expect(found.filter((x) => !x.user).length, '注釈の引きが少なすぎる').toBeGreaterThan(10);
   });
 
