@@ -28,7 +28,7 @@ describe('追記欄の枠 (#1890)', () => {
 
   it('枠が線を持ち、フォーカスの輪郭は枠(:focus-within)で見せる', () => {
     expect(body("[data-pkc-field='append-form']")).toMatch(/border:\s*1px solid/);
-    expect(body("[data-pkc-field='append-form']:focus-within")).toMatch(/border-color:\s*var\(--accent\)/);
+    expect(body("[data-pkc-field='append-form']:focus-within")).toMatch(/border-color:\s*var\(--neon\)/);
     expect(body("[data-pkc-field='append-input']:focus-visible")).toMatch(/outline:\s*none/);
   });
 
