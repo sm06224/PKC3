@@ -467,6 +467,99 @@ export function alertInApp(host: HTMLElement, message: string): Promise<DialogAn
   });
 }
 
+/** 回復キーを保存するファイルの名前 / 中身(`recoveryKeyFileText`)。 */
+export const RECOVERY_KEY_FILE_NAME = 'pkc3-recovery-key.txt';
+export function recoveryKeyFileText(recoveryKey: string): string {
+  return [
+    'PKC3 回復キー(端末間の同期の暗号化)',
+    '',
+    recoveryKey,
+    '',
+    'パスフレーズを忘れたときに、このキーで暗号化キーを開き直せます。',
+    'このファイルは安全な場所に保管してください(パスワードマネージャーなど)。第三者に渡さないでください。',
+    '',
+  ].join('\n');
+}
+
+/**
+ * 🔴 **回復キーを 1 度だけ見せて、打ち直してもらう**(#2000 段 4b-B。user 裁定: 画面に 1 度だけ表示 + テキストファイルで保存 + 打ち直して確認)。
+ *
+ * - 回復キー(等幅・選べる字)/ 「テキストファイルに保存」/ 打ち直しの欄。**打ち直しが合うまで「完了」を押せない**
+ *   (大文字小文字・ハイフン・空白は問わない)。
+ * - `Escape`・「やめる」= 設定をやめる(`'cancel'`)。⚠ 回復キーはこの窓の中にだけ在る ── 閉じたら DOM から消し、どこにも保存しない。
+ * - 保存は Blob + `revokeObjectURL`(`downloadBlob`)。
+ * @param same 打ち直しが合っているか(`sameRecoveryKey`。判断は features の 1 本)
+ */
+export function confirmRecoveryKeyInApp(
+  host: HTMLElement,
+  recoveryKey: string,
+  same: (shown: string, typed: string) => boolean,
+  save: (name: string, text: string) => void,
+): Promise<DialogAnswer> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = '回復キーを保存してください';
+    f.body.textContent = '';
+    const note = document.createElement('span');
+    note.setAttribute('data-pkc-field', 'recovery-note');
+    note.textContent =
+      'パスフレーズを忘れたときの回復キーです。この画面で見せるのは 1 度だけで、PKC3 は保存しません。テキストファイルに保存するか、別の安全な場所に記録してください。';
+    const key = document.createElement('code');
+    key.setAttribute('data-pkc-field', 'recovery-key');
+    key.textContent = recoveryKey;
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.setAttribute('data-pkc-field', 'recovery-save');
+    saveBtn.textContent = 'テキストファイルに保存';
+    saveBtn.title = `${RECOVERY_KEY_FILE_NAME} として書き出します`;
+    const onSave = (): void => save(RECOVERY_KEY_FILE_NAME, recoveryKeyFileText(recoveryKey));
+    saveBtn.addEventListener('click', onSave);
+    const label = document.createElement('label');
+    label.setAttribute('data-pkc-field', 'recovery-retype-label');
+    label.textContent = '確認のため、回復キーをもう一度入力してください(大文字小文字・ハイフンは問いません)';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('data-pkc-field', 'recovery-retype');
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    label.append(input);
+    const match = document.createElement('span');
+    match.setAttribute('data-pkc-field', 'recovery-match');
+    match.setAttribute('aria-live', 'polite');
+    f.body.append(note, key, saveBtn, label, match);
+    f.ok.textContent = '完了';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.ok.hidden = false;
+    f.ok.disabled = true;
+    f.cancel.textContent = 'やめる';
+    f.cancel.hidden = false;
+    const update = (): void => {
+      const typed = input.value;
+      const good = typed.trim() !== '' && same(recoveryKey, typed);
+      f.ok.disabled = !good;
+      match.textContent = typed.trim() === '' ? '' : good ? '一致しました' : '一致しません';
+      match.setAttribute('data-pkc-state', typed.trim() === '' ? 'none' : good ? 'ok' : 'caution');
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('keydown', (ev: KeyboardEvent) => {
+      if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
+      ev.preventDefault();
+      if (!f.ok.disabled) f.ok.click();
+    });
+    const answered = open(f, 'cancel');
+    input.focus();
+    try {
+      return await answered;
+    } finally {
+      // ⚠ 回復キーをこの窓に残さない(閉じたら DOM から消す)/ 他のダイアログの「受ける」を殺さない
+      saveBtn.removeEventListener('click', onSave);
+      input.value = '';
+      f.body.textContent = '';
+      f.ok.disabled = false;
+    }
+  });
+}
+
 /**
  * 開いて、閉じるまで待つ。
  *

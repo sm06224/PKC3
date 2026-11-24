@@ -8,6 +8,8 @@ import { S3Box, webSigCrypto } from './s3-box';
 import type { SyncRemoteDeps } from './sync-folder';
 import { SYNC_REMOTE_HTTPS_ONLY } from './sync-folder';
 import { idbKeystoreBackend, SyncKeystore, windowKeystoreLock } from './sync-keystore';
+import { webE2ECrypto } from './encrypted-box';
+import { SyncE2E } from './sync-e2e';
 
 /**
  * 📌 **保管先を選べるか**(user 裁定 2026-11-22)── `file://` では選べない(「HTTPS で開いたときだけ使えます」)。
@@ -18,11 +20,38 @@ export function remoteUnavailableReason(loc: { protocol: string }, secure: boole
   return null;
 }
 
-/** 窓の保管先の口(IndexedDB の鍵の保管 + fetch の S3)。 */
-export function windowSyncRemote(): SyncRemoteDeps {
+/**
+ * 窓の保管先の口(IndexedDB の鍵の保管 + fetch の S3)と、暗号化の口(#2000 段 4b-B)。
+ * 🔴 暗号化キーの保管は認証情報と**同じ鍵の保管**(`SyncKeystore`)── 同じ 1 つを共有する。
+ */
+export function windowSyncRemoteAndE2E(): { remote: SyncRemoteDeps; e2e: SyncE2E | null } {
   let keystore: SyncKeystore | null = null;
   // ⚠ 鍵の保管は使うときに作る(`file://` で開いたとき・使わない人の端末で IndexedDB を開かない)
   const ks = (): SyncKeystore => (keystore ??= new SyncKeystore(idbKeystoreBackend(), globalThis.crypto.subtle, undefined, windowKeystoreLock()));
+  const remote = windowRemote(ks);
+  const e2e =
+    globalThis.crypto?.subtle === undefined
+      ? null
+      : new SyncE2E({
+          crypto: webE2ECrypto(),
+          keys: {
+            load: async (cid) => {
+              const v = await ks().openDataKey(cid);
+              return v === null ? null : { keyId: v.keyId, key: v.key };
+            },
+            save: (cid, v) => ks().saveDataKey(cid, v),
+            remove: (cid) => ks().removeDataKey(cid),
+          },
+        });
+  return { remote, e2e };
+}
+
+/** 窓の保管先の口(後方互換: 暗号化の口は `windowSyncRemoteAndE2E`)。 */
+export function windowSyncRemote(): SyncRemoteDeps {
+  return windowSyncRemoteAndE2E().remote;
+}
+
+function windowRemote(ks: () => SyncKeystore): SyncRemoteDeps {
   return {
     unavailable: () => remoteUnavailableReason(globalThis.location ?? { protocol: 'file:' }, globalThis.isSecureContext === true),
     open: (cid) => ks().open(cid),

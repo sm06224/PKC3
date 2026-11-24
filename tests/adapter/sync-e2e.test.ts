@@ -16,7 +16,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EncryptedBox } from '../../src/adapter/platform/encrypted-box';
 import {
   SyncFolder,
-  SYNC_E2E_LOCKED_NOTE,
+  SYNC_E2E_SETUP_NOTE,
+  SYNC_E2E_UNAVAILABLE_NOTE,
   type SyncFolderDirLike,
   type SyncFolderSaved,
   type SyncFolderStore,
@@ -25,6 +26,7 @@ import {
 } from '../../src/adapter/platform/sync-folder';
 import { S3Box, webSigCrypto } from '../../src/adapter/platform/s3-box';
 import { SyncKeystore } from '../../src/adapter/platform/sync-keystore';
+import { SyncE2E } from '../../src/adapter/platform/sync-e2e';
 import { applySyncDiff, buildSyncDiff } from '../../src/adapter/ui/actions/sync-diff';
 import { writeArchive } from '../../src/features/export/pkc3-archive';
 import { readZipDirectory, readZipEntry } from '../../src/features/import/zip-reader';
@@ -40,6 +42,8 @@ import { spawnDevice, type SyncDevice } from '../helpers/sync-device';
 const KEY_ID = 'AKIA-CANARY-ID-77';
 const SECRET_KEY = 'canary/SECRET+key=Qz19';
 const SECRET = { accessKeyId: KEY_ID, secretAccessKey: SECRET_KEY };
+/** 暗号化しない接続(旧い端末・切り替えの出発点)。 */
+const plain = (f: SyncRemoteForm): SyncRemoteForm => ({ ...f, encrypt: false });
 const FORM: SyncRemoteForm = { endpoint: 'https://s3.example.test/', bucket: ' my notes ', region: '', prefix: 'pkc3', accessKeyId: KEY_ID, secretAccessKey: SECRET_KEY };
 const PASS = 'パスフレーズ-CANARY-φ-7731';
 const NOTE_TEXT = '機密の本文 NOTE-CANARY-4242';
@@ -160,7 +164,21 @@ async function rig(
     enabled: () => d.enabled,
     picker: async () => opts.folder ?? new FakeFolder(),
     remote,
-    ...(c === null ? {} : { e2e: { crypto: c, key: (cid: string) => ks.openDataKey(cid).then((v) => (v === null ? null : { dataKey: v.key, keyId: v.keyId })) } }),
+    ...(c === null
+      ? {}
+      : {
+          e2e: new SyncE2E({
+            crypto: c,
+            keys: {
+              load: async (cid) => {
+                const v = await ks.openDataKey(cid);
+                return v === null ? null : { keyId: v.keyId, key: v.key };
+              },
+              save: (cid, v) => ks.saveDataKey(cid, v),
+              remove: (cid) => ks.removeDataKey(cid),
+            },
+          }),
+        }),
     store,
     lock: null,
     device: async () => (await d.request({ op: 'syncSnapshot', cid: d.cid, ensureDevice: true })).device as string,
@@ -214,7 +232,7 @@ describe('S3 互換(既定で暗号化)', () => {
     // 暗号化キーがまだ無い ── 平文で書かない
     expect(await A.sf.connectRemote(FORM)).toBe(true);
     expect(A.sf.view().phase).toBe('stopped');
-    expect(A.fails).toContain(SYNC_E2E_LOCKED_NOTE);
+    expect(A.fails).toContain(SYNC_E2E_SETUP_NOTE);
     expect([...s3.objects.keys()], '何も置かれていない(平文も)').toEqual([]);
 
     await provisionFirst(A, s3);
@@ -236,15 +254,24 @@ describe('S3 互換(既定で暗号化)', () => {
     await B.sf.syncNow(false);
     await A.sf.syncNow(false);
     expect(await titles(A.d)).toEqual(['B のメモ', 'メモ']);
-    expect(A.fails.filter((f) => f !== SYNC_E2E_LOCKED_NOTE)).toEqual([]);
+    expect(A.fails.filter((f) => f !== SYNC_E2E_SETUP_NOTE)).toEqual([]);
   });
 
-  it('🔴 暗号化の既定は S3 = オン / 口(deps.e2e)が無ければ従来どおり平文(段 4a の挙動のまま。段 4b-B で口を配線するとき、ここは「口が無ければ止まる(fail-closed)」に変わる)', async () => {
+  it('🔴 fail-closed: 暗号化したい接続(S3 の既定)で口(deps.e2e)が無ければ、平文で書かずに止まる / 暗号化しない接続(encrypt: false)は平文で書く(対照群)', async () => {
     const s3 = fakeS3(SECRET);
     const A = await rig('A', s3, { e2e: false });
     await A.d.put('n1', 'メモ', NOTE_TEXT);
     await A.sf.connectRemote(FORM);
-    expect([...s3.objects.keys()]).toEqual([`pkc3/${folderFileName(await deviceId(A.d))}`]);
+    expect(A.sf.view().phase).toBe('stopped');
+    expect(A.fails).toContain(SYNC_E2E_UNAVAILABLE_NOTE);
+    expect([...s3.objects.keys()], '何も置かれていない(平文も)').toEqual([]);
+    // 対照群: 暗号化しない接続なら、同じ口なしでも平文で書く(止まった理由は「暗号化したいのに」)
+    const s3b = fakeS3(SECRET);
+    const B = await rig('B', s3b, { e2e: false });
+    await B.d.put('n1', 'メモ', NOTE_TEXT);
+    await B.sf.connectRemote(plain(FORM));
+    expect(B.sf.view().phase).toBe('idle');
+    expect([...s3b.objects.keys()]).toEqual([`pkc3/${folderFileName(await deviceId(B.d))}`]);
   });
 });
 
@@ -255,8 +282,8 @@ describe('🔴 途中の切り替え(平文 → 暗号化)', () => {
     const B0 = await rig('B', s3, { e2e: false });
     await A0.d.put('n1', 'A の既存メモ', 'a');
     await B0.d.put('n2', 'B の既存メモ', 'b');
-    await A0.sf.connectRemote(FORM);
-    await B0.sf.connectRemote(FORM);
+    await A0.sf.connectRemote(plain(FORM));
+    await B0.sf.connectRemote(plain(FORM));
     await A0.sf.syncNow(true);
     const aDev = await deviceId(A0.d);
     const bDev = await deviceId(B0.d);
@@ -270,6 +297,7 @@ describe('🔴 途中の切り替え(平文 → 暗号化)', () => {
     await B0.d.put('n4', 'B の平文の新しいメモ', 'b2');
     await B0.sf.syncNow(true);
     await A.sf.boot();
+    await A.sf.setEncrypt(true);
     await A.sf.syncNow(true);
     const keys = [...s3.objects.keys()].sort();
     expect(keys, 'A の平文は消え、暗号化したファイルに替わった(B の平文はそのまま)').toEqual(
@@ -296,6 +324,7 @@ describe('🔴 途中の切り替え(平文 → 暗号化)', () => {
     const B = await rig('B', s3, { d: B0.d, ks: B0.ks, store: B0.store });
     await provisionNext(B, s3);
     await B.sf.boot();
+    await B.sf.setEncrypt(true);
     await B.sf.syncNow(true);
     expect([...s3.objects.keys()].sort()).toEqual([`pkc3/${encFileName(aDev)}`, `pkc3/${encFileName(bDev)}`, 'pkc3/keyring.json'].sort());
     expect(await titles(B.d)).toContain('A の新しいメモ');
@@ -311,21 +340,23 @@ describe('🔴 暗号化をオフに戻したら、取り込まなかった平�
     const A0 = await rig('A', s3, { e2e: false });
     const B0 = await rig('B', s3, { e2e: false });
     await A0.d.put('n1', 'A のメモ', 'a');
-    await A0.sf.connectRemote(FORM);
-    await B0.sf.connectRemote(FORM);
+    await A0.sf.connectRemote(plain(FORM));
+    await B0.sf.connectRemote(plain(FORM));
     await B0.d.put('n2', 'B の新しいメモ', 'b');
     await B0.sf.syncNow(true); // B の平文に新しいメモが載る
     const A = await rig('A', s3, { d: A0.d, ks: A0.ks, store: A0.store });
     await provisionFirst(A, s3);
     await A.sf.boot();
+    await A.sf.setEncrypt(true);
     await A.sf.syncNow(true);
     expect(await titles(A.d), '暗号化している間は取り込まない').not.toContain('B の新しいメモ');
     const saved = A.store.map.get(A.d.cid)!.record;
     expect(Object.keys(saved.seen).filter((n) => !n.endsWith('.enc')), '平文は控え(seen)に入っていない').toEqual([]);
     expect(Object.keys(saved.guided ?? {}), '案内した記録は別に在る').toHaveLength(1);
     // 暗号化をオフに戻す(口を渡さない = 平文)── 無人の回で読む
-    const A2 = await rig('A', s3, { e2e: false, d: A.d, ks: A.ks, store: A.store });
-    await A2.sf.boot(); // 起動の回(無人 = 手で押していない)
+    const A2 = await rig('A', s3, { d: A.d, ks: A.ks, store: A.store });
+    await A2.sf.boot();
+    await A2.sf.setEncrypt(false); // オフに戻す(無人の回 = 手で押していない)
     for (let i = 0; i < 200 && A2.sf.view().lastAt === null; i += 1) await new Promise((r) => setTimeout(r, 25));
     expect(A2.sf.view().lastAt, '空振り防止: 起動の無人の回が実際に終わった').not.toBeNull();
     expect(await titles(A2.d), '次の無人の回で取り込まれた').toContain('B の新しいメモ');
@@ -413,8 +444,11 @@ describe('🔴 巻き戻し・差し替え・格下げの拒否', () => {
     B.fails.length = 0;
     await B.sf.syncNow(true);
     expect(B.fails.join('\n')).toContain('古い');
+    expect(B.sf.view().e2e.refused, '画面に出す: 取り込んでいない端末').toEqual([aDev]);
     expect(await B.sf.acceptPeerAgain('ffffffffffffffff'), '知らない相手は何も変えない').toBe(false);
+    expect(B.sf.view().e2e.refused, '知らない相手を受け入れ直しても、拒否中の物は消えない').toEqual([aDev]);
     expect(await B.sf.acceptPeerAgain(aDev)).toBe(true);
+    expect(B.sf.view().e2e.refused, '受け入れ直したら消える').toEqual([]);
     expect(B.store.map.get(B.d.cid)!.record.peerSeq[aDev], '読み直して、受け入れた連番に更新された').toBeDefined();
     expect(B.sf.view().phase).toBe('idle');
     expect(B.says.join('\n')).toContain('受け入れ直します');
@@ -481,14 +515,15 @@ describe('🔴 切り替えの片付け(平文を消すのは、暗号化した�
     const A0 = await rig('A', s3, { e2e: false });
     const B0 = await rig('B', s3, { e2e: false });
     await A0.d.put('n1', 'メモ', NOTE_TEXT);
-    await A0.sf.connectRemote(FORM);
-    await B0.sf.connectRemote(FORM);
+    await A0.sf.connectRemote(plain(FORM));
+    await B0.sf.connectRemote(plain(FORM));
     await A0.sf.syncNow(true);
     const aDev = await deviceId(A0.d);
     const A = await rig('A', s3, { d: A0.d, ks: A0.ks, store: A0.store });
     await provisionFirst(A, s3);
     pre(s3); // 開き直す(= 暗号化への切り替えの最初の回が走る)前に、失敗の仕掛けを入れる
     await A.sf.boot();
+    await A.sf.setEncrypt(true);
     await A.sf.syncNow(true); // 起動の回の終わりを待ち、もう 1 回(手で)回す
     return { s3, A, aDev, plainKey: `pkc3/${folderFileName(aDev)}`, encKey: `pkc3/${encFileName(aDev)}` };
   }
@@ -739,5 +774,204 @@ describe('🔴 秘密が 1 バイトも出ない(パスフレーズ・回復キ�
       g.localStorage = before.l;
       g.sessionStorage = before.s;
     }
+  });
+});
+
+describe('🔴 設定の操作(段 4b-B): 初回の設定 / 開く / 開くたびにパスフレーズ / 変更 / オフ', () => {
+  const PASS2 = 'あたらしい-パスフレーズ-φ-9921';
+
+  it('🔴 初回の設定: 回復キーを打ち直して確定するまで、置き場には何も書かない / やめたら何も残らない / 確定すると暗号化して同期する', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3);
+    await A.d.put('n1', 'メモ', NOTE_TEXT);
+    await A.sf.connectRemote(FORM);
+    expect(A.sf.view().phase).toBe('stopped');
+    expect(A.sf.view().e2e).toMatchObject({ available: true, on: true, open: false, keyring: 'none' });
+    expect(A.sf.needsPassphrase()).toBe(true);
+    expect(A.sf.statusLine()).toBe('パスフレーズを決めると同期を始めます');
+    expect(A.sf.unlockButtonLabel()).toBe('暗号化を設定する');
+
+    // やめる = 何も残らない
+    const first = await A.sf.e2eBeginSetup(PASS, true);
+    if (first.kind !== 'ready') throw new Error('作れていない');
+    expect(first.recoveryKey).toMatch(/^([0-9A-Z]{4}-){7}[0-9A-Z]{4}$/);
+    expect([...s3.objects.keys()], '🔴 確定の前: 置き場には何も書いていない').toEqual([]);
+    expect(await A.ks.openDataKey(A.d.cid), '端末にも置いていない').toBeNull();
+    first.cancel();
+    expect((await first.commit()).ok, 'やめたあとの確定は通らない').toBe(false);
+    expect([...s3.objects.keys()]).toEqual([]);
+
+    // 短いパスフレーズは作らない(UI の前に実体でも断る: 空)
+    const empty = await A.sf.e2eBeginSetup('', true);
+    expect(empty.kind).toBe('refused');
+
+    // 確定する
+    const second = await A.sf.e2eBeginSetup(PASS, true);
+    if (second.kind !== 'ready') throw new Error('作れていない');
+    const done = await second.commit();
+    expect(done.ok).toBe(true);
+    expect([...s3.objects.keys()].sort()).toEqual([`pkc3/${encFileName(await deviceId(A.d))}`, 'pkc3/keyring.json'].sort());
+    expect(A.sf.view()).toMatchObject({ phase: 'idle', e2e: { open: true, stored: true, ask: false, keyring: 'present' } });
+    expect(await A.ks.openDataKey(A.d.cid), '取り出せない形で端末に置いた').not.toBeNull();
+    expect(A.sf.needsPassphrase()).toBe(false);
+
+    // 他の端末: 回復キーで開く(パスフレーズを知らなくても)→ ノートが届く
+    const B = await rig('B', s3);
+    await B.sf.connectRemote(FORM);
+    expect(B.sf.view().e2e).toMatchObject({ open: false, keyring: 'present' });
+    expect(B.sf.statusLine()).toBe('パスフレーズを入れると同期を再開します');
+    expect(B.sf.unlockButtonLabel()).toBe('パスフレーズを入れる');
+    const bad = await B.sf.e2eUnlock({ passphrase: `${PASS}x` }, true);
+    expect(bad).toMatchObject({ ok: false });
+    expect(bad.text).toContain('違います');
+    expect(bad.text).not.toContain(PASS);
+    expect(B.sf.view().e2e.open, '違えば開かない').toBe(false);
+    const good = await B.sf.e2eUnlock({ recoveryKey: second.recoveryKey.toLowerCase().replace(/-/g, ' ') }, true);
+    expect(good.ok, '回復キー(小文字・ハイフン無しでも)で開く').toBe(true);
+    expect(await titles(B.d)).toContain('メモ');
+  });
+
+  it('🔴 2 台が同時に初回の設定をした: 先に確定した方の束を採り、後の方は自分の暗号化キーを捨てて「開く」へ切り替わる', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3);
+    const B = await rig('B', s3);
+    await A.sf.connectRemote(FORM);
+    await B.sf.connectRemote(FORM);
+    const a = await A.sf.e2eBeginSetup(PASS, true);
+    const b = await B.sf.e2eBeginSetup(PASS2, true);
+    if (a.kind !== 'ready' || b.kind !== 'ready') throw new Error('作れていない');
+    expect((await a.commit()).ok).toBe(true);
+    const late = await b.commit();
+    expect(late.ok).toBe(false);
+    expect(late.text).toContain('先に別の端末が暗号化キーを作っていました');
+    expect(await B.ks.openDataKey(B.d.cid), '自分で作った暗号化キーは捨てた(端末に置いていない)').toBeNull();
+    expect(B.sf.view().e2e).toMatchObject({ open: false, keyring: 'present' });
+    expect((await B.sf.e2eUnlock({ passphrase: PASS2 }, true)).ok, 'B 自身のパスフレーズでは開かない').toBe(false);
+    expect((await B.sf.e2eUnlock({ passphrase: PASS }, true)).ok, 'A のパスフレーズで開く').toBe(true);
+    // 束が在るのに「作る」は断る
+    const again = await B.sf.e2eBeginSetup(PASS2, true);
+    expect(again.kind).toBe('refused');
+  });
+
+  it('🔴 開くたびにパスフレーズを入れる(B): 端末に置かない / 開き直すと同期は待つ / 選び方は残る / 切り替えは両方向', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3);
+    await A.d.put('n1', 'メモ', NOTE_TEXT);
+    await A.sf.connectRemote(FORM);
+    const start = await A.sf.e2eBeginSetup(PASS, false);
+    if (start.kind !== 'ready') throw new Error('作れていない');
+    expect((await start.commit()).ok).toBe(true);
+    expect(await A.ks.openDataKey(A.d.cid), '🔴 保管しない(メモリにだけ)').toBeNull();
+    expect(A.sf.view()).toMatchObject({ phase: 'idle', e2e: { open: true, stored: false, ask: true } });
+    expect([...s3.objects.keys()].some((k) => k.endsWith('.enc')), 'このセッションでは暗号化して同期できている').toBe(true);
+
+    // ページを開き直した(同じ端末・同じ記録 / メモリの鍵は無い)
+    const A2 = await rig('A', s3, { d: A.d, ks: A.ks, store: A.store });
+    await A2.sf.boot();
+    for (let i = 0; i < 200 && A2.sf.view().phase !== 'stopped'; i += 1) await new Promise((r) => setTimeout(r, 25));
+    expect(A2.sf.view().phase, '開き直すと、パスフレーズを入れるまで同期は待つ').toBe('stopped');
+    expect(A2.sf.view().e2e).toMatchObject({ open: false, ask: true, keyring: 'present' });
+    expect(A2.sf.statusLine()).toBe('パスフレーズを入れると同期を再開します');
+    expect(A2.sf.view().message).toContain('パスフレーズを入れると同期を再開します');
+    expect((await A2.sf.e2eUnlock({ passphrase: PASS }, false)).ok).toBe(true);
+    expect(A2.sf.view()).toMatchObject({ phase: 'idle', e2e: { open: true, stored: false, ask: true } });
+    expect(await A2.ks.openDataKey(A2.d.cid), '開き直しても置かない').toBeNull();
+
+    // 切り替え: 置く(自動で開く)← → 置かない
+    expect((await A2.sf.e2eSetRemember(true)).ok).toBe(true);
+    expect(await A2.ks.openDataKey(A2.d.cid), '置いた').not.toBeNull();
+    expect(A2.sf.view().e2e).toMatchObject({ stored: true, ask: false });
+    expect((await A2.sf.e2eSetRemember(false)).ok).toBe(true);
+    expect(await A2.ks.openDataKey(A2.d.cid), '消した').toBeNull();
+    expect(A2.sf.view().e2e).toMatchObject({ stored: false, ask: true, open: true });
+    // 開いていないときは切り替えられない(理由を言う)
+    const A3 = await rig('A', s3, { d: A.d, ks: A.ks, store: A.store });
+    await A3.sf.boot();
+    expect((await A3.sf.e2eSetRemember(true)).ok).toBe(false);
+  });
+
+  it('🔴 パスフレーズの変更: いまの入力が違えば変えない / 変えたら新しいので開く(古いのは開かない・回復キーは変わらない)/ 別の端末が先に変えていたら上書きしない', async () => {
+    const racer = { on: false, done: false };
+    const s3 = fakeS3(SECRET, {
+      beforePut: (key) => {
+        if (!racer.on || racer.done || key !== 'pkc3/keyring.json') return;
+        racer.done = true;
+        // 別の端末が先に束を変えた(中身が違う・ETag も違う)
+        const cur = s3.objects.get(key)!;
+        s3.objects.set(key, { body: new TextEncoder().encode(new TextDecoder().decode(cur.body).replace(/"salt":"(.)/, (_m, c: string) => `"salt":"${c === 'A' ? 'B' : 'A'}`)), etag: '"raced-keyring"', mtime: new Date().toISOString() });
+      },
+    });
+    const A = await rig('A', s3);
+    await A.sf.connectRemote(FORM);
+    const start = await A.sf.e2eBeginSetup(PASS, true);
+    if (start.kind !== 'ready') throw new Error('作れていない');
+    await start.commit();
+    const before = new TextDecoder().decode(s3.objects.get('pkc3/keyring.json')!.body);
+
+    const wrong = await A.sf.e2eChangePassphrase({ passphrase: 'ちがう-パスフレーズ-1234' }, PASS2);
+    expect(wrong.ok).toBe(false);
+    expect(new TextDecoder().decode(s3.objects.get('pkc3/keyring.json')!.body), '違えば束は変わらない').toBe(before);
+
+    expect((await A.sf.e2eChangePassphrase({ passphrase: PASS }, PASS2)).ok).toBe(true);
+    const after = new TextDecoder().decode(s3.objects.get('pkc3/keyring.json')!.body);
+    expect(after).not.toBe(before);
+    expect(JSON.parse(after).wrapped.recovery, '回復キー側の包みは変えない').toBe(JSON.parse(before).wrapped.recovery);
+    const B = await rig('B', s3);
+    await B.sf.connectRemote(FORM);
+    expect((await B.sf.e2eUnlock({ passphrase: PASS }, true)).ok, '古いパスフレーズでは開かない').toBe(false);
+    expect((await B.sf.e2eUnlock({ passphrase: PASS2 }, true)).ok, '新しいパスフレーズで開く').toBe(true);
+    // 回復キーで開いて、また変える(忘れたとき)
+    const C = await rig('C', s3);
+    await C.sf.connectRemote(FORM);
+    expect((await C.sf.e2eChangePassphrase({ recoveryKey: start.recoveryKey }, 'さらに-あたらしい-pass-1')).ok).toBe(true);
+
+    // 競合: 読んでから書く間に別の端末が変えた(412)→ 上書きしない
+    racer.on = true;
+    const lost = await A.sf.e2eChangePassphrase({ passphrase: 'さらに-あたらしい-pass-1' }, 'さらにもう一度-pass-22');
+    expect(lost.ok).toBe(false);
+    expect(lost.text).toContain('上書きしません');
+    expect(s3.objects.get('pkc3/keyring.json')!.etag, '別の端末の束が残っている').toBe('"raced-keyring"');
+  });
+
+  it('🔴 暗号化をオフ / オン: オフで自分のファイルを平文で書き直し .enc を消し、この端末の暗号化キーを忘れる(束は残る)/ オンに戻すと、開くまで止まる', async () => {
+    const s3 = fakeS3(SECRET);
+    const A = await rig('A', s3);
+    await A.d.put('n1', 'メモ', NOTE_TEXT);
+    await A.sf.connectRemote(FORM);
+    const start = await A.sf.e2eBeginSetup(PASS, true);
+    if (start.kind !== 'ready') throw new Error('作れていない');
+    await start.commit();
+    const aDev = await deviceId(A.d);
+    expect([...s3.objects.keys()].sort()).toEqual([`pkc3/${encFileName(aDev)}`, 'pkc3/keyring.json'].sort());
+
+    expect((await A.sf.setEncrypt(false)).ok).toBe(true);
+    expect([...s3.objects.keys()].sort(), '平文に書き直し、.enc は消えた(束は残る)').toEqual([`pkc3/${folderFileName(aDev)}`, 'pkc3/keyring.json'].sort());
+    expect(await A.ks.openDataKey(A.d.cid), '暗号化キーを忘れた').toBeNull();
+    expect(A.sf.view()).toMatchObject({ phase: 'idle', e2e: { on: false, open: false } });
+    expect((await A.ks.config(A.d.cid))?.encrypt, '接続情報に残る').toBe(false);
+
+    expect((await A.sf.setEncrypt(true)).ok).toBe(true);
+    expect(A.sf.view()).toMatchObject({ phase: 'stopped', e2e: { on: true, open: false, keyring: 'present' } });
+    expect((await A.sf.e2eUnlock({ passphrase: PASS }, true)).ok).toBe(true);
+    expect([...s3.objects.keys()].sort(), '開いたら、また暗号化して書き、平文を消す').toEqual([`pkc3/${encFileName(aDev)}`, 'pkc3/keyring.json'].sort());
+  });
+
+  it('同期フォルダの暗号化: オンにすると止まり(平文を書かない)、設定→回復→開く ができる / 接続を外すと暗号化キーも忘れる', async () => {
+    const s3 = fakeS3(SECRET);
+    const folder = new FakeFolder();
+    const A = await rig('A', s3, { folder });
+    await A.d.put('n1', 'メモ', NOTE_TEXT);
+    await A.sf.pick();
+    expect(A.sf.view().kind).toBe('folder');
+    expect([...folder.files.keys()].some((k) => k.endsWith('.zip')), '対照群: 既定オフ = 平文').toBe(true);
+    expect((await A.sf.setEncrypt(true)).ok).toBe(true);
+    expect(A.sf.view()).toMatchObject({ phase: 'stopped', e2e: { on: true, keyring: 'none' } });
+    const start = await A.sf.e2eBeginSetup(PASS, true);
+    if (start.kind !== 'ready') throw new Error('作れていない');
+    expect((await start.commit()).ok).toBe(true);
+    const aDev = await deviceId(A.d);
+    expect([...folder.files.keys()].sort()).toEqual([encFileName(aDev), 'keyring.json'].sort());
+    await A.sf.stop();
+    expect(await A.ks.openDataKey(A.d.cid), 'やめたら暗号化キーも忘れる').toBeNull();
   });
 });

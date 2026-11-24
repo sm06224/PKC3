@@ -80,6 +80,10 @@ const UNRESOLVED: readonly string[] = [
   'allow-sync-folder-persist',
   'cancel-asr-install',
   // ⚠ 2026-11-22(#2000 段 4a-4)で 4 件増えた ── S3 互換の保管先の接続の確認 / 接続する / 接続を外す / CORS の設定をコピー。設定の節(`settings/sync-s3.ts`)が `button(action, …)` の変数で組む(`pick-sync-folder` と同じ)
+  // ⚠ 2026-11-24(#2000 段 4b-B)で 7 件増えた ── 端末間の同期の暗号化の欄(`settings/sync-e2e.ts` が `button(action, …)` の変数 / `checkRow(…, action, …)` の変数で組む)。
+  //   受け入れ直す / パスフレーズの変更 / 暗号化のオン・オフ / 開くたびに入れる / 暗号化の設定 / 開く。(入力の種類の切り替え `set-sync-e2e-via` と、状態の欄の `open-sync-e2e-settings` は静的に追える)
+  'accept-sync-e2e-peer',
+  'change-sync-e2e-passphrase',
   'connect-sync-s3',
   'copy-sync-s3-cors',
   'disconnect-sync-s3',
@@ -143,6 +147,10 @@ const UNRESOLVED: readonly string[] = [
   'reset-office-profile',
   'set-app-group',
   'set-app-icon',
+  'set-sync-e2e',
+  'set-sync-e2e-remember',
+  'start-sync-e2e-setup',
+  'unlock-sync-e2e',
   /**
    * ⚠ **2026-09-14(#918 段②a)で 1 件増えた** ── 履歴の一覧から 1 件選ぶ。
    * 🔑 押し所は `openContextMenu` が**その場で組む**ので、静的な

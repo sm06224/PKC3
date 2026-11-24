@@ -137,7 +137,7 @@ export function paintMessageEntries(root: ParentNode, model: MessageStatusModel)
 /** ポップオーバーの骨組みを 1 度だけ組む。⚠ 器は作り直さない(押している最中のボタンが消える)。 */
 export function buildMessagePopover(
   doc: Document,
-  slots: { readonly backup: HTMLElement; readonly captureRecovery: HTMLElement },
+  slots: { readonly backup: HTMLElement; readonly captureRecovery: HTMLElement; readonly syncUnlock?: HTMLElement },
   lid: string,
 ): HTMLElement {
   const pop = doc.createElement('div');
@@ -171,6 +171,7 @@ export function buildMessagePopover(
   const stateActs = doc.createElement('div');
   stateActs.setAttribute('data-pkc-field', 'popover-state-actions');
   stateActs.append(slots.backup, slots.captureRecovery);
+  if (slots.syncUnlock !== undefined) stateActs.append(slots.syncUnlock);
   stateSec.append(stateHead, stateList, stateActs);
 
   const keptSec = doc.createElement('section');
