@@ -112,12 +112,12 @@ describe('実物のマニュアルに当てる', () => {
   const hits = findManualRefs(text);
 
   it('空振り防止 ── 実物から参照を拾えている', () => {
-    expect(hits.length, '実物のマニュアルから参照を 1 つも拾えていない').toBeGreaterThan(50);
+    expect(hits.length, '実物のマニュアルから参照を 1 つも拾えていない').toBeGreaterThan(90);
   });
 
   it('🔴 参照はすべて行き先が決まる(曖昧を弾く規則は上の単体の原稿で見る)', () => {
     const ok = hits.filter((h) => resolveManualRef(h.name, heads) !== null);
-    expect(ok.length, '押せる字になる参照が少なすぎる').toBeGreaterThan(50);
+    expect(ok.length, '押せる字になる参照が少なすぎる').toBeGreaterThan(90);
   });
 
   /**
