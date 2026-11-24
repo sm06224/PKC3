@@ -32,7 +32,7 @@
  *   ⑤⁗′ 付箋とペン(#275)── 「付箋」→ ページの余白を押す → 字を入れる(変換中の Enter では付かない)→ Enter → 印が出る → 重ねると字が出る → 印を押して
  *     「直す」→「外す」→「ペン」で色を選んでなぞる → 線 → 線を押して「外す」→ 保存 → できた PDF を開き直すと付箋も線も在る(付箋は直せる・戻せる)
  *
- *   ⑤⁘ 別の PDF を追加(#275 結合)── 読めない PDF・パスワード付きは断って何も変えない → 2 ページの PDF を追加と一覧の最後に並び
+ *   ⑤⁘ 別の PDF を追加(#275 結合)── 読めない PDF・パスワード付きは断って何も変えない → 2 ページの PDF を追加すると一覧の最後に並び
  *     (絵も出る)、保存ボタンが出る → 足したページを回して「別の PDF として保存」→ できた PDF は N+2 ページで、足した字が後ろに入り、向きも反映される
  *
  * 🔑 起動を 1 つに収める理由(`scripts/smoke-budget.mjs` の予算): 設定の入切 → 同じ添付で窓の中身が替わる、
@@ -75,7 +75,7 @@ function buildPdf(
   for (let i = 0; i < pages; i += 1) {
     const pageObj = 4 + i * 2;
     kids.push(`${String(pageObj)} 0 R`);
-    // 🔑 3 頁目だけ、書体を変えて 2 つの塊(= 文字の層の span 2 つ)に分かれる 1 行を追加す:「split」+「match」。
+    // 🔑 3 頁目だけ、書体を変えて 2 つの塊(= 文字の層の span 2 つ)に分かれる 1 行を追加する:「split」+「match」。
     //    pdf.js は書体が変わるところで文字を別の塊にするので、「litma」の一致は 2 つの span にまたがる
     const split = i === 2 ? ' /F1 24 Tf 0 -100 Td (split) Tj /F2 24 Tf (match) Tj' : '';
     // 🔑 2 頁目だけ、別々の行に 2 つの Tj を足す(1 行目の行末で pdf.js が `hasEOL` を立てる)── 行をまたぐ語「the lazy」の観測用
@@ -1270,13 +1270,13 @@ test('🔴 PDF を PKC3 の PDF ビューアで読み、字を選んでノート
   const mgThumbs = mg.locator('.thumb-cell:not([hidden]) [data-pkc-field="pdf-page-thumb"]');
   // 読めない PDF / パスワード付きは断る ── 窓の下に理由が出て、一覧も保存ボタンも変わらない
   await mg.setInputFiles('#append-file', { name: '壊れ.pdf', mimeType: 'application/pdf', buffer: Buffer.from('not a pdf') });
-  await expect(mg.locator('#status')).toContainText('PDF として読めないため足せません。何も変えていません', { timeout: 15_000 });
+  await expect(mg.locator('#status')).toContainText('PDF として読めないため追加できません。何も変えていません', { timeout: 15_000 });
   await mg.setInputFiles('#append-file', {
     name: 'パスワード付き.pdf',
     mimeType: 'application/pdf',
     buffer: Buffer.from(ENCRYPTED_PDF_BASE64, 'base64'),
   });
-  await expect(mg.locator('#status')).toContainText('パスワードで守られた PDF は足せません。何も変えていません', { timeout: 15_000 });
+  await expect(mg.locator('#status')).toContainText('パスワードで守られた PDF は追加できません。何も変えていません', { timeout: 15_000 });
   await expect(mgThumbs, '断ったのに一覧が増えた').toHaveCount(3);
   await expect(mg.locator('#edit-save'), '断ったのに保存ボタンが出ている').toBeHidden();
   // 足し方の選び(#275 結合・裁定 Q2): 「PDF を追加」は 2 つの選び方を出す。外を押す / Esc で閉じる

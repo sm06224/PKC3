@@ -2487,7 +2487,7 @@ describe('スマホの 2 ペイン(1 枚ずつ)(#687)', () => {
     expect(mark('right')?.textContent, '右の帯が右と言っていない').toBe('右');
     // ⚠ 読み上げは器の aria-label が言う ── 2 度読ませない
     expect(mark('left')?.getAttribute('aria-hidden')).toBe('true');
-    // 🔴 タブを追加と帯は丸ごと組み直す ── そのときも先頭に残る
+    // 🔴 タブを追加すると帯は丸ごと組み直す ── そのときも先頭に残る
     s = reduce(s, { type: 'DUAL_TAB_ADD', side: 'left' }).state;
     r.render(s);
     expect(paneOf(s.dual, 'left').tabs.length, '前提が崩れている(タブが増えていない)').toBe(2);

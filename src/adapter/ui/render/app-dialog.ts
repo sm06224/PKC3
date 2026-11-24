@@ -580,7 +580,7 @@ function open(f: Frame, onDismiss: DialogAnswer): Promise<DialogAnswer> {
 }
 
 /**
- * 🔴 **日付を挿入道具**(user 指示 2026-08-23)。
+ * 🔴 **日付を挿入する道具**(user 指示 2026-08-23)。
  *
  * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
  * > ついてくるツールとか用意されてもいいかも。アイデアはすごくいいと思うけど足りない**」
@@ -1585,7 +1585,7 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
     f.dialog.addEventListener('keydown', onArrow);
     f.dialog.addEventListener('click', onOutside);
 
-    f.ok.textContent = '選んだ物を入れる';
+    f.ok.textContent = '選んだ物を挿入';
     f.ok.removeAttribute('data-pkc-danger');
     // 🔑 受ける側は**隠す**(`pickSnippetInApp` の docstring)── 消さずに隠す(器を捨てない)
     f.ok.hidden = true;
@@ -1985,7 +1985,7 @@ export function pickScrapInApp(
         list.append(line);
       }
 
-      f.ok.textContent = marks.length === 0 ? '選んだ物を入れる' : `選んだ ${marks.length} 件を入れる`;
+      f.ok.textContent = marks.length === 0 ? '選んだ物を挿入' : `選んだ ${marks.length} 件を挿入`;
       f.ok.disabled = marks.length === 0;
 
       if (focusKey !== null) {

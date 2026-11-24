@@ -257,7 +257,7 @@ export class InspectorRenderer {
     kind: HTMLSelectElement;
     add: HTMLButtonElement;
   } | null = null;
-  /** 「つながり」の行(`dd`)。つながりを追加欄をこの中に置く(依頼 77-6 C)。 */
+  /** 「つながり」の行(`dd`)。つながりを追加する欄をこの中に置く(依頼 77-6 C)。 */
   private relDd: HTMLElement | null = null;
   /** タグを打つ欄の器(#494)。⚠ 打てない状況では**畳む**(押せない物を出さない)。 */
   private tagForm: HTMLElement | null = null;
@@ -1911,7 +1911,7 @@ export class InspectorRenderer {
       dl.append(dt, dd);
       this.rows.set(field, dd);
       /**
-       * 🔴 **つながりの行も器を 2 つに割る**(台帳 #1852 / 依頼 77-6 C)。⚠ 直す前は、つながりを追加欄が
+       * 🔴 **つながりの行も器を 2 つに割る**(台帳 #1852 / 依頼 77-6 C)。⚠ 直す前は、つながりを追加する欄が
        *   ペインのいちばん下(「つながりの図」のさらに下)にあり、スクロールしないと届かなかった。
        *   「タグ」と同じく、**一覧と足す欄を同じ行に置く**(見る場所と足す場所を離さない)。
        * ⚠ 一覧は描き直しのたびに作り直すが、**打つ欄は作り直さない**(打ちかけの相手名と焦点が消える)。

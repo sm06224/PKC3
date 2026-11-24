@@ -172,7 +172,7 @@ export class ScheduleDay {
       this.label.removeAttribute('data-pkc-holiday');
       setTipTitle(this.label, null);
     }
-    // 🔑 行き先が今日なら空(= 今日に追従する状態へ戻す)── 実日付を挿入と、日付をまたいで開いたままにしたとき
+    // 🔑 行き先が今日なら空(= 今日に追従する状態へ戻す)── 実日付を挿入すると、日付をまたいで開いたままにしたとき
     //   昨日が出たままになる(着地前レビュー)
     const goTo = (d: string | null): string => (d === null ? p.day : d === p.today ? '' : d);
     this.prev.setAttribute('data-pkc-day-to', goTo(addDays(p.day, -1)));

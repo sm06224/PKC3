@@ -107,14 +107,14 @@ test('🔴 行と列を足せて、消せる ── 5 列で足りなくなっ�
   await expect(cells.first()).toBeVisible({ timeout: 10_000 });
   expect(await cells.count()).toBe(15);
 
-  // ── 列を追加す(5 → 6 列 = 18 升)
+  // ── 列を追加する(5 → 6 列 = 18 升)
   await page
     .locator('[data-pkc-action="shape-cell"][data-pkc-cell-what="col"][data-pkc-cell-mode="add"]')
     .first()
     .click({ force: true });
   await expect(cells, '列が足されていない').toHaveCount(18, { timeout: 10_000 });
 
-  // ── 行を追加す(3 → 4 行 = 24 升)
+  // ── 行を追加する(3 → 4 行 = 24 升)
   await page
     .locator('[data-pkc-action="shape-cell"][data-pkc-cell-what="row"][data-pkc-cell-mode="add"]')
     .first()

@@ -1517,7 +1517,7 @@ function showAppendMenu() {
 }
 
 /**
- * 🔴 一覧が窓の左外へはみ出さないようにする。上のバーが狭い窓で折り返すと「PDF を足す」が 2 段目の
+ * 🔴 一覧が窓の左外へはみ出さないようにする。上のバーが狭い窓で折り返すと「PDF を追加」が 2 段目の
  *   左端へ移り、右端そろえのままだと一覧が左へはみ出して押せなくなる(1100px の窓で実測、x=-16.8)。
  *   ⚠ 一覧の中身(添付の候補)が後から増えて幅が変わったときも、ここを呼び直す。
  */
@@ -1535,7 +1535,7 @@ appendBtn.addEventListener('click', () => {
   if (appendMenu.hidden) showAppendMenu();
   else hideAppendMenu();
 });
-// 外を押したら閉じる(メニューの中と「PDF を足す」自身は除く)/ Esc でも閉じる
+// 外を押したら閉じる(メニューの中と「PDF を追加」自身は除く)/ Esc でも閉じる
 document.addEventListener('pointerdown', (ev) => {
   if (appendMenu.hidden) return;
   const t = ev.target instanceof Node ? ev.target : null;

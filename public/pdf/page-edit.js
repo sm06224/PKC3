@@ -204,9 +204,9 @@
 
   /** 足した PDF の断り(窓の下に出す一行)。`code` は `edit-core.js` の断りの種類。 */
   function appendRefusal(code) {
-    if (code === 'encrypted') return 'パスワードで守られた PDF は足せません。何も変えていません';
-    if (code === 'unreadable') return 'PDF として読めないため足せません。何も変えていません';
-    return 'PDF を足せませんでした。もう一度試してください。何も変えていません';
+    if (code === 'encrypted') return 'パスワードで守られた PDF は追加できません。何も変えていません';
+    if (code === 'unreadable') return 'PDF として読めないため追加できません。何も変えていません';
+    return 'PDF を追加できませんでした。もう一度試してください。何も変えていません';
   }
 
   /** 「添付から選ぶ」の断り(窓の下に出す一行、または一覧の代わりに出す一行)。 */

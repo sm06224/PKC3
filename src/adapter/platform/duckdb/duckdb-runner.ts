@@ -342,7 +342,7 @@ function duckDbReadFrom(source: DuckDbFileGuestSource, file: string): string {
  * 🔑 覆る条件は「**複数の相手を 1 つの器へ並べて引けるようにしたとき**」と書いていた ──
  *   #918 段⑦ でその日が来たが、**覆さなかった**:並べたときは**表の名前そのものが file 名**
  *   (`duckDbTableNamesOf`)なので、どの file の行かは表を見れば分かる。
- *   ⚠ 列を追加すと「相手の列名を勝手に増やさない」が再び破れる(上の ②)。
+ *   ⚠ 列を追加すると「相手の列名を勝手に増やさない」が再び破れる(上の ②)。
  *
  * ⚠ **VIEW にしない** ── VIEW は打つたびに file を読み直すので、
  *   外を塞いだ後に**引けなくなる**(実測で `Permission Error`)。

@@ -339,7 +339,7 @@ describe('行・列の口を押す(#418 段①)', () => {
       expect(r.dispatched.map((a) => a['type'])).toEqual(['SET_CSV_SHAPE']);
     });
 
-    // 足す回も同じ門(#1087。別のタブが編集中のノートへ行・列を追加すと、追記(`append-entry`)と同じく上書きされる)
+    // 足す回も同じ門(#1087。別のタブが編集中のノートへ行・列を追加すると、追記(`append-entry`)と同じく上書きされる)
     it('🔴 足す回も、別のタブが握っていたら足さずに理由を出す', async () => {
       const r = press('add', 'denied');
       await tick();

@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 /**
- * #1087: ショートカットキーの割り当て(保存・読み込み・検査)と、アプリのリンクを追加口。
+ * #1087: ショートカットキーの割り当て(保存・読み込み・検査)と、アプリのリンクを追加する口。
  *
  * 守る主張:
  * 1. 設定ファイルの読み込み(`localStorage` へ直に書く)の後にキーを 1 つ割り当てても、読み込んだ割り当てが消えない
@@ -339,7 +339,7 @@ describe('6. 既に付いているキーをもう一度割り当てる', () => {
   });
 });
 
-describe('7. アプリのリンクを追加口', () => {
+describe('7. アプリのリンクを追加する口', () => {
   function setup() {
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');

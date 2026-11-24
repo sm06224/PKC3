@@ -40,7 +40,7 @@ describe('csv-shape ── 押した行の中身が違えば、別の行を足�
     expect(shape(PRESSED)).toBe('```csv\na,b\ne,f\n```');
   });
 
-  it('🔴 列を消す・行/列を追加す、も同じ門を通る(4 通り全部)', () => {
+  it('🔴 列を消す・行/列を追加する、も同じ門を通る(4 通り全部)', () => {
     for (const what of ['row', 'col'] as const) {
       for (const mode of ['add', 'remove'] as const) {
         expect(shape(DISK, { what, mode }), `${what}/${mode} が古い行番号のまま書いた`).toBeNull();

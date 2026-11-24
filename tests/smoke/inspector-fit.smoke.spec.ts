@@ -8,7 +8,7 @@
  * 🔑 観測点は**全数**である ── `[data-pkc-region="inspector"] *` の右端が窓の中。
  *   名指し(タグの行だけ)にすると、次に増えた行が同じ形で切れても鳴らない。
  * ⚠ 前提を assert する ── 右の列が**下限の幅で出ている**こと(広い窓では
- *   そもそも起きないので、この検査は何も主張しない)と、タグを追加欄が**在る**こと。
+ *   そもそも起きないので、この検査は何も主張しない)と、タグを追加する欄が**在る**こと。
  */
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, dismissAnnounce } from './helpers';
@@ -22,7 +22,7 @@ for (const width of [1280, 1366]) {
     await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
     const inspector = page.locator('[data-pkc-region="inspector"]');
     await expect(inspector).toBeVisible();
-    await expect(inspector.locator('[data-pkc-field="tag-add-input"]'), 'タグを追加欄が無い(台の空振り)').toBeVisible();
+    await expect(inspector.locator('[data-pkc-field="tag-add-input"]'), 'タグを追加する欄が無い(台の空振り)').toBeVisible();
 
     const r = await inspector.evaluate((el) => {
       const vw = document.documentElement.clientWidth;

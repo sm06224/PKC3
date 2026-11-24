@@ -1050,7 +1050,7 @@ test('🔴 どの幅でも探し方のタブの語が隣に重ならない', asy
         expect(g.textLeft - g.left, '群の見出しが左に寄っていない(中央に浮いている)').toBeLessThan(16);
         const urlRight = await lp.locator('[data-pkc-field="launcher-add-url"]').evaluate((e) => e.getBoundingClientRect().right);
         const rowRight = await lp.locator('[data-pkc-action="open-tile"]').first().evaluate((e) => e.getBoundingClientRect().right);
-        expect(Math.abs(urlRight - rowRight), `リンクを追加欄の右端(${urlRight})が一覧の右端(${rowRight})と揃っていない`).toBeLessThan(6);
+        expect(Math.abs(urlRight - rowRight), `リンクを追加する欄の右端(${urlRight})が一覧の右端(${rowRight})と揃っていない`).toBeLessThan(6);
         // 「リンクを追加」は欄の右端に寄る / 説明の上下の間は余白の段(直す前は p の既定 ≒ 13px)
         const goRight = await lp.locator('[data-pkc-field="launcher-add-go"]').evaluate((e) => e.getBoundingClientRect().right);
         expect(Math.abs(goRight - urlRight), `「リンクを追加」が右端に寄っていない(${goRight} / ${urlRight})`).toBeLessThan(2);

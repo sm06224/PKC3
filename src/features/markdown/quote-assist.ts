@@ -178,7 +178,7 @@ export function quoteOnEnter(value: string, caret: number): QuoteAssist {
 }
 
 /**
- * 🔴 **抜けるとき、空行を追加す必要があるか**(#1163 依頼 199)── 直前の行が実のある行なら足す。
+ * 🔴 **抜けるとき、空行を追加する必要があるか**(#1163 依頼 199)── 直前の行が実のある行なら足す。
  * ⚠ 直前が空行(または先頭)なら足さない(空行が 2 つ重ならない)。引用の記号だけの行(`>`)も空行と数える。
  */
 function blankBefore(value: string, lineHead: number): boolean {

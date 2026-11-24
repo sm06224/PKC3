@@ -84,7 +84,7 @@ test('🔴 行頭の / と @ で候補が caret の下に出て、Tab で入る(
   await page.keyboard.press('Enter');
   await expect(menu).toHaveCount(0);
   await expect(ta, 'Enter で見出し3 に置き換わらない').toHaveValue('### ');
-  // 🔴 先に聞く挿入の道具も呼べる: /date → 「日付を挿入」→ Enter で `/date` が消え、日付の選びが開く
+  // 🔴 先に聞く挿入するの道具も呼べる: /date → 「日付を挿入」→ Enter で `/date` が消え、日付の選びが開く
   await page.keyboard.press('Control+A');
   await page.keyboard.type('/date');
   await expect(menu.locator('[data-pkc-field="inline-complete-item"]').first()).toContainText('日付を挿入');

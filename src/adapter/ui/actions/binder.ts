@@ -3736,7 +3736,7 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   'workspace-delete',
   'toggle-app-tile',
   /**
-   * 🔴 **リンクを追加のも「作る」である**(#401 ①)。⚠ `create-entry` と同じ理由で
+   * 🔴 **リンクを追加するのも「作る」である**(#401 ①)。⚠ `create-entry` と同じ理由で
    *   載せる ── 取り込みが entry を総入れ替えしている裏で新しい行を挿させない。
    * 🔑 「押しうるか」ではなく「**撃ちうるか**」で判断する(`open-today` と同じ)。
    */
@@ -13130,7 +13130,7 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 「選択を読む → 渡す → 書き戻す」だけ。op ごとの知識をここに漏らさない。
    */
   /**
-   * 🔴 **日付を挿入道具**(user 指示 2026-08-23)。
+   * 🔴 **日付を挿入する道具**(user 指示 2026-08-23)。
    *
    * > 「**日付の記法としては入力がめんどくさいから、日付と時刻を簡単に入力できるし、
    * > ついてくるツールとか用意されてもいいかも**」
@@ -14250,7 +14250,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     ACTIONS['edit-cell']!(dispatcher, cell, services, root);
   },
   /**
-   * 🔴 **表の行・列を追加す / 消す**(#418 段①)。
+   * 🔴 **表の行・列を追加する / 消す**(#418 段①)。
    *
    * 🔑 打てるだけでは動線が元に戻る ── 5 列で足りなくなった瞬間に
    *   CSV の原文へ帰ることになる。⚠ 足せるなら**消せる**
@@ -14290,7 +14290,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'SET_CSV_SHAPE', lid, line, openLine, col, what, mode });
     };
     /**
-     * 🔴 **行・列を追加す回も消す回も、別のタブ・窓が編集中なら断る**(追記・チェックの切り替えと同じ門。#1087)。
+     * 🔴 **行・列を追加する回も消す回も、別のタブ・窓が編集中なら断る**(追記・チェックの切り替えと同じ門。#1087)。
      * ⚠ 通すと編集中のタブの保存で上書きされ、足した行・消した行は履歴にだけ残る(足す回は `append-entry` と同じ)。
      */
     actUnlessEditedElsewhere(dispatcher, services, [lid], '表を触れませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください', fire);

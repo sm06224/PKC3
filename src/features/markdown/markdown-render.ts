@@ -1150,7 +1150,7 @@ md.renderer.rules.td_close = function (tokens, idx, options, env, self) {
     open?.type === 'td_open' ? ((open.meta as { cellAt?: { line: number; col: number } | null } | null)?.cellAt ?? null) : null;
   if (at === null || at.col !== 0) return base;
   return (
-    shapeButtonHtml(at.line, at.col, 'row', 'add', 'この行の下に行を追加す') +
+    shapeButtonHtml(at.line, at.col, 'row', 'add', 'この行の下に行を追加') +
     shapeButtonHtml(at.line, at.col, 'row', 'remove', 'この行を消す') +
     base
   );
@@ -1190,7 +1190,7 @@ md.renderer.rules.th_close = function (tokens, idx, options, env, self) {
     cellEditButtonHtml() +
     (at === null
       ? ''
-      : shapeButtonHtml(at.line, at.col, 'col', 'add', 'この列の右に列を追加す') +
+      : shapeButtonHtml(at.line, at.col, 'col', 'add', 'この列の右に列を追加') +
         shapeButtonHtml(at.line, at.col, 'col', 'remove', 'この列を消す')) +
     base
   );

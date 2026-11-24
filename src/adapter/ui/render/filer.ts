@@ -618,7 +618,7 @@ export class FilerRenderer {
     input.setAttribute('list', 'pkc-tag-candidates');
     input.placeholder = 'タグ';
     input.setAttribute('aria-label', '集める条件にするタグ');
-    const add = iconButton('smart-cond-add', '条件に追加す');
+    const add = iconButton('smart-cond-add', '条件に追加');
     add.title =
       '入力したタグが付いたノートを集めます(複数の条件は「全部付いている」で絞ります)。井桁を付けて空白で並べると、まとめて追加できます';
     bar.append(input, add);
@@ -1989,7 +1989,7 @@ export class FilerRenderer {
         smartHit === null || smartHit.failed
           ? null
           : isSmartEmpty(smartHit.spec)
-            ? 'まだ条件がありません。上の「タグ」に入れて「条件に追加す」を押してください'
+            ? 'まだ条件がありません。上の「タグ」に入れて「条件に追加」を押してください'
             : '条件に合うノートがありません(条件を外すか、別のタグにしてみてください)';
       const bodyPending =
         q !== '' && commandQueryOf(state.filterQuery) === null && state.searchHitsQuery !== state.filterQuery;

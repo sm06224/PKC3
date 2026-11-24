@@ -87,7 +87,7 @@ describe('shownCellLine / noteCellWrite ── 自分が書いた行を先へ進
 /**
  * 🔴 **表の行・列の足し引きも、自分が直前に書いた行を数える**(#1087)。
  *
- * 列を追加すとその行の字が変わる。書き戻しが画面に届く前に(ダブルクリックなど)もう一度押すと、
+ * 列を追加するとその行の字が変わる。書き戻しが画面に届く前に(ダブルクリックなど)もう一度押すと、
  * 画面の行は書く前のままで `openLine` が disk と食い違い、2 度目が断られる ── 升の `Tab` と同じ形。
  * ⚠ 行を**消す**回は覚えない:消した行の番号は次の行の字になるので、覚えると二度押しが**続けて 2 行消す**。
  */
@@ -116,7 +116,7 @@ describe('noteShapeWrite ── 行・列の足し引きを続けて押す', () 
     const s = stateOf(CSV);
     noteShapeWrite(s, 'e1', shape({}), 0);
     expect(shownCellLine(s, 'e1', 2, 1), '押していない行の予測が無い').toBe('c,,d');
-    // 対照群:行を追加す回は他の行の番号がずれるので、他の行は覚えない
+    // 対照群:行を追加する回は他の行の番号がずれるので、他の行は覚えない
     resetCellChains();
     noteShapeWrite(s, 'e1', shape({ what: 'row' }), 0);
     expect(shownCellLine(s, 'e1', 2, 1)).toBe('c,d');
@@ -126,7 +126,7 @@ describe('noteShapeWrite ── 行・列の足し引きを続けて押す', () 
     const s = stateOf(CSV);
     noteShapeWrite(s, 'e1', shape({ what: 'row', mode: 'remove' }), 0);
     expect(shownCellLine(s, 'e1', 1, 1), '消した行の番号に、次の行の予測を載せた').toBe('a,b');
-    // 対照群:行を追加す回は押した行の字が変わらないので、そのまま
+    // 対照群:行を追加する回は押した行の字が変わらないので、そのまま
     noteShapeWrite(s, 'e1', shape({ what: 'row', mode: 'add' }), 2);
     expect(shownCellLine(s, 'e1', 1, 3)).toBe('a,b');
   });

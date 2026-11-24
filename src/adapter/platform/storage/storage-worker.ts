@@ -1175,7 +1175,7 @@ export function applySchema(database: Database): void {
      * ⚠ 順序を逆にすると、**既存 DB が開かなくなる**:
      *   `SCHEMA_DDL` には新しい列を使う索引
      *   (`CREATE INDEX … ON entries (cid, task_total)`)が入っているので、
-     *   列を追加す前に走ると `no such column` で **tx ごと落ちる** ── つまり
+     *   列を追加する前に走ると `no such column` で **tx ごと落ちる** ── つまり
      *   **いま使っている user 全員のアプリが起動しなくなる**。
      * ⚠ 新規 DB には entries がまだ無いので、**表の実在を見てから** ALTER する
      *   (判定は user_version ではなく「あるべき状態の実在」── schema.ts の原則)。
@@ -2544,7 +2544,7 @@ function restoreOneChain(
  * 🔴 **鎖の復元の本体**(台帳 #1852 束 F2 で `restoreOneChain` から切り出した)。`head` = 符号化の起点(生きたノートなら
  * `entries` の行、ゴミ箱のノートなら頭の行になる全文)。生きたノートの復元(`restoreOneChain`)とゴミ箱のノートの復元
  * (`restoreOneTrashNote`)が**この 1 本**を通る ── 2 か所に decode / 噛み合わせ検査 / 符号化を書かない。
- * @returns 積んだ古い版の行数(rev_order は 1..n。頭の行を追加すなら n + 1)
+ * @returns 積んだ古い版の行数(rev_order は 1..n。頭の行を追加するなら n + 1)
  */
 function stageAndWriteChain(
   database: Database,

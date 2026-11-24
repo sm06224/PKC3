@@ -80,7 +80,7 @@ export function appendModeOf(state: AppState): AppendMode {
  *
  * 以前は追記欄が理由なく消えた(1 画面の編集の間は「編集中」と出口が出る)。場所が動かないよう、同じ場所に 1 行だけ出す
  * (ボタンは出さない ── 出口は章の欄の「保存 / やめる」。ここに別の押し口を置くと、押した物と効く先が食い違う)。
- * ⚠ `appendModeOf` は変えない(`hidden` のまま。binder の門が読む判定を増やさない)── 表示の側だけがこの 1 行を追加す。
+ * ⚠ `appendModeOf` は変えない(`hidden` のまま。binder の門が読む判定を増やさない)── 表示の側だけがこの 1 行を追加する。
  */
 export const SECTION_EDITING_NOTE = '章を編集中';
 export const CODE_EDITING_NOTE = 'コードを編集中';

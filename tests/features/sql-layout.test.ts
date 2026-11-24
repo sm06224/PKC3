@@ -137,7 +137,7 @@ describe('キャレットの後ろも見る(着地前レビュー W3)', () => {
     expect(insertionWithSpacing('SELECT ', 'a', 'name', ')')).toBe('a');
     expect(insertionWithSpacing('SELECT', 'a', 'name', 'FROM')).toBe(' a ');
   });
-  it('文: 後ろに字が在れば改行を追加す(改行で始まるならそのまま)', () => {
+  it('文: 後ろに字が在れば改行を追加する(改行で始まるならそのまま)', () => {
     expect(insertionWithSpacing('x', 's', 'statement', 'y')).toBe('\ns\n');
     expect(insertionWithSpacing('x\n', 's', 'statement', '\ny')).toBe('s');
     expect(insertionWithSpacing('', 's', 'statement', '')).toBe('s');
