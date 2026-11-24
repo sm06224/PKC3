@@ -11,20 +11,70 @@
  * | コマ落ち | ページ内の rAF 間隔。**中央値の 2 倍以上**の間隔を 1 つと数える |
  * | 再計算・レイアウト・スクリプトの時間 | CDP `Performance.getMetrics` の前後差(`RecalcStyleDuration` / `LayoutDuration` / `ScriptDuration`) |
  *
- * 🔑 **対照群 = 測りたい操作以外を全部同じにしたもの**(perf-measurement の作法)。同じ起動・同じ道筋で
- *   `emulateMedia({ reducedMotion: 'reduce' })`(発光のリスナーごと外れる)と通常を**交互に 2 回ずつ**測る(A B A B。先頭 1 回は温め)。
- * ⚠ **機械の数字を assert にしない**。assert は ①対照群で光っていない・通常で実際に光った(= 空振りでない)②コマが十分に取れた
- *   ③通常のコマ落ちが対照群より大きく悪くない(許容は広く取る)だけ。数字は console と `PKC3_PERF_OUT`(JSON)へ出す。
+ * 🔑 **対照群 = 測りたい操作(発光)だけを外したもの**(perf-measurement の作法)。同じ起動・同じ道筋で、発光だけを外した群と通常を**交互に 2 回ずつ**測る(温め 1 回は捨てる)。
+ * ⚠ **`prefers-reduced-motion: reduce` は対照群に使わない** ── 発光のほか、すべての transition / animation / smooth scroll も止めるので「発光だけの差」にならない。
+ *   代わりに init script で `matchMedia` を包み、**`GLOW_QUERY`(`neon-glow.ts` の正本をそのまま import)だけ** `matches: false` を返して `change` を送る。
+ *   ほかの media query は触らず、`reducedMotion` は両群とも `no-preference` のまま。
+ * ⚠ **機械の数字を assert にしない**。assert は ①対照群で光っていない・通常で実際に光った(光ったコマが全コマの 10% 以上 = 空振りでない)
+ *   ②コマが十分に取れた ③通常のコマ落ちが対照群より大きく悪くない(許容は広く取る)だけ。コマ落ちは**中央値の 1.5 倍以上**の間隔を 1 つと数える。
+ *   数字は console と `PKC3_PERF_OUT`(JSON。形は `SCHEMA` で固定し、spec が形を検査する)へ出す。
  * ⚠ 差し引きの値は**向きだけ**信じる(倍率は書かない)。
  *
  * `PKC3_SKIP_PERF=1` で飛ばせる(負荷の高い手元・CI の共有機で揺れるとき)。
  */
 import { test, expect, type Page } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { GLOW_QUERY } from '../../src/adapter/ui/render/neon-glow';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, dismissAnnounce } from './helpers';
 
 test.use({ deviceScaleFactor: 2 });
 test.skip(process.env.PKC3_SKIP_PERF === '1', 'PKC3_SKIP_PERF=1');
+
+/** 🔴 発光だけを外す: `GLOW_QUERY` の問いにだけ `matches: false` を返し(`change` も送る)、ほかの media query は本物のまま。 */
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript((q: string) => {
+    const real = window.matchMedia.bind(window);
+    const w = window as unknown as { __pkcGlowOff?: (off: boolean) => void };
+    let off = false;
+    const fns = new Set<(e: Event) => void>();
+    const fake = {
+      media: q,
+      onchange: null,
+      get matches(): boolean {
+        return !off && real(q).matches;
+      },
+      addEventListener: (_t: string, f: (e: Event) => void): void => void fns.add(f),
+      removeEventListener: (_t: string, f: (e: Event) => void): void => void fns.delete(f),
+      addListener: (f: (e: Event) => void): void => void fns.add(f),
+      removeListener: (f: (e: Event) => void): void => void fns.delete(f),
+      dispatchEvent: (): boolean => true,
+    };
+    w.__pkcGlowOff = (v: boolean): void => {
+      off = v;
+      for (const f of fns) f(new Event('change'));
+    };
+    window.matchMedia = ((query: string): MediaQueryList => (query === q ? (fake as unknown as MediaQueryList) : real(query))) as typeof window.matchMedia;
+  }, GLOW_QUERY);
+});
+
+/** 出力 JSON の形(単位つき)。変えるときは `schema` の版を上げる。 */
+const SCHEMA = {
+  schema: 'pkc3-neon-perf/1',
+  runFields: {
+    label: 'string',
+    frames: 'count(rAF 間隔の数)',
+    medianMs: 'ms(rAF 間隔の中央値)',
+    dropped: 'count(中央値の 1.5 倍以上の間隔)',
+    glowFrames: 'count(発光の印が付いていたコマ)',
+    loafCount: 'count',
+    loafTotalMs: 'ms(長い描画の duration 合計)',
+    loafKind: 'long-animation-frame | longtask | none',
+    recalcStyleMs: 'ms(CDP RecalcStyleDuration の前後差)',
+    layoutMs: 'ms(CDP LayoutDuration の前後差)',
+    scriptMs: 'ms(CDP ScriptDuration の前後差)',
+  },
+} as const;
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -124,6 +174,8 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
     };
     requestAnimationFrame(tick);
   });
+  // 群を切り替えた直後の再計算(change → 発光の付け外し)を測りに入れない: 2 コマ待ってから基準を取る
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
   const m0 = await metrics();
   for (const title of scenes) {
     await selectByTitle(page, title);
@@ -142,7 +194,7 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
     const iv = st.ts.slice(1).map((t, i) => t - st.ts[i]!);
     const sorted = [...iv].sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
-    return { frames: iv.length, median, dropped: iv.filter((d) => d >= median * 2).length, glow: st.glow, long: st.long, kind: st.kind };
+    return { frames: iv.length, median, dropped: iv.filter((d) => d >= median * 1.5).length, glow: st.glow, long: st.long, kind: st.kind };
   });
   await cdp.detach();
   const d = (k: string): number => ((m1[k] ?? 0) - (m0[k] ?? 0)) * 1000;
@@ -161,7 +213,7 @@ async function measure(page: Page, label: string, scenes: string[]): Promise<Run
   };
 }
 
-test('🔴 ネオンの 600 コマ計測: 対照群(動きを減らす = 発光なし)と通常を同じ道筋で測り、数字を出す (Stage 2 PR-1 @perf)', async ({ page }) => {
+test('🔴 ネオンの 600 コマ計測: 対照群(発光だけを外す)と通常を同じ道筋で測り、数字を出す (Stage 2 PR-1 @perf)', async ({ page }) => {
   test.setTimeout(240_000);
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -174,30 +226,40 @@ test('🔴 ネオンの 600 コマ計測: 対照群(動きを減らす = 発光�
   const scenes = ['計測用のログ', '計測用のノート'];
 
   const runs: Run[] = [];
-  const order: [string, 'reduce' | 'no-preference'][] = [
-    ['温め(捨てる)', 'no-preference'],
-    ['control-1', 'reduce'],
-    ['glow-1', 'no-preference'],
-    ['control-2', 'reduce'],
-    ['glow-2', 'no-preference'],
+  const order: [string, boolean][] = [
+    ['温め(捨てる)', false],
+    ['control-1', true],
+    ['glow-1', false],
+    ['control-2', true],
+    ['glow-2', false],
   ];
-  for (const [label, motion] of order) {
-    await page.emulateMedia({ reducedMotion: motion });
+  for (const [label, glowOff] of order) {
+    await page.evaluate((v) => (window as unknown as { __pkcGlowOff: (o: boolean) => void }).__pkcGlowOff(v), glowOff);
     await page.mouse.move(150, 450);
     const run = await measure(page, label, scenes);
     if (label !== '温め(捨てる)') runs.push(run);
   }
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
 
   console.log(`[neon-perf]\n${JSON.stringify(runs, null, 1)}`);
+  const report = { schema: SCHEMA.schema, at: new Date().toISOString(), viewport: '1440x900@2', units: SCHEMA.runFields, runs };
   const out = process.env.PKC3_PERF_OUT;
-  if (out !== undefined && out !== '') writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), viewport: '1440x900@2', runs }, null, 2));
+  if (out !== undefined && out !== '') writeFileSync(out, JSON.stringify(report, null, 2));
+  // 🔑 出力の形を毎回検査する(書かない実行でも)── JSON を読む側(後の PR・比較の道具)が黙って壊れない
+  const parsed = JSON.parse(JSON.stringify(report)) as typeof report;
+  expect(parsed.schema).toBe('pkc3-neon-perf/1');
+  expect(parsed.runs.length).toBe(4);
+  for (const r of parsed.runs) {
+    expect(Object.keys(r).sort(), '出力の run の欄が SCHEMA と違う').toEqual(Object.keys(SCHEMA.runFields).sort());
+    for (const [k, v] of Object.entries(r)) expect(typeof v, `${k} の型`).toBe(k === 'label' || k === 'loafKind' ? 'string' : 'number');
+  }
+  // 🔑 GLOW_QUERY が正本の字面と一致している(import が差し替えられても、字面の写しが漂わない)
+  expect(readFileSync('src/adapter/ui/render/neon-glow.ts', 'utf-8')).toContain(`export const GLOW_QUERY = '${GLOW_QUERY}'`);
 
   const control = runs.filter((r) => r.label.startsWith('control'));
   const glow = runs.filter((r) => r.label.startsWith('glow'));
   for (const r of runs) expect(r.frames, `${r.label}: コマが取れていない`).toBeGreaterThan(300);
   for (const r of control) expect(r.glowFrames, `${r.label}: 対照群で光っている(空振り)`).toBe(0);
-  for (const r of glow) expect(r.glowFrames, `${r.label}: 通常で一度も光らない(空振り)`).toBeGreaterThan(0);
+  for (const r of glow) expect(r.glowFrames, `${r.label}: 通常で光ったコマが全体の 10% に満たない(空振り)`).toBeGreaterThanOrEqual(r.frames * 0.1);
   // 緩い上限: 通常のコマ落ちは対照群の最大 + 5% を超えない(機械の揺れを許す。厳しい線は後の PR が数字を見て決める)
   const worstControl = Math.max(...control.map((r) => r.dropped));
   for (const r of glow) expect(r.dropped, `${r.label}: コマ落ちが対照群(${worstControl})より大きく増えた`).toBeLessThanOrEqual(worstControl + 30);
