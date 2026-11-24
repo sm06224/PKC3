@@ -11,6 +11,7 @@ import type { SyncFolderViewSource } from '../sync-folder-view';
 import type { SyncEnabledStore } from '../sync-enabled';
 import type { SettingsSection } from './section';
 import { buildSettingsNote } from './note';
+import { buildE2EPanel, syncE2EPanel } from './sync-e2e';
 import { SYNC_FOLDER_UNSUPPORTED_NOTE } from '@adapter/platform/sync-folder';
 
 export const SYNC_FOLDER_LABEL = '同期フォルダ';
@@ -69,9 +70,10 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
         'クラウドドライブのフォルダを選ぶと、端末ごとに 1 つのファイル(pkc3-<端末の ID>.pkc3-diff.zip)を置き、ほかの端末のファイルを取り込みます。ファイルを自分で運ぶ必要はありません。',
         'ノートの本文・題名・フォルダの置き場所・つながり・添付・色ラベル・ピン留め・削除を運びます。両方で変えたノートは、両方残します(差分ファイルと同じ)。',
         'この画面を開いている間だけ同期します。初めての端末は、選んだ直後か「今すぐ同期」を押したときに 1 度だけ確認します。',
+        '「中身を暗号化する」をオンにすると、ファイルを暗号化して置きます(同期フォルダでは任意・既定はオフ)。同じフォルダを使う全部の端末でオンにしてください。',
         'パソコンの Chrome・Edge で使えます。スマホや Safari・Firefox では、差分ファイルの書き出しと取り込みを使ってください。',
       ]) notes.push(buildSettingsNote(t));
-      dd.append(status, bar, ...notes);
+      dd.append(status, bar, buildE2EPanel('folder'), ...notes);
       return [dt, dd];
     },
     sync(): void {
@@ -131,6 +133,8 @@ export function createSyncFolderSection(region: HTMLElement, source: SyncFolderV
         const want = String(v?.minutes ?? 5);
         if (select.value !== want) select.value = want;
       }
+      const e2e = dd.querySelector<HTMLElement>('[data-pkc-region="sync-e2e"]');
+      if (e2e !== null) syncE2EPanel(e2e, v, { connected: hasFolder, enabled: usable });
     },
   };
 }

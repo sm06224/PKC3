@@ -14802,6 +14802,83 @@ h6:hover > .pkc-heading-anchor,
   white-space: pre;
 }
 
+/* #2000 段 4b-B 端末間の同期の暗号化の欄(S3 互換の保管先・同期フォルダ共通)。状態の注意だけ注意の色(色は意味にだけ)。 */
+[data-pkc-region='sync-e2e'] {
+  margin: var(--s2) 0;
+}
+[data-pkc-region='sync-e2e'] [hidden] {
+  display: none;
+}
+[data-pkc-region='sync-e2e'][data-pkc-state='none'] [data-pkc-field='sync-e2e-status'],
+[data-pkc-region='sync-e2e'][data-pkc-state='locked'] [data-pkc-field='sync-e2e-status'],
+[data-pkc-region='sync-e2e'][data-pkc-state='broken'] [data-pkc-field='sync-e2e-status'] {
+  color: var(--warn);
+}
+[data-pkc-field='sync-e2e-setup'],
+[data-pkc-field='sync-e2e-unlock'],
+[data-pkc-field='sync-e2e-open'] {
+  display: grid;
+  justify-items: start;
+  gap: var(--s2);
+}
+[data-pkc-field='sync-e2e-setup'] label:not(:has([type='checkbox'])),
+[data-pkc-field='sync-e2e-unlock'] label:not(:has([type='checkbox'])),
+[data-pkc-field='sync-e2e-change'] label:not(:has([type='checkbox'])) {
+  display: grid;
+  grid-template-columns: 10em minmax(0, 20em);
+  gap: var(--s2);
+  align-items: center;
+}
+[data-pkc-field='sync-e2e-change'] {
+  display: grid;
+  gap: var(--s2);
+  justify-items: start;
+}
+[data-pkc-field='sync-e2e-change'] > summary {
+  cursor: pointer;
+}
+[data-pkc-field='sync-e2e-refused'] > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+  color: var(--warn);
+}
+/* 回復キーの窓: 等幅・選べる字・折り返す(32 文字を 1 目で写せる) */
+[data-pkc-field='dialog-body'] [data-pkc-field='recovery-note'],
+[data-pkc-field='dialog-body'] [data-pkc-field='recovery-match'] {
+  display: block;
+  font-size: var(--fs-sm);
+}
+[data-pkc-field='dialog-body'] [data-pkc-field='recovery-key'] {
+  display: block;
+  margin: var(--s3) 0;
+  padding: var(--s3);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-lg, 1.1em);
+  letter-spacing: 0.08em;
+  text-align: center;
+  user-select: all;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+[data-pkc-field='dialog-body'] [data-pkc-field='recovery-save'] {
+  margin-bottom: var(--s3);
+}
+[data-pkc-field='dialog-body'] [data-pkc-field='recovery-retype'] {
+  display: block;
+  width: 100%;
+  margin-top: var(--s1);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+[data-pkc-field='dialog-body'] [data-pkc-field='recovery-match'][data-pkc-state='ok'] {
+  color: var(--ok);
+}
+[data-pkc-field='dialog-body'] [data-pkc-field='recovery-match'][data-pkc-state='caution'] {
+  color: var(--warn);
+}
+
 /* OS の「視差効果を減らす」を出している人には、動きをほぼ即時にする */
 @media (prefers-reduced-motion: reduce) {
   *,

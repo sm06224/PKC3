@@ -114,6 +114,8 @@ export interface ShellRegions {
   messagePopover: HTMLElement;
   /** 途中で終わった録音・録画への入口(#1985。残っている間だけ出る。ポップオーバーの状態の欄)。 */
   statusCaptureRecovery: HTMLElement;
+  /** 🔴 端末間の同期が「パスフレーズを入れる」で止まっているときの入口(#2000 段 4b-B。ポップオーバーの状態の欄。押すと設定の暗号化の欄へ)。 */
+  statusSyncUnlock: HTMLElement;
   /** 🔴 **狭すぎる端末への断り書き**(#671)。中身は `too-narrow.ts` が出し入れする。 */
   tooNarrow: HTMLElement;
   /** その断り書きの字を置く所。 */
@@ -1328,6 +1330,12 @@ export function buildShell(root: HTMLElement): ShellRegions {
   statusCaptureRecovery.setAttribute('data-pkc-field', 'status-capture-recovery');
   statusCaptureRecovery.setAttribute('data-pkc-action', 'open-capture-recovery');
   statusCaptureRecovery.hidden = true;
+  /** 🔴 同期が「パスフレーズを入れる」で止まっている間だけ出す(#2000 段 4b-B。`paintStatusSyncUnlock`)。 */
+  const statusSyncUnlock = document.createElement('button');
+  statusSyncUnlock.type = 'button';
+  statusSyncUnlock.setAttribute('data-pkc-field', 'status-sync-unlock');
+  statusSyncUnlock.setAttribute('data-pkc-action', 'open-sync-e2e-settings');
+  statusSyncUnlock.hidden = true;
   /**
    * 🔴 **狭すぎる端末への断り書き**(user 裁定 2026-09-04、#671)。
    * ⚠ **器は 1 度だけ組む**(`too-narrow.ts` は `hidden` の付け外しだけ)──
@@ -1364,7 +1372,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
    */
   const messagePopover = buildMessagePopover(
     document,
-    { backup: statusBackup, captureRecovery: statusCaptureRecovery },
+    { backup: statusBackup, captureRecovery: statusCaptureRecovery, syncUnlock: statusSyncUnlock },
     SYSTEM_MESSAGE_LID,
   );
   const statusBackupToast = document.createElement('button');
@@ -1590,6 +1598,7 @@ export function buildShell(root: HTMLElement): ShellRegions {
     statusLive,
     messagePopover,
     statusCaptureRecovery,
+    statusSyncUnlock,
     tooNarrow,
     tooNarrowText,
     tooNarrowOk,

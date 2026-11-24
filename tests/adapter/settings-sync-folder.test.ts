@@ -40,6 +40,7 @@ const view = (over: Partial<SyncFolderView>): SyncFolderView => ({
   message: null,
   pending: 0,
   persist: true,
+  e2e: { available: true, on: false, open: false, stored: false, ask: false, keyring: 'unknown', refused: [] },
   ...over,
 });
 

@@ -93,6 +93,7 @@ import { scheduleNumberFormatWarmup } from '@adapter/ui/render/locale-warmup';
 import {
   paintStatusBackup,
   paintStatusCaptureRecovery,
+  paintStatusSyncUnlock,
   paintStatusCopyRef,
   paintStatusCreate,
   paintStatusOpen,
@@ -242,7 +243,7 @@ import { SYNC_FORGET_CONFIRM, SYNC_FORGET_CONFIRM_ON_OFF, SYNC_FORGET_LABEL, SYN
 import { SHOW_SYNC_CONFLICTS_ACTION } from '@adapter/ui/actions/sync-diff';
 import { applySyncDiff, backupSyncSeed, buildSyncDiff, exportSyncDiff, importSyncDiff, seedSyncFromBackup, type SyncDeps } from '@adapter/ui/actions/sync-diff';
 import { idbSyncFolderStore, SyncFolder, type SyncFolderPicker } from '@adapter/platform/sync-folder';
-import { windowSyncRemote } from '@adapter/platform/sync-remote';
+import { windowSyncRemoteAndE2E } from '@adapter/platform/sync-remote';
 import { appSyncFolderView } from '@adapter/ui/render/sync-folder-view';
 import { readDiffZip } from '@features/sync/diff-file';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
@@ -1864,6 +1865,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    */
   /** 同期フォルダ(#2000 段 3)の状態の一言。⚠ 実体は後で組まれる(それまでは空)── 起動の途中の塗りで TDZ に当たらない。 */
   let syncFolderStatus: () => string = () => '';
+  /** 🔴 同期が「パスフレーズを入れる」で止まっているときの、状態の欄のボタンの字(段 4b-B。`null` = 出さない)。 */
+  let syncUnlockLabel: () => string | null = () => null;
   const folderSync = new FolderSync({
     picker: windowSyncPicker(),
     // 🔴 別のタブ・ウィンドウが同じフォルダを同期していたら重ならない(`navigator.locks`。無い環境は排他なし)
@@ -2518,6 +2521,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 🔴 日付のノートが無かった直後の「○○のノートを作る」も同じ口で出し入れする(#1169)
     const create = paintStatusCreate(regions.statusCreate, dispatcher.getState(), shown);
     paintStatusCaptureRecovery(regions.statusCaptureRecovery, captureRecoveryCount);
+    paintStatusSyncUnlock(regions.statusSyncUnlock, syncUnlockLabel());
     // 🔴 いま押す口を持つ知らせか(持つなら自動で消さない ── `status-lifetime.ts`)
     return open || undo || create || copyRef;
   };
@@ -3895,12 +3899,15 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       confirmAction: async () => false,
     };
   };
+  const syncRemote = windowSyncRemoteAndE2E();
   const syncFolder = new SyncFolder({
     cid: () => cid,
     enabled: () => appSyncEnabled.enabled(),
     picker: windowSyncPicker() as SyncFolderPicker | null,
     // 🔴 S3 互換の保管先(#2000 段 4a-4)── 認証情報は鍵の保管(取り出せない鍵で暗号化)にだけ置く
-    remote: windowSyncRemote(),
+    remote: syncRemote.remote,
+    // 🔴 端末間の同期の暗号化(段 4b-B)── 暗号化したい箱で口が無い・暗号化キーが開かれていないときは、平文で書かずに止まる(fail-closed)
+    e2e: syncRemote.e2e,
     store: idbSyncFolderStore(),
     lock: windowSyncLock(),
     device: async () => {
@@ -3924,6 +3931,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
   appSyncFolderView.attach(() => syncFolder.view());
   syncFolderStatus = () => syncFolder.statusLine();
+  syncUnlockLabel = () => syncFolder.unlockButtonLabel();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') syncFolder.onVisible();
   });
@@ -5016,6 +5024,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       allowPersist: () => syncFolder.allowPersist(),
       testRemote: (form) => syncFolder.testRemote(form),
       connectRemote: (form) => syncFolder.connectRemote(form),
+      e2e: {
+        setEncrypt: (on) => syncFolder.setEncrypt(on),
+        e2eBeginSetup: (pass, remember) => syncFolder.e2eBeginSetup(pass, remember),
+        e2eUnlock: (via, remember) => syncFolder.e2eUnlock(via, remember),
+        e2eSetRemember: (remember) => syncFolder.e2eSetRemember(remember),
+        e2eChangePassphrase: (via, next) => syncFolder.e2eChangePassphrase(via, next),
+        acceptPeerAgain: (device) => syncFolder.acceptPeerAgain(device),
+      },
     },
     setAlarmEnabled: (on) => {
       appAlarmEnabled.setEnabled(on);

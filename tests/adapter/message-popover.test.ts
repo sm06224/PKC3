@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildShell } from '../../src/adapter/ui/render/shell';
+import { paintStatusSyncUnlock } from '../../src/adapter/ui/render/status-open';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import type { Dispatchable } from '../../src/adapter/state/app-state';
@@ -307,6 +308,15 @@ describe('中身(いまの状態 / 最近のメッセージ / ボタン)', () =>
     // 警告の隣のバックアップのボタンはポップオーバーの中に在る(帯が無いので移した)
     expect(pop.contains(regions.statusBackup)).toBe(true);
     expect(pop.contains(regions.statusCaptureRecovery)).toBe(true);
+    // 🔴 同期が「パスフレーズを入れる」で止まっているときの入口(段 4b-B): 在る・既定は畳まれている・出すと字が入り、押す先は設定の暗号化の欄
+    expect(pop.contains(regions.statusSyncUnlock)).toBe(true);
+    expect(regions.statusSyncUnlock.hidden).toBe(true);
+    expect(regions.statusSyncUnlock.textContent).toBe('');
+    expect(regions.statusSyncUnlock.getAttribute('data-pkc-action')).toBe('open-sync-e2e-settings');
+    paintStatusSyncUnlock(regions.statusSyncUnlock, 'パスフレーズを入れる');
+    expect([regions.statusSyncUnlock.hidden, regions.statusSyncUnlock.textContent]).toEqual([false, 'パスフレーズを入れる']);
+    paintStatusSyncUnlock(regions.statusSyncUnlock, null);
+    expect([regions.statusSyncUnlock.hidden, regions.statusSyncUnlock.textContent], '止まっていなければ畳み、字も空にする').toEqual([true, '']);
     expect(pop.querySelector('[data-pkc-field="popover-state"] > h3')!.getAttribute('title')).toBe('版 — 保存先');
   });
 
