@@ -1592,13 +1592,19 @@ img[data-pkc-action='view-big']:focus-visible {
  * `BrowseRouter.render` が畳む部分を空白区切りで書く(判定と表は `browse-mode.ts` の `filerHeaderFold`。フォルダは印なし = 何も畳まない)。
  * ⚠ 畳むのは**見た目だけ**(`display: none`)── DOM に残すので、鍵(`Alt+←`・`Ctrl+N`・操作を探す)の受け手のボタンは生きたまま。
  *   探す欄を畳んでいるとき、探す欄への焦点(`focus-search`)はフォルダのタブへ移ってから入れる。
+ * 🔴 探す欄を畳んでも、戻る・進む・最近(‹ › ◷)のボタンは残す ── グラフ等でノートを開いたあと、マウスだけで元のノートへ戻れるように
+ *   (CLAUDE.md §2-10「マウスだけで完結」。鍵の `Alt+←` だけにしない)。
  * ⚠ スマホ幅の一覧のページでは、メッセージの入口が作る帯の末尾に居る(`rail.ts` の `placeMessageEntry`)── 他の子だけ畳み、入口は残す
  *   (どの画面からも届く常設の入口 ── CLAUDE.md §2-3)。入口の居ない帯(PC)は空になるので丸ごと畳む。
  */
 [data-pkc-region='sidebar'][data-pkc-filer-fold~='search'] > :is(
-    [data-pkc-region='find-bar'],
     [data-pkc-region='kind-bar'],
     [data-pkc-region='saved-searches']
+  ),
+[data-pkc-region='sidebar'][data-pkc-filer-fold~='search'] > [data-pkc-region='find-bar'] > :not(
+    [data-pkc-action='nav-back'],
+    [data-pkc-action='nav-forward'],
+    [data-pkc-action='open-recent']
   ),
 [data-pkc-region='sidebar'][data-pkc-filer-fold~='sort'] > [data-pkc-region='find-bar'] > :is(
     [data-pkc-field='entry-sort'],

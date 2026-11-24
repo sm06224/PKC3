@@ -70,14 +70,27 @@ test('🔴 1: ファイラー以外のタブでは効かない部分が畳まれ
     await openLeft(page, mode);
     expect(await parts(page), `${mode}: 畳む部分が表と違う`).toEqual({ search: true, sort: false, create: true });
   }
-  // 絞りが効かないタブ(グラフ・シェル): 頭を全部畳む(約 110px 広がる)
+  // 絞りが効かないタブ(グラフ・シェル): 探す欄・並び順・作る帯を畳む。⚠ 戻る・進む・最近(‹ › ◷)だけはマウスで届くよう残す
   for (const mode of ['graph', 'shell']) {
     await openLeft(page, mode);
     expect(await parts(page), `${mode}: 畳む部分が表と違う`).toEqual({ search: false, sort: false, create: false });
-    for (const r of ['find-bar', 'create-bar', 'kind-bar'])
+    for (const r of ['create-bar', 'kind-bar'])
       expect(await visible(page, `[data-pkc-region="sidebar"] > [data-pkc-region="${r}"]`), `${mode}: ${r} が見えている`).toBe(false);
+    const shown = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-pkc-region="sidebar"] > [data-pkc-region="find-bar"] > *')]
+        .filter((el) => el.getBoundingClientRect().width > 0)
+        .map((el) => el.getAttribute('data-pkc-action') ?? el.getAttribute('data-pkc-field') ?? el.tagName),
+    );
+    // ⚠ ブラウザのタブ(幅が広い・アプリとして開いていない)では ‹ › はもともと出さない(ブラウザの戻る・マウスの戻るが効く ── `nav-history.smoke`)。
+    //   ここで残るのは ◷ だけ。‹ › が出る場(アプリとして開いた / スマホ幅)でも畳む規則は ‹ › を除外している(`filer-header-fold.test.ts`)
+    expect(shown, `${mode}: 探す欄の段に残る物が「最近」と違う`).toEqual(['open-recent']);
+    // 実際に押せる(覆われていない)── 最近を押すと最近開いたノートの一覧が出る
+    const recent = page.locator('[data-pkc-region="sidebar"] [data-pkc-action="open-recent"]');
+    const rb = (await recent.boundingBox())!;
+    const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-pkc-action]')?.getAttribute('data-pkc-action') ?? null, [rb.x + rb.width / 2, rb.y + rb.height / 2]);
+    expect(hit, `${mode}: 最近のボタンが覆われている`).toBe('open-recent');
     const top = await hostTop(page);
-    expect(topFiler - top, `${mode}: 一覧の領域が上へ広がっていない(フォルダ ${topFiler} / ここ ${top})`).toBeGreaterThanOrEqual(80);
+    expect(topFiler - top, `${mode}: 一覧の領域が上へ広がっていない(フォルダ ${topFiler} / ここ ${top})`).toBeGreaterThanOrEqual(50);
   }
 
   // 双方向: フォルダへ戻ると出る
@@ -104,6 +117,12 @@ test('🔴 1: ファイラー以外のタブでは効かない部分が畳まれ
   await openLeft(page, 'filer');
   await page.waitForTimeout(150);
   expect(await rows(), '往復のあと、作る帯が 2 段に割れている(測り直されていない)').toBe(1);
+  // スマホ幅(‹ › が出る場)では、グラフのタブでも ‹ › ◷ が残る(マウス・指だけで元のノートへ戻れる)
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openLeft(page, 'graph');
+  for (const a of ['nav-back', 'nav-forward', 'open-recent'])
+    await expect(page.locator(`[data-pkc-region="sidebar"] > [data-pkc-region="find-bar"] > [data-pkc-action="${a}"]`), `スマホ幅のグラフで ${a} が消えた`).toBeVisible();
+  await expect(page.locator('[data-pkc-region="sidebar"] [data-pkc-field="entry-filter"]'), 'スマホ幅のグラフで探す欄が出ている').toBeHidden();
   await page.setViewportSize({ width: 1280, height: 800 });
 
   // 探す欄への焦点(鍵の入口): 畳んでいる(グラフ)ときはフォルダのタブへ移ってから入る / 見えている(予定)ときはタブを動かさずに入る

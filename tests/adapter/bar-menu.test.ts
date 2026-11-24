@@ -105,6 +105,36 @@ describe('① makeBarMenu の振る舞い(native `<details>` + 足した 3 つ)'
     expect(outer, '閉じているのに Esc を握った').toHaveBeenCalledTimes(1);
   });
 
+  it('🔴 焦点がメニューの外(Tab で出た等)でも Esc で閉じ、背後へ流さない / ダイアログが開いているときは握らない', () => {
+    for (const old of document.querySelectorAll('details[data-pkc-bar-menu]')) old.remove();
+    const d = makeBarMenu('t-out', 'その他', 'h', [btn('x-o', 'お')]);
+    const outside = document.createElement('input');
+    const outer = vi.fn();
+    document.body.append(d, outside);
+    document.body.addEventListener('keydown', outer);
+    try {
+      d.open = true;
+      outside.focus();
+      outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(d.open, '外に焦点があると閉じない').toBe(false);
+      expect(document.activeElement).toBe(d.querySelector('summary'));
+      expect(outer, 'Esc が背後へ流れている').not.toHaveBeenCalled();
+      // 対照群: 開いたダイアログが在るときは、ダイアログの Esc を奪わない
+      const dlg = document.createElement('dialog');
+      dlg.setAttribute('open', '');
+      document.body.append(dlg);
+      d.open = true;
+      outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(d.open, 'ダイアログの Esc を奪った').toBe(true);
+      expect(outer).toHaveBeenCalledTimes(1);
+      dlg.remove();
+    } finally {
+      document.body.removeEventListener('keydown', outer);
+      d.remove();
+      outside.remove();
+    }
+  });
+
   it('上へ開く指定は印に出る / 既定は下 / 詰め物は幅を持たない印の物', () => {
     expect(makeBarMenu('a', 'その他', 'h', [btn('x', 'x')], { up: true }).querySelector('[data-pkc-bar-menu-list]')?.getAttribute('data-pkc-bar-menu-list')).toBe('up');
     expect(makeBarMenu('b', 'その他', 'h', [btn('x', 'x')]).querySelector('[data-pkc-bar-menu-list]')?.getAttribute('data-pkc-bar-menu-list')).toBe('down');

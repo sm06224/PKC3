@@ -124,10 +124,18 @@ describe('④ CSS(畳む部分と属性の語が噛み合う / メッセージ�
 
   it('🔴 3 つの語(search / sort / create)がそれぞれの部分を畳む', () => {
     expect(at, '畳む規則が無い').toBeGreaterThan(-1);
-    expect(rule).toMatch(/filer-fold~='search'\] > :is\(\s*\[data-pkc-region='find-bar'\],\s*\[data-pkc-region='kind-bar'\],\s*\[data-pkc-region='saved-searches'\]/);
+    expect(rule).toMatch(/filer-fold~='search'\] > :is\(\s*\[data-pkc-region='kind-bar'\],\s*\[data-pkc-region='saved-searches'\]/);
+    // 🔴 探す欄は中身だけ畳み、戻る・進む・最近(‹ › ◷)はマウスで届くよう残す
+    expect(rule).toMatch(
+      /filer-fold~='search'\] > \[data-pkc-region='find-bar'\] > :not\(\s*\[data-pkc-action='nav-back'\],\s*\[data-pkc-action='nav-forward'\],\s*\[data-pkc-action='open-recent'\]\s*\)/,
+    );
     expect(rule).toMatch(/filer-fold~='sort'\] > \[data-pkc-region='find-bar'\] > :is\(\s*\[data-pkc-field='entry-sort'\],\s*\[data-pkc-field='entry-sort-reverse'\]/);
     expect(rule).toMatch(/filer-fold~='create'\] > :is\(\s*\[data-pkc-region='create-menu'\]/);
-    expect(css.slice(at)).toMatch(/\{\s*display:\s*none;\s*\}/);
+    // ⚠ その規則の宣言ブロック(最初の `{` から対応する `}`)だけを見る ── 後ろの別の `display: none` に救われない
+    const open = css.indexOf('{', at + rule.length - 1);
+    const body = css.slice(open, css.indexOf('}', open) + 1);
+    expect(open, '宣言ブロックが規則の直後に無い').toBe(at + rule.length - 1);
+    expect(body).toMatch(/^\{\s*display:\s*none;\s*\}$/);
     // 入口の居ない作る帯(PC)は丸ごと畳み、居る帯(スマホ)は子だけ畳んで入口を残す
     expect(rule).toContain(":not(:has(> [data-pkc-field='message-entry']))");
     expect(rule).toContain("> :not([data-pkc-field='message-entry'])");

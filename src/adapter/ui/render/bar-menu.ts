@@ -31,6 +31,24 @@ function ensureOutsideListener(doc: Document): void {
       if (ev.target instanceof Node && !d.contains(ev.target)) d.open = false;
     }
   });
+  /**
+   * 🔴 `Esc` は**文書で捕まえる**(焦点がメニューの外 ── Tab で出た / クリックで summary に焦点が入らない環境 ── でも閉じる)。
+   * ⚠ 開いたメニューが在るときだけ握り、背後の `Esc`(ノート選択の解除など)へ流さない(`stopImmediatePropagation`)。
+   * ⚠ 開いたダイアログが在るときは握らない(ダイアログの `Esc` が先)。
+   */
+  doc.addEventListener(
+    'keydown',
+    (ev: KeyboardEvent) => {
+      if (ev.key !== 'Escape') return;
+      const open = [...doc.querySelectorAll<HTMLDetailsElement>('details[data-pkc-bar-menu][open]')];
+      if (open.length === 0 || doc.querySelector('dialog[open]') !== null) return;
+      ev.stopImmediatePropagation();
+      ev.preventDefault();
+      for (const d of open) d.open = false;
+      open[open.length - 1]!.querySelector<HTMLElement>(':scope > summary')?.focus();
+    },
+    true,
+  );
 }
 
 export interface BarMenuOptions {
@@ -78,13 +96,6 @@ export function makeBarMenu(
     setTimeout(() => {
       d.open = false;
     }, 0);
-  });
-  d.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && d.open) {
-      ev.stopPropagation();
-      d.open = false;
-      sum.focus();
-    }
   });
   ensureOutsideListener(doc);
   return d;
