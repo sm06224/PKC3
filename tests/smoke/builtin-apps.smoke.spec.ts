@@ -943,10 +943,26 @@ test('🔴 広い別ウィンドウ: 連絡先・時間・録ったもの・予�
     // 🔑 伸びるのは**最後の週の段**まで(箱だけ伸びて段が元のままだと、下に地の色の帯が残る)
     const lastWeek = await boxOf(win.locator('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-monthview-week"]').last());
     expect(lastWeek.y + lastWeek.height, '月の最後の週の段が窓の高さまで伸びていない(箱だけ伸びている)').toBeGreaterThan(wide.height - 60);
+    // 🔴 見る所(大きな月)の ‹ › で月が送れる ── 行き先の年月は paintMonth が面ぜんたいに焼く(箱を分けても見る所の ‹ › に届く)
+    const label = win.locator('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-rail"] [data-pkc-month]').first();
+    const before = await label.getAttribute('data-pkc-month');
+    expect(before, '月の印が読めない').toMatch(/^\d{4}-\d{2}$/);
+    const [by, bm] = before!.split('-').map(Number) as [number, number];
+    const want = bm === 12 ? `${String(by + 1)}-01` : `${String(by)}-${String(bm + 1).padStart(2, '0')}`;
+    await clickReal(win, win.locator('[data-pkc-view-pane="schedule"] [data-pkc-field="schedule-main"] [data-pkc-action="schedule-nav"][data-pkc-nav-step="1"]'));
+    await expect(label, '見る所の › で次の月へ送れない').toHaveAttribute('data-pkc-month', want);
     // 週: 時間の目盛りが見る所に出る(横 1 列の操作に押し下げられない)
     await clickReal(win, win.locator('[data-pkc-view-pane="schedule"] [data-pkc-action="schedule-mode"][data-pkc-mode="week"]'));
     const weekTop = await boxOf(win.locator('[data-pkc-view-pane="schedule"] [data-pkc-region="schedule-weekview"]'));
     expect(weekTop.y, '週が操作の下へ押し下げられている').toBeLessThan(120);
+    // 🔴 閾値(60rem)未満 = 本体の中央ペインほどの幅(900px)では横に並べない(カンバン 4 列が折れない幅を残す)
+    await win.setViewportSize({ width: 900, height: 800 });
+    {
+      const r = await boxOf(rail);
+      const m = await boxOf(main);
+      expect(Math.abs(r.x - m.x), '[900px] 予定表が横に並んだ(閾値 60rem 未満は縦積みのはず)').toBeLessThan(2);
+      expect(m.y, '[900px] 見る所が操作の下に来ない').toBeGreaterThan(r.y + r.height - 2);
+    }
     // スマホ幅: 操作 → 見る所の縦積み(積む順は元のまま)
     await win.setViewportSize(phone);
     const r = await boxOf(rail);

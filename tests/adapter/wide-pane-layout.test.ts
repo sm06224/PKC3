@@ -25,6 +25,15 @@ function scheduleHost(attr: 'data-pkc-view-pane' | 'data-pkc-browse-pane'): HTML
   new ScheduleRenderer(host, NOW).render({ ...initialState, calendarMonth: { year: 2026, month: 11 } } as AppState);
   return host;
 }
+/** 月の送り(‹ ›)の全部に、行き先の年月(2026 年 11 月から ‹ = 10 月 / › = 12 月)が焼かれている。 */
+function expectNavBaked(root: Element, count: number): void {
+  const navs = [...root.querySelectorAll('[data-pkc-action="schedule-nav"]')];
+  expect(navs, '月の送りの数').toHaveLength(count);
+  for (const b of navs) {
+    expect(b.getAttribute('data-pkc-nav-year'), '行き先の年が焼かれていない').toBe('2026');
+    expect(b.getAttribute('data-pkc-nav-month'), '行き先の月が焼かれていない').toBe(b.getAttribute('data-pkc-nav-step') === '-1' ? '10' : '12');
+  }
+}
 const fields = (el: Element): string[] => [...el.children].map((c) => c.getAttribute('data-pkc-field') ?? c.getAttribute('data-pkc-region') ?? '');
 
 describe('予定表の箱(広い面だけ 2 つに分ける)', () => {
@@ -42,10 +51,14 @@ describe('予定表の箱(広い面だけ 2 つに分ける)', () => {
     // 空振り防止: 見る所の中身は本当に描かれている(日ごとの一覧の箱が在り、操作の列に月の送りの 2 ボタンがある)
     expect(main.querySelector('[data-pkc-region="schedule-groups"]')).not.toBeNull();
     expect(rail.querySelectorAll('[data-pkc-action="schedule-nav"]')).toHaveLength(2);
+    // 🔴 見る所(大きな月)の ‹ › にも行き先の年月が焼かれる(焼く範囲が操作の列だけだと、見る所の ‹ › が壊れる)
+    expectNavBaked(main, 2);
+    expectNavBaked(host, 4);
   });
 
   it('🔴 対照群: 左の列(狭い面)は箱を作らず、14 個の部品が元の順のまま並ぶ', () => {
     const host = scheduleHost('data-pkc-browse-pane');
+    expectNavBaked(host, 4);
     expect(host.querySelector('[data-pkc-field="schedule-rail"], [data-pkc-field="schedule-main"]'), '左の列に箱ができた').toBeNull();
     expect(fields(host)).toEqual([
       'schedule-toolbar',
@@ -109,7 +122,8 @@ const block = (): string => {
 describe('広い面の CSS の置き方', () => {
   it('🔴 判定は面の幅(container)の 1 つに寄せ、4 つの面に同じ名前で宣言している', () => {
     const b = block();
-    expect(b).toMatch(/\[data-pkc-view-pane='timers'\],\s*\[data-pkc-view-pane='captures'\]\s*\{\s*container:\s*pkc-wide \/ inline-size;/);
+    // 4 つの面を 1 つずつ縛る(先頭の 2 つを落としても通る検査にしない)
+    expect(b).toMatch(/^\[data-pkc-view-pane='schedule'\],\s*\[data-pkc-view-pane='contacts'\],\s*\[data-pkc-view-pane='timers'\],\s*\[data-pkc-view-pane='captures'\]\s*\{\s*container:\s*pkc-wide \/ inline-size;/);
     // 名前の無い container 問い合わせ・media による別判定を、この節に足していない
     expect(b.match(/@media/g) ?? [], 'この節に別の判定(@media)がある').toEqual([]);
     for (const q of b.match(/@container[^{]*/g) ?? []) expect(q.trim()).toMatch(/^@container pkc-wide \(min-width: \d+rem\)$/);
