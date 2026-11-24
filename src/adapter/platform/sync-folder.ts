@@ -770,9 +770,10 @@ export class SyncFolder {
       ? await (this.dir as unknown as { isSameEntry(o: unknown): Promise<boolean> }).isSameEntry(dir).catch(() => false)
       : false;
     if (!sameFolder && this.hasTarget()) {
-      // 🔴 別のフォルダ: 前の置き場の暗号化キーと設定を引き継がない(開いたままに見えて止まる行き止まりを作らない)
+      // 🔴 別のフォルダ: 前の置き場の暗号化キーは引き継がない(開いたままに見えて止まる行き止まりを作らない)。
+      //   ⚠ **暗号化する選択は引き継ぐ**(fail-closed)── 外すと、黙って平文で新しいフォルダへ全部書き、自分の暗号化ファイルまで消した。
+      //   新しいフォルダでもパスフレーズを決める(開く)まで止まる。やめたいときは「中身を暗号化する」をオフにする。
       this.resetE2E();
-      this.folderEncrypt = false;
       await this.deps.e2e?.forget(this.deps.cid()).catch(() => undefined);
     }
     this.dir = dir;
@@ -1121,9 +1122,15 @@ export class SyncFolder {
     const e2e = this.deps.e2e;
     if (e2e === undefined || e2e === null) return { ok: false, text: SYNC_E2E_UNAVAILABLE_NOTE };
     try {
+      const prevAsk = this.e2eAsk;
+      // ⚠ B へ切り替えるときは選び方を先に残す(保管を消せずに失敗しても、次の起動で保管から自動では開かない)
       if (!remember) await this.setAsk(true);
       const done = await e2e.setRemember(this.deps.cid(), remember);
-      if (!done) return { ok: false, text: '暗号化キーがまだ開かれていません(先にパスフレーズを入れてください)' };
+      if (!done) {
+        // 開いていなかった = 何も変えていない ── 先に残した選び方を戻す
+        await this.setAsk(prevAsk);
+        return { ok: false, text: '暗号化キーがまだ開かれていません(先にパスフレーズを入れてください)' };
+      }
       if (remember) await this.setAsk(false);
     } catch (e) {
       return { ok: false, text: this.e2eErrorText(e) };

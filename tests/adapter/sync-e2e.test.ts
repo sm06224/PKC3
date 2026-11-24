@@ -1023,18 +1023,22 @@ describe('🔴 レビュー対応(段 4b-B): 別の置き場への切り替え�
     expect((await A.sf.e2eUnlock({ passphrase: PASS_B }, true)).ok).toBe(true);
   });
 
-  it('🔴 同期フォルダ: 別のフォルダを選ぶと、暗号化の設定とキーを引き継がない', async () => {
+  it('🔴 同期フォルダ: 別のフォルダを選ぶと、キーは引き継がないが暗号化する選択は保つ(平文で書かない)', async () => {
     const s3 = fakeS3(SECRET);
-    const A = await rig('A', s3, { folder: new FakeFolder() });
+    const folder = new FakeFolder();
+    const A = await rig('A', s3, { folder });
     await A.sf.pick();
     await A.sf.setEncrypt(true);
     const st = await A.sf.e2eBeginSetup(PASS, true);
     if (st.kind !== 'ready') throw new Error('作れていない');
     await st.commit();
     expect(A.sf.view().e2e).toMatchObject({ on: true, open: true });
+    for (const n of [...folder.files.keys()]) if (n !== 'keyring.json') folder.files.delete(n);
     await A.sf.pick(); // 別のフォルダ(rig の picker は毎回新しい物は返さないが、isSameEntry が無いので別扱い)
-    expect(A.sf.view().e2e).toMatchObject({ on: false, open: false });
+    expect(A.sf.view().e2e).toMatchObject({ on: true, open: false });
     expect(await A.ks.openDataKey(A.d.cid)).toBeNull();
+    // 🔴 平文の差分ファイルを 1 つも書いていない(暗号化したい接続は、キーが開くまで止まる)
+    expect([...folder.files.keys()].filter((n) => n.endsWith('.pkc3-diff.zip'))).toEqual([]);
   });
 
   it('🔴 フォルダの暗号化のオン: 記録に書けなければ戻して失敗を返す(再起動でオフに戻って平文を書かない)', async () => {
