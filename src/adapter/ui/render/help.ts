@@ -40,6 +40,7 @@ import { APP_ID, APP_VERSION, BUILD_KIND, BUILT_AT } from '@runtime/release-meta
 import { formatBuildStamp } from '@features/datetime/datetime-format';
 import { NOTICES, type Notice } from '@features/notice/notice-log';
 import { preferredScrollBehavior } from './scroll-behavior';
+import { clearHitHighlights, collectHitRanges, paintHitRanges } from './search-jump';
 import { buildUpdateAvailableRow } from './update-card';
 import {
   OSS_SCOPE_NOTE,
@@ -187,6 +188,11 @@ export class HelpRenderer {
   private keys: HTMLElement | null = null;
   /** 探した件数を出す所(#636)。 */
   private findCount: HTMLElement | null = null;
+  /** 探す欄に打たれている語(結果から飛んだとき、本文の一致箇所を塗るのに使う)。 */
+  private findQuery = '';
+  /** 着いた見出しの一時の光(`flash`)。 */
+  private flashed: HTMLElement | null = null;
+  private flashTimer: unknown = null;
   /** 探した結果の一覧(#636)。 */
   private findHits: HTMLElement | null = null;
   /**
@@ -273,6 +279,8 @@ export class HelpRenderer {
    *   **6,385 節点(92.8%)**が返る)。
    */
   onHidden(): void {
+    // 🔴 探した語の塗りは表示の寿命と同じ(`pkc-search-hit` はノートの「探す」と共有 ── 別画面へ残さない)
+    clearHitHighlights();
     // ⚠ 描いていないなら予約しない(空の器をもう一度空にしても何も返らない)
     if (!this.manualDrawn || this.idleTimer !== null) return;
     this.idleTimer = this.timers.set(() => {
@@ -286,6 +294,7 @@ export class HelpRenderer {
     const host = this.manualHost;
     if (host === null || !this.manualDrawn) return;
     this.manualDrawn = false;
+    clearHitHighlights();
     // ⚠ 空にしない ── 次に開いたとき、描き終わるまでの数百 ms が**白紙**になる
     host.textContent = 'マニュアルを読み込んでいます…';
   }
@@ -391,13 +400,25 @@ export class HelpRenderer {
      *   帯のツールチップは指で触る端末では読めない。
      * ⚠ **毎回描き直す**(下の `render()` 側)── 本体へ昇格すると字が変わる。
      */
+    /**
+     * 🔴 **版以外のメタ情報(保存先・開発・ソース・使っている OSS)は 1 つの畳んだ欄に入れる**(Stage 2 PR-3)。
+     * ⚠ 直す前は版から目次までの上部だけで約 628px を占め、開いた直後は検索欄も本文も画面の外だった。
+     *   版(不具合報告に添える 1 行)は出したまま、残りは「保存先・開発・ソース・OSS」の 1 行に畳む。
+     *   場所は動かさない(版の直下)── 器は捨てず、`paintStorage` も同じ要素を書き直す。
+     */
+    const meta = document.createElement('details');
+    meta.setAttribute('data-pkc-region', 'help-meta');
+    const metaHead = document.createElement('summary');
+    metaHead.textContent = '保存先・開発・ソース・使っている OSS';
+    meta.append(metaHead);
+    body.append(meta);
     if (this.storageWhere !== null) {
       const where = document.createElement('p');
       where.setAttribute('data-pkc-field', 'help-storage');
       // ⚠ **組んだその場でも書く** ── `render()` の頭の塗り直しは、まだ器が無いので
       //   1 回目は空振りする(2 回目以降だけが通る)
       where.textContent = this.storageWhere();
-      body.append(where);
+      meta.append(where);
     }
 
     /**
@@ -411,7 +432,7 @@ export class HelpRenderer {
     const dev = document.createElement('p');
     dev.setAttribute('data-pkc-field', 'help-developer');
     dev.textContent = ossDeveloperLine();
-    body.append(dev);
+    meta.append(dev);
 
     const src = document.createElement('p');
     src.setAttribute('data-pkc-field', 'help-source');
@@ -423,7 +444,7 @@ export class HelpRenderer {
     srcLink.rel = 'noopener noreferrer';
     srcLink.textContent = OSS_SOURCE_URL;
     src.append(srcLink);
-    body.append(src);
+    meta.append(src);
 
     /**
      * 🔴 **使っている OSS(自動生成。手書きの一覧ではない)**。
@@ -466,7 +487,7 @@ export class HelpRenderer {
     ossScope.setAttribute('data-pkc-field', 'settings-note');
     ossScope.textContent = OSS_SCOPE_NOTE;
     ossRegion.append(ossScope);
-    body.append(ossRegion);
+    meta.append(ossRegion);
 
     /**
      * 🔴 **アプリとして開く口**(#645。user 要望 2026-08-31)。
@@ -591,7 +612,7 @@ export class HelpRenderer {
     const tocHead = document.createElement('p');
     tocHead.setAttribute('data-pkc-field', 'settings-note');
     tocHead.textContent =
-      '目次: 見出しを全部並べます。言葉で探すときは下の「マニュアルの中を探す」へ';
+      '目次: 見出しを全部並べます。言葉で探すときは上の「マニュアルの中を探す」へ';
     body.append(tocHead);
     this.tocHost = document.createElement('nav');
     this.tocHost.setAttribute('data-pkc-region', 'help-toc');
@@ -773,8 +794,10 @@ export class HelpRenderer {
     if (!count || !hits) return;
     hits.textContent = '';
     const q = query.trim();
+    this.findQuery = q;
     if (q === '') {
       count.textContent = '';
+      clearHitHighlights();
       return;
     }
     const found = findInManual(MANUAL_TEXT, q);
@@ -836,7 +859,8 @@ export class HelpRenderer {
     const host = this.manualHost;
     if (!host) return;
     if (section.index < 0) {
-      host.scrollTop = 0;
+      // 先頭(見出しより前)── 箱の頭を画面へ(外側が唯一のスクロールの箱)
+      host.scrollIntoView({ block: 'start', behavior: 'instant' });
       return;
     }
     const heads = host.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6');
@@ -847,7 +871,7 @@ export class HelpRenderer {
        *   **探した結果の一覧が画面の外へ出ていた**(次の結果へ移る道が見えなくなる)。`jumpTo` は外側を戻すので、一覧は残る。
        * ⚠ 戻る表示は出さない ── 一覧が画面に残るので、もう一度押せば別の節へ行ける(目次と同じ理由)。
        */
-      this.jumpTo(head, false);
+      this.jumpTo(head, this.findQuery);
       return;
     }
     /**
@@ -861,7 +885,10 @@ export class HelpRenderer {
      */
     const lines = manualLineCount(MANUAL_TEXT);
     const ratio = lines > 0 ? section.line / lines : 0;
-    host.scrollTop = Math.round(host.scrollHeight * ratio);
+    const outer = host.closest<HTMLElement>('[data-pkc-region="detail"]');
+    if (outer !== null) {
+      outer.scrollTop += host.getBoundingClientRect().top - outer.getBoundingClientRect().top + Math.round(host.offsetHeight * ratio);
+    }
   }
 
   private async drawManual(currentContainerId: string): Promise<void> {
@@ -945,7 +972,7 @@ export class HelpRenderer {
           if (title === null) return;
           const target = now.find((h) => (h.textContent ?? '') === title) ?? null;
           if (target === null) return;
-          this.jumpTo(target, true);
+          this.jumpTo(target);
         });
         frag.append(btn);
         at = hit.end;
@@ -956,46 +983,65 @@ export class HelpRenderer {
   }
 
   /**
-   * 🔴 **その見出しまで送る**(目次の行と本文の参照で**同じ 1 か所**。§7)。
+   * 🔴 **その見出しまで送る**(目次の行・探した結果・本文の参照で**同じ 1 か所**。§7)。
    *
-   * 🔴 **外側は動かさない**(着地前レビュー・動線 4、実測)。
-   * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、外側
-   *   (`[data-pkc-region='detail']`)まで動いて**目次が画面の外へ出る**
-   *   (実測: 押す前 `outerScrollTop 0` / 押した後 **494**)。目次は
-   *   「押して読んで、また押す」物なので、1 回で消えては使えない。
-   * 🔑 **送ってから外側だけ戻す**。⚠ 内側を自分で計算しない
-   *   (`getBoundingClientRect` は happy-dom で 0 ── 観測点を捨てない)。
+   * 🔴 **スクロールの箱は外側の 1 つだけ**(Stage 2 PR-3。直す前は外側の中に `max-height: 60vh` の箱が入れ子で、
+   *   `scrollIntoView` が箱の中だけを動かし、外側を `scrollTop = keep`(開いた位置)へ戻していた ──
+   *   **箱そのものが画面の外にあると、押しても見出しが画面に来ない**。実測: 目次・検索を押しても本文が動かない)。
+   * 🔑 いまは `help-manual` が箱を持たないので、`scrollIntoView` は外側(中央ペイン)だけを動かし、
+   *   **見出しは必ず画面に入る**。その代わり探した結果・目次は画面の外へ流れるので、
+   *   **帰り道(「← さっきの場所へ戻る」)を毎回出す**(上に貼り付く ── 片道にしない)。
+   * 🔑 **着いた所を一時的に光らせる**(`data-pkc-jump-flash` を 1.8 秒。動きは使わず、地の色だけ ── 動きを減らす設定でも同じ)。
+   *   探した語があれば、本文の一致箇所も塗る(`search-jump.ts` の塗りを再利用 ── ノートの「探す」と同じ見え方)。
    *
-   * @param offerBack 🔴 **本文の参照から飛んだときだけ `true`**。
-   *   ⚠ 目次から飛んだときは出さない ── 目次は**画面にずっと在る**ので、
-   *   もう一度押せば戻れる(帰り道が既に在る所に、2 つ目を作らない)。
+   * @param query 探した語(探す欄から来たときだけ)。
    */
-  private jumpTo(target: HTMLElement, offerBack: boolean): void {
+  private jumpTo(target: HTMLElement, query = ''): void {
     const host = this.manualHost;
     if (host === null) return;
     /**
-     * ⚠ **戻る先は「動かした物の位置」で控える** ── `scrollIntoView` は
-     *   スクロールできる祖先を全部動かすので、控えるのも**祖先ぜんぶ**にする。
-     *   ⚠ 動かない要素の `scrollTop` は 0 で、0 を書き戻すのは無害である。
+     * ⚠ **戻る先は「動かした物の位置」で控える** ── `scrollIntoView` はスクロールできる祖先を全部動かすので、
+     *   控えるのも**祖先ぜんぶ**にする。⚠ 動かない要素の `scrollTop` は 0 で、0 を書き戻すのは無害である。
      */
     const chain: { el: HTMLElement; top: number }[] = [];
-    /**
-     * 🔴 **`host` 自身から控える**(2026-09-08、smoke を読んで見つけた)。
-     * ⚠ 1 稿目は `host.parentElement` から始めていたが、**実際に動くのは
-     *   `help-manual` 自身**である(`max-height: 60vh; overflow: auto` の器 ──
-     *   `help-announce.smoke.spec.ts` が「動くのは help-body ではなくマニュアルの箱」と
-     *   実測で書いている)。⚠ unit は版面を持たないので、親を手で動かす台では
-     *   **どちらの実装でも緑**になり、この取り違えを見られなかった。
-     */
     for (let el: HTMLElement | null = host; el !== null; el = el.parentElement) {
       chain.push({ el, top: el.scrollTop });
       if (el.getAttribute('data-pkc-region') === 'detail') break;
     }
-    const outer = host.closest<HTMLElement>('[data-pkc-region="detail"]');
-    const keep = outer?.scrollTop ?? 0;
-    target.scrollIntoView({ block: 'start' });
-    if (outer !== null && outer !== undefined) outer.scrollTop = keep;
-    if (offerBack) this.showBack(chain);
+    // ⚠ 押した直後に動かす ── 滑らかな送りは長い文書で何秒もかかり、着いたか見えない(動きを減らす設定にも依らない)
+    target.scrollIntoView({ block: 'start', behavior: 'instant' });
+    this.flash(target);
+    this.paintQuery(host, target, query);
+    this.showBack(chain);
+  }
+
+  /** 着いた見出しを 1.8 秒だけ光らせる(最新の 1 つだけ)。 */
+  private flash(target: HTMLElement): void {
+    if (this.flashTimer !== null) this.timers.clear(this.flashTimer);
+    this.flashed?.removeAttribute('data-pkc-jump-flash');
+    target.setAttribute('data-pkc-jump-flash', '');
+    this.flashed = target;
+    this.flashTimer = this.timers.set(() => {
+      this.flashTimer = null;
+      this.flashed?.removeAttribute('data-pkc-jump-flash');
+      this.flashed = null;
+    }, 1800);
+  }
+
+  /**
+   * 探した語を本文で塗る。⚠ 塗りは**表示の寿命と同じ**(`clearHitHighlights` を、語を消す / 戻る / 手放すで呼ぶ)。
+   * 🔑 いまの 1 つは、着いた見出し以降で最初の一致。
+   */
+  private paintQuery(host: HTMLElement, head: HTMLElement, query: string): void {
+    clearHitHighlights();
+    const q = query.trim();
+    if (q === '') return;
+    const ranges = collectHitRanges(host, q);
+    let current = ranges.findIndex(
+      (r) => head.compareDocumentPosition(r.startContainer) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    if (current < 0) current = 0;
+    paintHitRanges(ranges, current);
   }
 
   /**
@@ -1010,8 +1056,10 @@ export class HelpRenderer {
   private showBack(chain: readonly { el: HTMLElement; top: number }[]): void {
     const bar = this.backHost;
     if (bar === null) return;
+    // 🔴 戻り先は**最初に飛んだ位置**を守る(Stage 2 PR-3 レビュー)── 帯が出ている間に 2 度目・3 度目の飛びで上書きすると、
+    //   A → B → C と飛んだ後の「戻る」が B になり、A(読んでいた最初の場所)へ帰れない。帰る(`goBack`)まで取り直さない。
+    if (bar.hidden || this.backTo === null) this.backTo = chain;
     bar.hidden = false;
-    this.backTo = chain;
   }
 
   /** 控えた位置へ戻して、帰り道を畳む。 */
@@ -1021,6 +1069,7 @@ export class HelpRenderer {
     if (this.backHost !== null) this.backHost.hidden = true;
     if (to === null) return;
     for (const { el, top } of to) el.scrollTop = top;
+    clearHitHighlights();
   }
 
   /**
@@ -1084,7 +1133,7 @@ export class HelpRenderer {
           const target = this.manualHeadings()[at] ?? null;
           if (target === null) return;
           // ⚠ 送り方は `jumpTo` 1 か所(§7)── 目次と本文の参照で 2 通りに書かない
-          this.jumpTo(target, false);
+          this.jumpTo(target);
         });
       });
       nav.append(row);

@@ -47,12 +47,13 @@ test('🔴 ヘルプからマニュアルの窓が開き、窓いっぱいに出
   await expect(page.locator('[data-pkc-region="help-manual"]')).toBeVisible();
 
   /**
-   * 🔴 **対照群 ── ヘルプ面の中では箱に入っている**。
-   * ⚠ これを先に測る:入っていないなら、以降の「窓では大きい」は何も証明しない。
+   * 🔴 **対照群 ── ヘルプ面の中のマニュアルは自分の箱を持たない**(Stage 2 PR-3 の 8-1c。直す前は 60vh の入れ子の箱だった)。
+   * ⚠ これを先に測る:ここが箱なら、以降の「窓ではスクロールの箱が本文」は何も証明しない。窓の側(`MAIN`)は箱である。
    */
-  const boxed = await page.locator('[data-pkc-region="help-manual"]').boundingBox();
-  expect(boxed, 'マニュアルの箱が見えない(前提が崩れている)').not.toBeNull();
-  expect(boxed!.height, '前提が崩れている(ヘルプ面の中で既に窓いっぱい)').toBeLessThan(900 * 0.7);
+  expect(
+    await page.locator('[data-pkc-region="help-manual"]').evaluate((el) => getComputedStyle(el).overflowY),
+    '前提が崩れている(ヘルプ面のマニュアルが自分でスクロールする)',
+  ).toBe('visible');
 
   // ② 「マニュアルを別のウィンドウで開く」を押す → 焼いた 1 枚へ移る
   const win = await openManual(page, context);
@@ -560,6 +561,96 @@ test('🔴 狭い画面では目次が畳まれ、押すと開く (#812)', async
   // 🔴 押すと開く(畳めるだけで開けない、を作らない)
   await opener.click();
   await expect(rows.first(), '押しても目次が開かない').toBeVisible();
+
+  expect(errors, 'pageerror が出た').toEqual([]);
+  await win.close();
+});
+
+/**
+ * 🔴 **別ウィンドウのマニュアルの「マニュアルの中を探す」**(Stage 2 PR-3 の 8-2)。
+ *
+ * 目次の上に検索欄が在り、①目次が絞られる ②本文の全文のヒット一覧が出る ③押すと該当の節が本文の箱の**画面の中**へ来て光り、
+ * 一致した語が塗られる、を実ブラウザの幾何で見る。さらに ④本文が**全部 DOM に描画済み**で、Ctrl+F 相当(`window.find`)が
+ * 末尾の「WebMCP」の節まで当たり、当たった所が窓の中に出る(遅延描画で欠けていない)。
+ */
+test('🔴 マニュアルの窓: 目次の上の検索で WebMCP が見つかり、押すと本文が確実にその節へ来る・Ctrl+F も末尾まで当たる (Stage 2 PR-3)', async ({ page, context }) => {
+  test.setTimeout(90_000);
+  const errors = collectPageErrors(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gotoApp(page);
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="help"]');
+  const win = await openManual(page, context);
+  await win.setViewportSize({ width: 1200, height: 900 });
+
+  const find = win.locator('[data-pkc-field="manual-window-find"]');
+  await expect(find, '目次の上に検索欄が無い').toBeVisible();
+  // 検索欄は目次の行より上(目次の上部)
+  const geo = await win.evaluate(() => {
+    const f = document.querySelector('[data-pkc-field="manual-window-find"]')!.getBoundingClientRect();
+    const t = document.querySelector('[data-pkc-region="manual-window-toc"] nav a')!.getBoundingClientRect();
+    return { findBottom: f.bottom, tocTop: t.top, vh: window.innerHeight, findTop: f.top };
+  });
+  expect(geo.findBottom, '検索欄が目次の最初の行より下にある').toBeLessThanOrEqual(geo.tocTop + 0.5);
+  expect(geo.findTop, '検索欄が窓の外にある').toBeLessThan(geo.vh);
+
+  const total = await win.locator(`${TOC} nav a`).count();
+  await find.fill('WebMCP');
+  const hits = win.locator('[data-pkc-region="manual-window-find-hits"] button');
+  await expect(hits.first(), '全文のヒット一覧が出ない').toBeVisible();
+  expect(await hits.count(), 'WebMCP がどの節にも当たらない').toBeGreaterThan(0);
+  // 目次が絞られている(見える行が減り、WebMCP を含む見出しだけが残る)
+  const shown = await win.locator(`${TOC} nav a:not([hidden])`).allTextContents();
+  expect(shown.length, '目次が絞られていない').toBeLessThan(total);
+  expect(shown.some((t) => t.includes('WebMCP')), '目次に WebMCP の見出しが残っていない').toBe(true);
+  expect(await win.locator('[data-pkc-field="manual-window-find-count"]').textContent()).toMatch(/か所/);
+
+  // 末尾に近い節のヒットを押す ── 本文の箱の中で、見出しが画面の中に来る
+  const last = hits.last();
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await expect
+    .poll(async () =>
+      win.evaluate(() => {
+        const el = document.querySelector('[data-pkc-region="manual-window-main"] [data-pkc-jump-flash]') as HTMLElement | null;
+        if (el === null) return null;
+        const m = (document.querySelector('[data-pkc-region="manual-window-main"]') as HTMLElement).getBoundingClientRect();
+        const r = el.getBoundingClientRect();
+        return r.top >= m.top - 1 && r.bottom <= m.bottom + 1 && r.top < window.innerHeight;
+      }),
+    { message: 'ヒットを押しても、該当の見出しが本文の箱の画面の中へ来ない / 光らない' })
+    .toBe(true);
+  const mainTop = await win.locator(MAIN).evaluate((el) => el.scrollTop);
+  expect(mainTop, '本文の箱が動いていない').toBeGreaterThan(0);
+
+  // 🔴 一致した語が塗られ(CSS Custom Highlight)、Esc で字を消すと塗りも消える(使えるブラウザのとき)
+  const paintedNow = (): Promise<boolean | null> => win.evaluate(() => (window.CSS as unknown as { highlights?: Map<string, unknown> }).highlights?.has('pkc-manual-hit') ?? null);
+  const painted = await paintedNow();
+  if (painted !== null) {
+    expect(painted, 'ヒットを押しても一致した語が塗られていない').toBe(true);
+    await find.press('Escape');
+    await expect.poll(paintedNow, { message: 'Esc で字を消しても塗りが残っている' }).toBe(false);
+    await expect(hits, 'Esc でヒット一覧が消えない').toHaveCount(0);
+  }
+  // 🔴 本文は全部 DOM に描画済み: window.find で末尾の WebMCP まで当たり、矩形があり、窓の中に出る
+  await find.fill('');
+  const found = await win.evaluate(() => {
+    (document.querySelector('[data-pkc-region="manual-window-main"]') as HTMLElement).scrollTop = 0;
+    window.getSelection()?.removeAllRanges();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ok = (window as any).find('WebMCP', true, false, true, false, false, false);
+    const sel = window.getSelection();
+    const rng = sel !== null && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    // 描画済みの語を、ブラウザの検索と同じく「選択を画面へ送る」で窓の中へ(送れること = 箱の中に実在する)
+    rng?.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const r = rng?.getBoundingClientRect() ?? null;
+    const m = (document.querySelector('[data-pkc-region="manual-window-main"]') as HTMLElement).getBoundingClientRect();
+    return { ok, text: sel?.toString() ?? '', rect: r === null ? null : { top: r.top, bottom: r.bottom, area: r.width * r.height }, main: { top: m.top, bottom: m.bottom }, vh: window.innerHeight };
+  });
+  expect(found.ok, 'window.find(WebMCP) が当たらない(本文に描かれていない)').toBe(true);
+  expect(found.text.toLowerCase()).toContain('webmcp');
+  expect(found.rect, '当たった所の矩形が無い').not.toBeNull();
+  expect(found.rect!.area, '当たった所が描画されていない(面積 0)').toBeGreaterThan(0);
+  expect(found.rect!.top >= found.main.top - 1 && found.rect!.bottom <= found.main.bottom + 1, `当たった所が本文の箱の外(${JSON.stringify(found.rect)})`).toBe(true);
 
   expect(errors, 'pageerror が出た').toEqual([]);
   await win.close();

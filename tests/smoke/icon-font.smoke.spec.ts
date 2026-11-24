@@ -237,6 +237,7 @@ test('🔴 図案が目録の全数とも書体から出ている(豆腐にな�
               underlayOpacity: getComputedStyle(primaryIcon, '::before').opacity,
               line: rgbOf(getComputedStyle(primaryIcon, '::after').color),
               own: rgbOf(getComputedStyle(primaryIcon).color),
+              accentFg: rgbOf(getComputedStyle(document.documentElement).getPropertyValue('--accent-fg').trim()),
               ground: rgbOf(getComputedStyle(primaryIcon.closest('button')!).backgroundColor),
             };
 
@@ -353,10 +354,19 @@ test('🔴 図案が目録の全数とも書体から出ている(豆腐にな�
   expect(out.primary!.tone, '「+ ノート」の tone が create ではない(前提が崩れている)').toBe(
     'create',
   );
+  /**
+   * 🔴 **Stage 2 PR-3 項目 1(user 指示「緑の主ボタン内アイコンが緑に溶ける。--accent-fg 基準で明瞭に」)で、主のボタンの線は
+   *   `--accent-fg` そのものになった**(旧: 一般の tone の色相を 32% 混ぜた色 ── 緑の地に溶けた)。
+   * 旧い期待値(線が字の色と**違う**)はこの設計の前提だったので、事実どおり「線 = `--accent-fg` の computed 値」へ更新する。
+   * ⚠ テストの意図(図案の色の機構が主のボタンにも届いている)は保つ:①線の色が **`--accent-fg` と一致**(tone の既定色や
+   *   `currentColor` の取り違えではなく、主の規則が当たっている)②下の対比(地に対して 3:1 以上)③下地の濃さ。
+   *   「色相が届く」検査は、標準・ゴーストなど**主でない型**で上の `create` と `neutral` の線の差(tone が届いている)として残してある。
+   */
+  expect(out.primary!.accentFg, '前提: --accent-fg が解決できない').not.toBeUndefined();
   expect(
     out.primary!.line,
-    `主のボタンで線が字の色のまま(色が届いていない): line=${out.primary!.line}`,
-  ).not.toEqual(out.primary!.own);
+    `主のボタンで線が --accent-fg でない(主の規則が当たっていない): line=${out.primary!.line} accent-fg=${out.primary!.accentFg}`,
+  ).toEqual(out.primary!.accentFg);
   const lum = (c: number[]): number => {
     const f = (v: number): number => {
       const x = v / 255;

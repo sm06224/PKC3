@@ -1271,7 +1271,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'sql-er-toggle',
-    label: '構造を見る',
+    label: 'ER 図を見る',
     contexts: ['global'],
     defaults: [],
     note: '表のつながりを図で出します。もう一度呼ぶと閉じます(SQL の画面を開いているときだけ効きます)',

@@ -243,7 +243,11 @@ describe('ボタンの 4 型(data-pkc-variant)の CSS', () => {
     expect(base).toMatch(decl('background', 'var\\(--accent\\)'));
     expect(base).toMatch(decl('color', 'var\\(--accent-fg\\)'));
     expect(one("button[data-pkc-variant='primary']:hover:not(:disabled)")).toMatch(decl('color', 'var\\(--accent-fg\\)'));
-    expect(one("button[data-pkc-variant='primary'] [data-pkc-icon]")).toContain('var(--accent-fg)');
+    const icon = one("button[data-pkc-variant='primary'] [data-pkc-icon]");
+    // 🔴 図案の線・下地は --accent-fg そのもの(色相の混色で緑に溶けた退行を捕まえる)
+    expect(icon).toMatch(decl('--pkc-icon-line', 'var\\(--accent-fg\\)'));
+    expect(icon).toMatch(decl('--pkc-icon-underlay', 'var\\(--accent-fg\\)'));
+    expect(icon).not.toContain('--pkc-icon-hue');
   });
 
   it('🔴 危険は --danger の字 + 薄い赤の地、乗せると --danger 地 + --surface 字。ゴースト = 透明', () => {

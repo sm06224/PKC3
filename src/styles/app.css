@@ -1615,8 +1615,21 @@ img[data-pkc-action='view-big']:focus-visible {
   min-width: 8em;
 }
 [data-pkc-field='entry-sort'] {
+  /* 🔴 **基準の幅を小さく取る**(Stage 2 PR-3。スマホ幅 390px で「⇅」だけが単独の行へ折り返していた)。
+   *   折り返しの判定は `flex-basis`(`auto` = 選択肢の最長の字の幅)で決まり、縮めるのはその後 ── 内容依存の幅のままだと
+   *   「戻る・進む・探す欄(8 字)・並び順・⇅」の合計が行の幅を 1 ボタンぶん超えて、いちばん後ろの ⇅ だけが 2 行目へ落ちる。
+   *   基準を 7em にして 1 行に収め、足りないときは `min-width` まで縮む(字は開けば読める)。
+   *   ⚠ 並び順と ⇅ は 1 組 ── 守りは `stage2-pr3.smoke` が「⇅ と並び順の上端が同じ」を 390px / 360px で見る */
   flex: 0 1 auto;
   min-width: 2em;
+}
+/* 🔴 スマホ幅: 探す欄を行の 6 割にして、並び順 + ⇅ を 2 行目へ**組で**送る(広い画面で同じにすると並び順の字が切れる。
+ *   並び順は 2 行目で伸びるので字も切れない)。⇅ が単独の行へ落ちるのは、行の合計が 1 ボタンぶん足りないせい ── 組で折る */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='entry-filter'] {
+  flex: 1 1 60%;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='entry-sort'] {
+  flex: 1 1 8em;
 }
 
 /* 🔴 **種類で絞る札**(#411)。⚠ 地は無彩色、色は**押されている札にだけ**使う
@@ -2558,17 +2571,17 @@ button[data-pkc-variant='primary']:active:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 70%, var(--fg));
 }
 /**
- * 🔴 **主のボタンの図案は、色相を `--accent-fg` と混ぜる**(#1054 段①-2 の `--surface` を
- * #1982 で替えた)。地が `--accent` なので、一般の tone(`--fg` と混ぜて地と反対の明るさへ
- * 寄せる)をそのまま使うと溶ける。字(`--accent-fg`)側へ寄せて、地に対して読める線にする。
- * ⚠ 色相を持たない絵(`neutral` / `kind`)は `currentColor`(= `--accent-fg`)へ落ちる。
+ * 🔴 **主のボタンの図案は、線も下地も `--accent-fg` そのもの**(#1054 段①-2 の `--surface` を #1982 で替え、
+ * Stage 2 PR-3 で「色相を 32% 混ぜる」をやめた ── 緑の地に tone の色相が混ざって溶けていた)。
+ * 地が `--accent` なので、字と同じ `--accent-fg` なら全テーマで字と同じ対比(4.5:1 以上、`accent-matrix.test.ts` が全配色で pin)になる。
+ * 色相は主の面では持たせない(地の色が意味を持つ)。
  * ⚠ 詳細度は `button[data-pkc-variant='primary'] [data-pkc-icon]`(0,2,1,1)で tone の規則
  *   (0,0,2,0)より高い ── ファイルの前後関係に頼らず勝つ。
  */
 button[data-pkc-variant='primary'] [data-pkc-icon] {
-  --pkc-icon-line: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
-  --pkc-icon-underlay: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
-  --pkc-icon-underlay-opacity: 0.55;
+  --pkc-icon-line: var(--accent-fg);
+  --pkc-icon-underlay: var(--accent-fg);
+  --pkc-icon-underlay-opacity: 0.4;
 }
 /**
  * 🔴 **「新規作成」と「▼」は 1 つの分割ボタン**(実機の崩れ。user 指示 2026-11-22)── 色違い・隙間ありの別ボタンに見えていた。
@@ -2604,9 +2617,34 @@ button[data-pkc-variant='primary'] [data-pkc-icon] {
   color: var(--accent-fg);
 }
 [data-pkc-region='create-bar'] button[data-pkc-field='create-pick'] [data-pkc-icon] {
-  --pkc-icon-line: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
-  --pkc-icon-underlay: color-mix(in oklab, var(--accent-fg) 32%, var(--pkc-icon-hue, currentColor));
-  --pkc-icon-underlay-opacity: 0.55;
+  --pkc-icon-line: var(--accent-fg);
+  --pkc-icon-underlay: var(--accent-fg);
+  --pkc-icon-underlay-opacity: 0.4;
+}
+/**
+ * 🔴 **本体が主でない間(編集中など `create-run` が薄くなっているとき)は、▼ も同じ見た目にそろえる**
+ *   (Stage 2 PR-3。実機の崩れ ── 左だけ灰色、▼ だけ濃い緑に分かれて 2 つの別物に見えていた)。
+ *   ▼ は編集中も押せる(添付・録音などの道具が並ぶ)ので `disabled` にはせず、**見た目だけ**本体の「薄い標準」に揃える
+ *   (地・字・枠・減光 .45 を本体と同じ値にする。区別は形 = 内側の区切り線で足りる)。
+ *   ⚠ 判定は本体の主の印(`data-pkc-variant="primary"`)── `browse.ts` の `setPrimary` と 1 か所で連動する。
+ *   ⚠ 勝つ理由は詳細度: `:has()` は引数の詳細度を持つので、この規則は (0,4,1)。上の ▼ の基本の規則 (0,2,1)・開いている状態 (0,3,1) より高く、
+ *     hover (0,4,1) とは同じ詳細度で**後ろにある**ので勝つ(順序を入れ替えると hover だけ緑へ戻る)。
+ *   守り: `stage2-pr3.smoke.spec.ts`(編集中の本体と ▼ の地・減光・字が同じ)と `stage2-pr3-css.test.ts`(規則が hover / 開いている / 焦点まで束ねている)。
+ */
+[data-pkc-region='create-bar']:has([data-pkc-field='create-run']:not([data-pkc-variant='primary'])) button[data-pkc-field='create-pick'],
+[data-pkc-region='create-bar']:has([data-pkc-field='create-run']:not([data-pkc-variant='primary'])) button[data-pkc-field='create-pick']:hover:not(:disabled),
+[data-pkc-region='create-bar']:has([data-pkc-field='create-run']:not([data-pkc-variant='primary'])) button[data-pkc-field='create-pick'][aria-expanded='true'],
+[data-pkc-region='create-bar']:has([data-pkc-field='create-run']:not([data-pkc-variant='primary'])) button[data-pkc-field='create-pick']:focus-visible {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  color: var(--fg);
+  border-color: var(--hairline);
+  box-shadow: inset 1px 0 0 var(--hairline);
+  opacity: 0.45;
+}
+[data-pkc-region='create-bar']:has([data-pkc-field='create-run']:not([data-pkc-variant='primary'])) button[data-pkc-field='create-pick'] [data-pkc-icon] {
+  --pkc-icon-line: var(--fg);
+  --pkc-icon-underlay: var(--fg);
+  --pkc-icon-underlay-opacity: 0.2;
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='create-bar'] button[data-pkc-field='create-pick'] {
   width: 32px;
@@ -4387,6 +4425,12 @@ dd[data-pkc-field='inspector-toc'] {
 }
 .pkc-md-rendered .pkc-md-block:hover .pkc-code-lang {
   opacity: 0.9;
+}
+/* 🔴 **言語バッジをコードに重ねない**(Stage 2 PR-3。1 行の SQL などでバッジがコード末尾に被っていた)。
+ *   バッジは右上に絶対配置なので、バッジのある枠だけ `pre` の上に 1 行ぶんの余白を取り、コードをその下から始める
+ *   (長い 1 行でも、横にはみ出した行もバッジの下の段になり重ならない)。 */
+.pkc-md-rendered .pkc-md-block:has(> .pkc-code-lang) > pre {
+  padding-top: calc(var(--s3) + 1.1em);
 }
 /* 🔴 **長大なコードブロックの折りたたみ・展開**(#1139) */
 .pkc-md-rendered .pkc-md-block[data-pkc-code-collapsed] > pre {
@@ -7915,12 +7959,17 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 [data-pkc-field='sql-er-scroll'] {
   overflow: auto;
   resize: vertical;
-  /* ⚠ 初めは器の 3 割ほど。掴んで変えられるので、ここは出発点にすぎない */
-  height: 30vh;
+  /* 🔴 **初めは ER の欄の残りの高さをぜんぶ使う**(Stage 2 PR-3。直す前は `height: 30vh` の固定で、広い画面では下が大きく余り、
+   *   余白のぶん下の「いま書かれている SQL」の 1 行が画面の下端へ追いやられていた)。⚠ 掴んで変える / 「高さ」ボタンで段を選ぶと
+   *   インラインの `height` が入り、`sql-er.ts` が `data-pkc-height-fixed` を立てる ── そのときは下の規則が伸び縮みを止めて、選んだ高さのままにする */
+  flex: 1 1 auto;
   min-height: 80px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--s2);
+}
+[data-pkc-field='sql-er-scroll'][data-pkc-height-fixed] {
+  flex: none;
 }
 /* 「高さ」ボタン(#918 Q2)。図の右下。 */
 [data-pkc-field='sql-er-height'] {
@@ -11468,6 +11517,17 @@ h3[data-pkc-section] {
  */
 [data-pkc-region='help-jump-back'] {
   margin: 0 0 var(--s2);
+  /* 🔴 外側が唯一のスクロールの箱になったので、読み進めても帰り道が画面の上に残る(Stage 2 PR-3) */
+  position: sticky;
+  /* 🔴 上の閉じる帯(`pane-bar`: sticky・top 0・z-index 2。高さ = 標準の行 + 上下の余白 + 下の線)の**真下**に貼り付く。
+   *   top: 0 だと帯が閉じるボタンに重なって覆う(Stage 2 PR-3 レビュー)。守り: `stage2-pr3.smoke` が両方の中心点を `elementFromPoint` で見る */
+  top: calc(var(--row-h) + var(--s2) * 2 + 1px);
+  z-index: 1;
+  padding: var(--s1) 0;
+  background: var(--bg);
+}
+[data-pkc-region='help-jump-back'][hidden] {
+  display: none;
 }
 
 /* 🔴 **探した結果の 1 行は、題名の下に小さく**(依頼 67-2)。⚠ 2 行になるので、ボタンの既定の高さを外す。 */
@@ -11492,7 +11552,8 @@ h3[data-pkc-section] {
 }
 
 [data-pkc-region='help-toc'] {
-  max-height: 30vh;
+  /* 開いた時点で検索欄と本文の頭が画面に入る高さ(Stage 2 PR-3。30vh → 22vh) */
+  max-height: 22vh;
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -11628,12 +11689,41 @@ h3[data-pkc-section] {
 /* 🔴 **マニュアルは縦に長い** ── 器ごとスクロールさせると面の頭
    (版・お知らせ)まで流れるので、ここだけを箱にする。
    ⚠ この箱が狭いこと自体が #645 の苦情である ── 出る道は上のボタン。 */
+/* 🔴 **スクロールの箱は外側(中央ペイン)の 1 つだけ**(Stage 2 PR-3。直す前は `max-height: 60vh; overflow: auto` の箱が
+ *   外側の中に入れ子で、箱が画面の外にあると目次・検索を押しても本文が動かなかった)。
+ *   ⚠ ここに `overflow` / `max-height` を戻さない(`help-toc-css.test.ts` が見る)。 */
 [data-pkc-region='help-manual'] {
-  max-height: 60vh;
-  overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--s4);
+}
+/* 飛んだ見出しが、貼り付いた帰り道の帯の下に潜らない */
+/* 🔴 help-body はスクロールの箱にしない(箱になると、中の貼り付く帰り道の帯が「動かない箱」に貼り付いて、読み進めると流れてしまう) */
+[data-pkc-region='help-body'] {
+  overflow: visible;
+}
+[data-pkc-region='help-manual'] h1,
+[data-pkc-region='help-manual'] h2,
+[data-pkc-region='help-manual'] h3,
+[data-pkc-region='help-manual'] h4,
+[data-pkc-region='help-manual'] h5,
+[data-pkc-region='help-manual'] h6 {
+  /* 閉じる帯 + 貼り付く帰り道の帯の 2 段ぶん */
+  scroll-margin-top: calc((var(--row-h) + var(--s3)) * 2 + var(--s2));
+}
+/* 🔴 着いた見出しを一時的に光らせる(`help.ts` の `flash`。1.8 秒で外れる。動きは使わず地の色だけ ── 動きを減らす設定でも同じ) */
+[data-pkc-region='help-manual'] [data-pkc-jump-flash] {
+  background: var(--accent-dim);
+  color: var(--accent-dim-fg);
+  border-radius: var(--radius);
+}
+/* 🔴 版以外のメタ情報の畳んだ欄(保存先・開発・ソース・OSS) */
+[data-pkc-region='help-meta'] {
+  margin: 0 0 var(--s3);
+}
+[data-pkc-region='help-meta'] > summary {
+  cursor: pointer;
+  color: var(--muted);
 }
 
 
@@ -12467,6 +12557,11 @@ h3[data-pkc-section] {
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='flags-body'],
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='help-body'] {
   overflow-x: hidden;
+}
+/* 🔴 ヘルプだけは `clip`(横にはみ出さない点は同じ)── `hidden` はスクロールの箱を作り、貼り付く帰り道の帯が動かない箱に貼り付いてしまう(Stage 2 PR-3) */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='help-body'] {
+  overflow: visible;
+  overflow-x: clip;
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='settings-body'] dl,
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='flags-body'] dl,
@@ -13690,6 +13785,26 @@ h3[data-pkc-section] {
 [data-pkc-field='log-order']:focus-visible {
   background: var(--surface-hover);
   --muted: var(--pkc-muted-on-mark);
+}
+/* 🔴 **並び順のボタンと「すべて折りたたむ」は 1 行に並べる**(Stage 2 PR-3。直す前は右寄せの 2 行で、「≡ 目次」の下に
+ *   並び順だけが単独の行になり、本文の頭が 2 行ぶん押し下げられていた)。古い順では右へ float(DOM は並び順 → すべて なので、
+ *   並び順が右端)、続く本文は `clear` で次の行から始める。新しい順(縦の flex)では、行の折り返しを許した `row-reverse` にして
+ *   同じ並びにする(2 つの子だけ字の幅 = `width: auto`、ほかの塊は幅いっぱい = 自分の行)。 */
+[data-pkc-log-days] > :is([data-pkc-field='log-order'], [data-pkc-log-all]) {
+  float: right;
+  margin: 0 0 0.2em var(--s2);
+}
+[data-pkc-log-days] > [data-pkc-log-all] + *,
+[data-pkc-log-days] > [data-pkc-field='log-order']:not(:has(+ [data-pkc-log-all])) + * {
+  clear: both;
+}
+[data-pkc-log-days][data-pkc-log-order='desc'] {
+  flex-flow: row-reverse wrap;
+  align-content: flex-start;
+}
+[data-pkc-log-days][data-pkc-log-order='desc'] > :is([data-pkc-field='log-order'], [data-pkc-log-all]) {
+  float: none;
+  flex: none;
 }
 
 /**

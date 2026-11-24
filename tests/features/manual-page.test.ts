@@ -543,16 +543,35 @@ describe('焼いたマニュアル — blob:null では目次の <a> を肩代�
 });
 
 describe('焼いたマニュアル — 1 枚で完結する', () => {
-  it('完全な document で、script は 1 本、style は 1 本、配色は `<body>` の前に立つ', () => {
+  it('完全な document で、script は 2 本(配色 = `<body>` の前 / 探す欄 = `</body>` の直前)、style は 1 本', () => {
     const html = bake().html;
     expect(html.startsWith('<!doctype html>')).toBe(true);
     expect(html).toContain('<meta charset="utf-8">');
     expect(html.match(/<style>/gu)).toHaveLength(1);
-    expect(html.match(/<script>/gu)).toHaveLength(1);
-    // 🔑 最初の描画の前に属性が立つ ── script が body より前
+    expect(html.match(/<script>/gu)).toHaveLength(2);
+    // 🔑 最初の描画の前に属性が立つ ── 1 本目(配色)が body より前
     expect(html.indexOf('<script>')).toBeLessThan(html.indexOf('<body'));
+    // 🔴 2 本目(探す欄、Stage 2 PR-3)は DOM が揃った後ろ
+    expect(html.lastIndexOf('<script>')).toBeGreaterThan(html.indexOf('manual-window-main'));
     // ⚠ 外の資源を 1 つも指さない(オフラインで 1 枚だけで読める)
     expect(html).not.toMatch(/<link\b/u);
+  });
+
+  it('🔴 目次の上に「マニュアルの中を探す」が在り、探す欄の script は本文の後ろに焼かれる(Stage 2 PR-3 の 8-2)', () => {
+    const html = bake().html;
+    const doc = parse(html);
+    const toc = doc.querySelector('[data-pkc-region="manual-window-toc"]')!;
+    const input = toc.querySelector('[data-pkc-field="manual-window-find"]');
+    const nav = toc.querySelector('nav');
+    expect(input, '探す欄が目次の中に無い').not.toBeNull();
+    expect(nav).not.toBeNull();
+    expect(
+      input!.compareDocumentPosition(nav!) & Node.DOCUMENT_POSITION_FOLLOWING,
+      '探す欄が目次(nav)より後ろにある(「目次の上部」でない)',
+    ).toBeTruthy();
+    // 本文の全文が DOM にある(遅延描画で欠けていない)── Ctrl+F が末尾の節まで当たる前提
+    expect(doc.querySelector('[data-pkc-region="manual-window-main"]')!.textContent, '末尾の WebMCP の節が本文に無い').toContain('WebMCP');
+    expect(html.indexOf('manual-window-find"]'), '探す欄の script が見つからない').toBeGreaterThan(0);
   });
 
   /**

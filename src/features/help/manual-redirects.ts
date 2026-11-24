@@ -26,4 +26,6 @@ export const MANUAL_HEADING_REDIRECTS: Readonly<Record<string, string>> = {
   連絡先を扱う: '付箋ボードと連絡先',
   'スマホ-タッチで使う': 'スマートフォン・タブレット',
   困ったとき: 'リファレンスと困ったときの対処',
+  // 🔴 Stage 2 PR-3: 見出しに「(WebMCP)」を足した(ブラウザの検索・マニュアルの検索で WebMCP が当たるように)。旧い印はここへ
+  'ブラウザの-ai-との連携': 'ブラウザの AI との連携(WebMCP)',
 };

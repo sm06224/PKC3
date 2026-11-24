@@ -289,10 +289,9 @@ describe('ヘルプの面', () => {
       'help-version',
       // 🔴 「あとで切り替える」を押した後の切り替える場所(待っている版が無い間は隠れている。台帳 #1852 束 L2)
       'update-available',
-      // 🔴 #948:開発者名・ソース・使っている OSS は版のすぐ下(沈めない)
-      'help-developer',
-      'help-source',
-      'help-oss',
+      // 🔴 #948:開発者名・ソース・使っている OSS は版のすぐ下(沈めない)。
+      //    🔴 Stage 2 PR-3:保存先・開発・ソース・OSS は 1 つの畳んだ欄(`help-meta`)に入れた(開いた直後に検索欄と本文を画面へ入れるため)
+      'help-meta',
       'help-manual-open',
       'help-find-bar',
       'settings-note:目次: 見出',
@@ -454,15 +453,41 @@ describe('ヘルプの面', () => {
       expect(host.scrollTop, '飛ぶ前の位置へ戻っていない').toBe(321);
     });
 
-    it('🔴 目次から飛んだときは帰り道を出さない(目次はずっと画面に在る)', async () => {
+    it('🔴 続けて 2 度飛んでから戻ると、最初の位置へ帰る(上書きしない。Stage 2 PR-3 レビュー)', async () => {
       const host = await mount();
       const back = region.querySelector<HTMLElement>('[data-pkc-region="help-jump-back"]')!;
+      const outer = document.createElement('div');
+      outer.setAttribute('data-pkc-region', 'detail');
+      region.replaceWith(outer);
+      outer.append(region);
+      const rows = [...region.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')];
+      expect(rows.length).toBeGreaterThan(1);
+      outer.scrollTop = 111; // A
+      rows[0]!.click();
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+      outer.scrollTop = 222; // B(1 度目の飛び先)
+      rows[1]!.click();
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+      outer.scrollTop = 333; // C
+      expect(back.hidden).toBe(false);
+      back.querySelector<HTMLElement>('[data-pkc-field="manual-jump-back"]')!.click();
+      expect(outer.scrollTop, '戻る先が 2 度目の飛びで上書きされ、最初の位置 A へ帰れない').toBe(111);
+      expect(host).not.toBeNull();
+    });
+
+    it('🔴 目次から飛んでも帰り道を出す(外側が唯一のスクロールの箱 ── 目次は画面の外へ流れる。Stage 2 PR-3)', async () => {
+      const host = await mount();
+      const back = region.querySelector<HTMLElement>('[data-pkc-region="help-jump-back"]')!;
+      expect(back.hidden, '前提: 押す前は畳んである').toBe(true);
       const row = region.querySelector<HTMLElement>('[data-pkc-field="help-toc-row"]');
       expect(row, '前提が崩れている: 目次の行が無い').not.toBeNull();
       row!.click();
       for (let i = 0; i < 4; i += 1) await Promise.resolve();
-      expect(back.hidden, '目次から飛んで帰り道が出た').toBe(true);
-      // 対照群 ── 本文の参照からなら出る(この test 自身が空振りでないこと)
+      expect(back.hidden, '目次から飛んだのに帰り道が出ない(読み進めると目次へ戻れない)').toBe(false);
+      // 帰ると畳む(片道にしない)
+      back.querySelector<HTMLElement>('[data-pkc-field="manual-jump-back"]')!.click();
+      expect(back.hidden).toBe(true);
+      // 対照群 ── 本文の参照からでも出る
       host.querySelector<HTMLElement>('[data-pkc-field="manual-ref"]')!.click();
       expect(back.hidden, '本文の参照から飛んでも出ない').toBe(false);
     });
@@ -1061,16 +1086,20 @@ describe('マニュアルの中を探す(#636)', () => {
       host.querySelectorAll('h1,h2,h3,h4,h5,h6').length,
       '台の前提が崩れている(素の原文なら見出しは 0 本)',
     ).toBe(0);
-    // happy-dom は版面を組まないので、送り先を持てるように寸法を差す
-    Object.defineProperty(host, 'scrollHeight', { value: 10_000, configurable: true });
-    host.scrollTop = 0;
+    // happy-dom は版面を組まないので、送り先を持てるように寸法を差す。🔴 スクロールの箱は外側(`detail`)の 1 つだけ
+    const outer = document.createElement('div');
+    outer.setAttribute('data-pkc-region', 'detail');
+    region.replaceWith(outer);
+    outer.append(region);
+    Object.defineProperty(host, 'offsetHeight', { value: 10_000, configurable: true });
+    outer.scrollTop = 0;
     type('ルビ');
     const row = rows()[0];
     expect(row, '押す行が無い').not.toBeUndefined();
     row!.click();
     // ⚠ 送るのは `manualReady` を待ってから ── 同期に見ると必ず 0 になる
     for (let i = 0; i < 8; i++) await Promise.resolve();
-    expect(host.scrollTop, '押しても 1px も動かない(dead click)').toBeGreaterThan(0);
+    expect(outer.scrollTop, '押しても 1px も動かない(dead click)').toBeGreaterThan(0);
   });
 
   /**
@@ -1290,11 +1319,11 @@ describe('ヘルプの面の目次(#719)', () => {
    *   describe('「これまでのお知らせ」の一覧(#1017 段③-2)') に居る。
    */
   /**
-   * 🔴 **押しても外側は動かさない**(着地前レビュー・動線 4、実測)。
-   * ⚠ `scrollIntoView` は**スクロールできる祖先を全部**動かすので、外側まで動くと
-   *   **目次が画面の外へ出る**(実測: 押す前 0 / 押した後 494)。
+   * 🔴 **押すと外側(唯一のスクロールの箱)が見出しへ送られ、着いた見出しが光り、帰り道が出る**(Stage 2 PR-3 の 8-1b / 8-1c)。
+   * 直す前は「外側は動かさない」だった(目次を画面に残すため)── 入れ子の箱が画面の外にあると、押しても本文が動かなかった。
+   * ⚠ happy-dom は版面を持たないので、`scrollIntoView` の呼ばれ方(どの見出しへ・どの向きで)を観測点にする。
    */
-  it('🔴 目次を押しても、外側の器はスクロールしない', async () => {
+  it('🔴 目次を押すと、その見出しを画面の頭へ送り、光らせ、帰り道を出す', async () => {
     const outer = document.createElement('div');
     outer.setAttribute('data-pkc-region', 'detail');
     document.body.append(outer);
@@ -1305,15 +1334,19 @@ describe('ヘルプの面の目次(#719)', () => {
     for (let i = 0; i < 8; i++) await Promise.resolve();
     const rows = [...host.querySelectorAll<HTMLElement>('[data-pkc-field="help-toc-row"]')];
     expect(rows.length, '目次の行が出ていない(空振り)').toBeGreaterThan(3);
-    // 台: `scrollIntoView` が外側を動かす実物のふるまいを真似る
-    for (const h of host.querySelectorAll<HTMLElement>('h1[id], h2[id], h3[id]'))
-      h.scrollIntoView = function (this: HTMLElement): void {
-        outer.scrollTop = 494;
+    const calls: { el: HTMLElement; arg: unknown }[] = [];
+    const heads = [...host.querySelectorAll<HTMLElement>('[data-pkc-region="help-manual"] :is(h1,h2,h3,h4,h5,h6)')];
+    for (const h of heads)
+      h.scrollIntoView = function (this: HTMLElement, arg?: unknown): void {
+        calls.push({ el: this, arg });
       };
-    outer.scrollTop = 0;
     rows[3]!.click();
     for (let i = 0; i < 8; i++) await Promise.resolve();
-    expect(outer.scrollTop, '外側まで動いた(目次が画面の外へ出る)').toBe(0);
+    expect(calls.length, '押しても見出しへ送っていない(dead click)').toBe(1);
+    expect(calls[0]!.el, '押した行と別の見出しへ送った').toBe(heads[3]);
+    expect(calls[0]!.arg, '頭へ・即時で送っていない').toMatchObject({ block: 'start', behavior: 'instant' });
+    expect(calls[0]!.el.hasAttribute('data-pkc-jump-flash'), '着いた見出しを光らせていない').toBe(true);
+    expect(host.querySelector<HTMLElement>('[data-pkc-region="help-jump-back"]')!.hidden, '帰り道が出ない').toBe(false);
   });
 });
 
