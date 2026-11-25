@@ -10,16 +10,23 @@ export interface MockS3 {
   url: string;
   s3: ReturnType<typeof fakeS3>;
   cors: boolean;
-  race: boolean;
+  /**
+   * 🔴 412 を起こす相手のキー(`null` = 起こさない)。このキーへの**次の PUT の直前**に、別の端末が同じキーを書き換えたことにする(1 回で外れる)。
+   * ⚠ キーで絞る ── ほかの端末(B)の無人の同期や `keyring.json` の PUT で先に消費されない。
+   */
+  race: string | null;
+  /** `race` が実際に起きた回数(空振りの検出)。 */
+  raced: number;
   server: Server;
 }
 
 export async function startMockS3(): Promise<MockS3> {
-  const m = { cors: true, race: false } as MockS3;
+  const m = { cors: true, race: null, raced: 0 } as MockS3;
   m.s3 = fakeS3(SECRET, {
     beforePut: (key) => {
-      if (!m.race) return;
-      m.race = false;
+      if (m.race === null || m.race !== key) return;
+      m.race = null;
+      m.raced += 1;
       m.s3.objects.set(key, { body: new TextEncoder().encode('別の端末が書いた'), etag: '"racer"', mtime: new Date().toISOString() });
     },
   });
