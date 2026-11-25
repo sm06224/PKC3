@@ -30,6 +30,38 @@ import type { IconValue } from '@features/icon/icon-value';
 import { appGroupFold, type GroupFoldStore } from './group-fold';
 import { recordTemplates } from '@features/launcher/record-tiles';
 import { setIcon } from './icons';
+
+/** リンクを足す欄の `id`(「+ リンクを追加」の `aria-controls` が指す)。 */
+const ADD_FORM_ID = 'pkc-launcher-add-form';
+
+/**
+ * 🔴 **リンクを足す欄を開く / 閉じる実体は 1 本**(#1442 S3-2)── ボタン・「キャンセル」・`Esc`・追加できたとき・
+ * 「操作を探す」の `リンクを追加` がすべてここを通る(開閉・`aria-expanded`・焦点の 3 つを 2 か所に書かない)。
+ * - 開く: 欄を出し、**最初の入力欄(名前)へ焦点**。
+ * - 閉じる: 欄を畳み、**ボタンへ焦点を戻す**(`Esc` で入力欄に居たまま欄が消えて、焦点が `body` へ落ちるのを防ぐ)。
+ *   `clear` なら入力の字も消す(キャンセル・`Esc`・追加できたとき。ボタンの 2 度押しは字を残す)。
+ * @param wrap `launcher-add-wrap`(ボタンと欄の親)
+ * @returns 開いたあとの状態(wrap が見つからなければ `null`)
+ */
+export function setLauncherAddOpen(
+  wrap: HTMLElement | null,
+  open: boolean,
+  opts: { readonly clear?: boolean; readonly focus?: boolean } = {},
+): boolean | null {
+  const btn = wrap?.querySelector<HTMLButtonElement>('[data-pkc-field="launcher-add-open"]') ?? null;
+  const form = wrap?.querySelector<HTMLElement>('[data-pkc-region="launcher-add"]') ?? null;
+  if (wrap === null || btn === null || form === null) return null;
+  form.hidden = !open;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (!open && opts.clear === true) {
+    for (const input of form.querySelectorAll<HTMLInputElement>('input')) input.value = '';
+  }
+  if (opts.focus !== false) {
+    if (open) form.querySelector<HTMLInputElement>('[data-pkc-field="launcher-add-name"]')?.focus();
+    else btn.focus();
+  }
+  return open;
+}
 import { AssetLends, type AssetLender } from './asset-lends';
 
 /**
@@ -117,8 +149,29 @@ export class LauncherRenderer {
      *   PKC2 では既定 ON で届いていた導線である。
      * ⚠ 起動の扱いは既存のタイルと**同じ門**を通る(ここで別経路を作らない)。
      */
+    /**
+     * 🔴 **「+ リンクを追加」で開閉する**(#1442 S3-2。user 指示 2026-11-24)。
+     *
+     * ⚠ 直す前は 3 行の欄(名前・アドレス・追加)が常に一番上に出ていて、組み込みアプリの一覧が下へ押されていた。
+     *   リンクを足すのは**たまに**なので、既定は**閉じて**、一覧を最上段から見渡せるようにする(常用は出す・副次は奥)。
+     * 🔑 開いたら**最初の入力欄(名前)へ焦点**を入れ、閉じたら**ボタンへ焦点を戻す**(`setLauncherAddOpen`)。
+     *   追加できたら閉じる / 「キャンセル」と `Esc` でも閉じる(閉じるときは欄を空にする)/ ボタンをもう一度押すと閉じる(欄の字は残す)。
+     * ⚠ 欄は 1 度だけ組む(上の注記)── 閉じても打ちかけの字は DOM に残る(ボタンで畳んだだけの回)。
+     */
+    const wrap = document.createElement('div');
+    wrap.setAttribute('data-pkc-region', 'launcher-add-wrap');
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.setAttribute('data-pkc-action', 'launcher-add-toggle');
+    openBtn.setAttribute('data-pkc-field', 'launcher-add-open');
+    openBtn.setAttribute('aria-expanded', 'false');
+    openBtn.setAttribute('aria-controls', ADD_FORM_ID);
+    openBtn.title = 'アプリの一覧に、よく開くサイトのリンクを足す欄を開きます(もう一度押すと閉じます)';
+    openBtn.textContent = '+ リンクを追加';
     const add = document.createElement('div');
+    add.id = ADD_FORM_ID;
     add.setAttribute('data-pkc-region', 'launcher-add');
+    add.hidden = true;
     const name = document.createElement('input');
     name.type = 'text';
     name.setAttribute('data-pkc-field', 'launcher-add-name');
@@ -129,6 +182,12 @@ export class LauncherRenderer {
     url.setAttribute('data-pkc-field', 'launcher-add-url');
     url.placeholder = 'https://…';
     url.setAttribute('aria-label', 'リンクのアドレス');
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.setAttribute('data-pkc-action', 'launcher-add-cancel');
+    cancel.setAttribute('data-pkc-field', 'launcher-add-cancel');
+    cancel.title = '入力を消して、この欄を閉じます(Esc でも閉じます)';
+    cancel.textContent = 'キャンセル';
     const go = document.createElement('button');
     go.type = 'button';
     go.setAttribute('data-pkc-action', 'add-url-tile');
@@ -136,11 +195,21 @@ export class LauncherRenderer {
     // ⚠ 文言は**起きること**で書く(user 指示 2026-08-21)
     go.title = 'この一覧にリンクを 1 つ追加します(追加したリンクは、システムの「アプリの開き方」で選んだ先に開きます)';
     go.textContent = 'リンクを追加';
-    add.append(name, url, go);
+    // ⚠ 主の型にしない ── 左のペインの主は「+ ノート」の 1 つ(`primary-action.test.ts` が左のペイン全体で数える)。
+    //   アプリのタブでは作る帯を見た目だけ畳むが DOM には残るので、ここも主にすると全数検査で 2 つになる
+    add.append(name, url, cancel, go);
+    // 🔴 `Esc` で閉じる(入力欄・ボタンのどこに焦点があっても)。⚠ 背後の `Esc`(ノート選択解除など)へ流さない
+    add.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape' || add.hidden) return;
+      ev.stopPropagation();
+      ev.preventDefault();
+      setLauncherAddOpen(wrap, false, { clear: true });
+    });
+    wrap.append(openBtn, add);
 
     const list = document.createElement('div');
     list.setAttribute('data-pkc-field', 'launcher-list');
-    this.region.append(add, list);
+    this.region.append(wrap, list);
     return list;
   }
 
@@ -494,7 +563,7 @@ export class LauncherRenderer {
       const none = document.createElement('p');
       none.setAttribute('data-pkc-field', 'launcher-no-own');
       none.textContent =
-        '自分のアプリはまだありません。HTML ファイルをノートに添付し、その添付の画面で「アプリとして登録」にチェックを入れると、ここに並びます。よく開くサイトは、上の欄に名前とアドレスを入れて「リンクを追加」を押してください';
+        '自分のアプリはまだありません。HTML ファイルをノートに添付し、その添付の画面で「アプリとして登録」にチェックを入れると、ここに並びます。よく開くサイトは、上の「+ リンクを追加」を押して開く欄に名前とアドレスを入れ、「リンクを追加」を押してください';
       list.append(none);
     }
 

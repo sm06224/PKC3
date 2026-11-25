@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool, openMessagePopover, writesLanded } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, openTile, transitionsSettled, openBrowse, pressCreateTool, openMessagePopover, writesLanded, openBarMenu } from './helpers';
 
 /**
  * 🔴 **組み込みアプリ 3 つを、実ブラウザで押す**(#281 ① 関係グラフ / #277 カンバン / #683 ① 計った時間)。
@@ -256,6 +256,7 @@ test('🔴 テキスト整形: 貼る → 整え方を押す → 右に結果 �
   expect(ib && ob && ib.x < ob.x && ib.height > 80 && ob.height > 80, '左右の欄が並んで見えていない').toBe(true);
 
   // 新しいノートにする ── 本物の一覧(保存された側)に載る
+  await openBarMenu(page, 'textlab-out');
   await clickReal(page, pane.locator('[data-pkc-action="textlab-to-note"]'));
   await expect(pane.locator('[data-pkc-field="textlab-summary"]')).toContainText('新しいノート「ABC」を作りました');
   await expect(
@@ -344,6 +345,7 @@ test('🔴 計算スクラッチパッド: 書くと各行の右に結果が同�
   await expect(results.nth(2)).toHaveText('160,000');
 
   // ノートにする(表)── 本物の一覧に載る
+  await openBarMenu(page, 'calc-out');
   await clickReal(page, pane.locator('[data-pkc-action="calc-to-table"]'));
   await expect(pane.locator('[data-pkc-field="calc-status"]')).toContainText('新しいノート「計算メモ');
   await expect(

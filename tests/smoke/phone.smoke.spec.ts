@@ -1243,7 +1243,8 @@ for (const [name, w, h] of [
      *   「右へ写す」は **53px 必要 / 15px しか無い**(全角 1 字)。図案だけの
      *   均一なタイルにしたので、字の長さで幅が変わる問題そのものが無くなった。
      */
-    expect(first.tiles.length, '2 ペインの操作タイルを 1 つも拾えていない').toBe(7);
+    // 🔴 #1442 S3-2: 帯のタイルは 4 つ(名前・フォルダ・ノートは「その他 ▾」の奥 ── 字の見える行なので 44px のタイルではない)
+    expect(first.tiles.length, '2 ペインの操作タイルが 4 つ拾えていない').toBe(4);
     for (const t of first.tiles) {
       expect(t.w, `${t.action} の幅が 44px でない(${t.w}px)`).toBe(44);
       expect(t.h, `${t.action} の高さが 44px でない(${t.h}px)`).toBe(44);
@@ -1541,16 +1542,9 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
   const menu = page.locator('[data-pkc-region="context-menu"]');
   await expect(menu, '長押しで名前つきメニューが開かない').toBeVisible();
   const menuText = (await menu.textContent()) ?? '';
-  for (const label of [
-    '右へコピー',
-    '右へ移す',
-    '名前',
-    'フォルダ',
-    'ノート',
-    'ゴミ箱',
-    'プレビュー',
-  ]) {
-    expect(menuText, `${label} がメニューに無い(7 操作を数え上げていない)`).toContain(label);
+  // 🔴 #1442 S3-2: 帯のタイルは 4 つ(コピー・移す・ゴミ箱へ・プレビュー)。名前・フォルダ・ノートは「その他 ▾」の奥(下で開いて確かめる)
+  for (const label of ['右へコピー', '右へ移す', 'ゴミ箱', 'プレビュー']) {
+    expect(menuText, `${label} がメニューに無い(帯の 4 操作を数え上げていない)`).toContain(label);
   }
   // 🔑 タイル自身の action は発火していない(直後の click が飲み込まれている)
   await page.waitForTimeout(100);
@@ -1560,6 +1554,18 @@ test('🔴 スマホで行を 600ms 押し続けると、印が 2 行になる (
   ).toBe(pressedBefore);
   await page.keyboard.press('Escape');
   await expect(menu, 'Escape でメニューが閉じない').toBeHidden();
+
+  // 残りの 3 操作(名前・フォルダ・ノート)は「その他 ▾」の奥 ── 指でも開けて、字の見える行で出る(7 操作が揃っている)
+  await clickReal(page, '[data-pkc-region="dual-commands"] [data-pkc-field="dual-more"] > summary');
+  for (const [action, label] of [
+    ['dual-rename-begin', '名前を変える'],
+    ['dual-mkdir', 'フォルダを作る'],
+    ['dual-mknote', 'ノートを作る'],
+  ] as const) {
+    const item = page.locator(`[data-pkc-region="dual-commands"] [data-pkc-action="${action}"]`);
+    await expect(item, `${label} が「その他 ▾」に出ない(7 操作が揃っていない)`).toBeVisible();
+    expect(((await item.textContent()) ?? '').trim()).toBe(label);
+  }
 
   expect(errors, `console/pageerror: ${errors.join(' | ')}`).toEqual([]);
 });

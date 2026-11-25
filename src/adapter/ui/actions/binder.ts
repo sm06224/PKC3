@@ -25,6 +25,8 @@ import type { DroppedAt } from './asset-into-note';
 import { deliveredEntryOf, type ExtDeliveredEntry } from '@features/extension/ext-delivery';
 import { BUILTIN_KINDS, isLaunchableUrl, tileSelectsEntry } from '@features/launcher/tiles';
 import { syncChoiceRow } from '../render/choice-buttons';
+import { setLauncherAddOpen } from '../render/launcher';
+import { FILER_FOLD_ATTR } from '../render/browse-mode';
 import {
   allHeadingFoldState,
   applyHeadingFold,
@@ -7685,6 +7687,16 @@ export function runGlobalCommand(
         );
       }
     } else if (!phoneShowList(dispatcher)) return true;
+    /**
+     * 🔴 **探す欄の語が効かないタブ(グラフ・PC・シェルなど)では探す欄を畳んでいる**(#1442 S3-2)── 畳んだ欄に焦点を入れても何も起きない
+     *   (`prevent()` で鍵だけ食う)。user が押したのは「探したい」なので、**フォルダのタブへ移ってから**入れる(畳みを戻してから入れる、と同じ作法)。
+     *   ⚠ 移すのはタブの押し(`set-browse`)── 切り替えの手続きを 2 か所に書かない。⚠ 欄が見えているタブ(予定・アプリ・連絡先など)では移さない。
+     */
+    if ((input.closest('[data-pkc-region="sidebar"]')?.getAttribute(FILER_FOLD_ATTR) ?? '').split(' ').includes('search')) {
+      root
+        .querySelector<HTMLElement>('[data-pkc-region="browse-tabs"] [data-pkc-action="set-browse"][data-pkc-browse="filer"]')
+        ?.click();
+    }
     input.focus();
     input.select();
     return true;
@@ -8163,7 +8175,7 @@ export function runGlobalCommand(
   const btn = root.querySelector<HTMLElement>(sel);
   if (btn === null) return false;
   // 🔴 行ごと隠してある間は「効かない」(#582 段③。`PALETTE_HIDDEN_OK` の注釈)
-  if (!PALETTE_HIDDEN_OK.has(cmd) && !inClosedMenuSource(btn) && btn.closest('[hidden]') !== null) return false;
+  if (!PALETTE_HIDDEN_OK.has(cmd) && !inClosedMenuSource(btn) && !inClosedLauncherAdd(btn) && btn.closest('[hidden]') !== null) return false;
   /**
    * 🔴 **「押せるか」は `disabled` まで見る**(#425 段①)。
    *
@@ -8266,8 +8278,11 @@ function focusFieldFirst(
   const ask = PALETTE_FIELD_FIRST[cmd];
   if (ask === undefined) return false;
   const field = btn.parentElement?.querySelector<HTMLInputElement | HTMLTextAreaElement>(ask.field) ?? null;
+  // 🔴 畳んでいる欄は、字が入っていても**先に開く**(見えなかった欄の字を、確認なしに送らない。#1442 S3-2)
+  const wasClosed = ask.opener !== undefined && field !== null && field.closest('[hidden]') !== null;
+  if (wasClosed) root.querySelector<HTMLElement>(ask.opener ?? '')?.click();
   // ⚠ 欄が見つからないときはボタンを押す(受け手が「入力してください」と言う ── 黙らない)
-  if (field === null || field.value.trim() !== '') return false;
+  if (field === null || (!wasClosed && field.value.trim() !== '')) return false;
   /**
    * 🔑 畳んでいるなら先に戻す(`focus-search` と同じ作法。畳んだペインは DOM に残るので、
    *   戻さずに焦点を入れると**見えない欄に入って何も起きない**)。スマホは列が無いので触らない。
@@ -16556,9 +16571,25 @@ const ACTIONS: Record<string, ActionHandler> = {
     // 🔑 **足したものがその場で出る** ── 読み直さないと、user は「押しても
     //    何も起きない」と読む(次に開いたときに出ても遅い)
     dispatcher.dispatch({ type: 'REFRESH_LAUNCHER_TILES' });
-    if (nameEl) nameEl.value = '';
-    if (urlEl) urlEl.value = '';
+    // 🔴 足したら欄を空にして**閉じる**(#1442 S3-2。焦点は「+ リンクを追加」へ戻る)。欄が無い面(旧い器)は字を消すだけ
+    if (setLauncherAddOpen(target.closest<HTMLElement>('[data-pkc-region="launcher-add-wrap"]'), false, { clear: true }) === null) {
+      if (nameEl) nameEl.value = '';
+      if (urlEl) urlEl.value = '';
+    }
     services.showStatus?.(`「${title}」を足しました`);
+  },
+  /**
+   * 🔴 **リンクを足す欄を開閉する**(#1442 S3-2。「+ リンクを追加」)。実体は `setLauncherAddOpen` の 1 本
+   *   (開いたら名前の欄へ焦点 / 閉じたらボタンへ焦点を戻す)。もう一度押すと閉じる(片道にしない。閉じても字は残す)。
+   */
+  'launcher-add-toggle': (_dispatcher, target) => {
+    const wrap = target.closest<HTMLElement>('[data-pkc-region="launcher-add-wrap"]');
+    const open = target.getAttribute('aria-expanded') === 'true';
+    setLauncherAddOpen(wrap, !open);
+  },
+  /** 🔴 **「キャンセル」**(#1442 S3-2)── 入力を消して欄を閉じる(`Esc` と同じ)。 */
+  'launcher-add-cancel': (_dispatcher, target) => {
+    setLauncherAddOpen(target.closest<HTMLElement>('[data-pkc-region="launcher-add-wrap"]'), false, { clear: true });
   },
   /**
    * 🔴 **添付の名前を、その添付の画面から変える**(#401 ②)。
@@ -20779,6 +20810,14 @@ const PALETTE_HIDDEN_OK: ReadonlySet<string> = new Set(['attach-file', 'open-tod
 // ⚠ 書式の帯の「その他 ▾」の元(`format-more-source`。#1982 段 3)も同じ ── 「置換」「日付」などの鍵・操作を探すが効く
 const CLOSED_MENU_SOURCES =
   '[data-pkc-field="inspector-more-source"], [data-pkc-field="inspector-export-source"], [data-pkc-field="format-more-source"], [data-pkc-field="collection-more-source"], [data-pkc-field="copy-more-source"]';
+/**
+ * 🔴 **畳んでいる「リンクを追加」の欄の中のボタンは「効く」**(#1442 S3-2)。⚠ 隠れている物が**その欄だけ**のときに限る
+ * (アプリの面ごと別のタブへ移って隠れているなら、今までどおり「いまは効かない」)。効くとき `focusFieldFirst` が欄を開いて移す。
+ */
+function inClosedLauncherAdd(btn: HTMLElement): boolean {
+  const form = btn.closest<HTMLElement>('[data-pkc-region="launcher-add"][hidden]');
+  return form !== null && form.parentElement?.closest('[hidden]') === null;
+}
 function inClosedMenuSource(btn: HTMLElement): boolean {
   const nearest = btn.closest('[hidden]');
   return nearest !== null && nearest.matches(CLOSED_MENU_SOURCES);
@@ -20794,7 +20833,7 @@ function inClosedMenuSource(btn: HTMLElement): boolean {
  *   別の面の同名の欄を拾わない)。
  */
 const PALETTE_FIELD_FIRST: Readonly<
-  Record<string, { readonly field: string; readonly pane: PaneId | null; readonly say: string }>
+  Record<string, { readonly field: string; readonly pane: PaneId | null; readonly say: string; readonly opener?: string }>
 > = {
   'add-tag': { field: '[data-pkc-field="tag-add-input"]', pane: 'inspector', say: '足すタグをここに入れてから、「タグを追加」を押してください' },
   'add-relation': { field: '[data-pkc-field="relation-target"]', pane: 'inspector', say: 'つなぐ先の題名をここに入れてから、「つながりを追加」を押してください' },
@@ -20803,7 +20842,8 @@ const PALETTE_FIELD_FIRST: Readonly<
   // 第 2 群(#582 段③)── 欄はボタンと同じ親の中に居る
   'replace-all': { field: '[data-pkc-field="replace-find"]', pane: null, say: '探す語をここに入れてから、「すべて置換」を押してください' },
   'contacts-quick-add': { field: '[data-pkc-field="contacts-quick-name"]', pane: null, say: '追加する連絡先の名前をここに入れてから、「連絡先を追加」を押してください' },
-  'add-url-tile': { field: '[data-pkc-field="launcher-add-url"]', pane: null, say: '追加するリンクのアドレスをここに入れてから、「リンクを追加」を押してください' },
+  // 🔴 欄は「+ リンクを追加」で畳んでいる(#1442 S3-2)── 閉じていたら開いてから移る(`opener`)
+  'add-url-tile': { field: '[data-pkc-field="launcher-add-url"]', pane: null, say: '追加するリンクのアドレスをここに入れてから、「リンクを追加」を押してください', opener: '[data-pkc-action="launcher-add-toggle"]' },
 };
 
 /** 整える 5 つ(#1233)。⚠ 命令 id(`keymap.ts`)→ 整え方(`text-tidy.ts`)。 */

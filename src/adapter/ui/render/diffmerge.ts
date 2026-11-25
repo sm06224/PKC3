@@ -29,6 +29,8 @@ import {
   type MergeRow,
 } from '@features/revision/merge-hunks';
 import { diffLineEl, sideCellEl } from './diff-line';
+import { makeBarMenu, makeBarSpacer } from './bar-menu';
+import { markPrimary } from './icons';
 
 /** 相手の種類。 */
 export type DiffSourceKind = 'note' | 'rev' | 'file';
@@ -510,7 +512,16 @@ export class DiffMergeRenderer {
     const save = mk('diff-save', '変更を保存', '書き換わったノートを保存します(置き換え前の版はノートの履歴に残ります)');
     save.setAttribute('data-pkc-action', 'diff-save');
     save.disabled = true;
-    tools.append(undo, redo, reset, allRight, allLeft, toggle, save);
+    /**
+     * 🔴 **帯の並びは「常用は出す・たまにしか使わない物は奥」**(#1442 S3-2。SQL 画面と同じ方針)。
+     * - 出す(左): 取り込みを元に戻す / やり直す / 同じ行も全部出す(比べている間に何度も押す)
+     * - 出す(右端): 変更を保存(**主は 1 つだけ**。保存するまで何も書かない面の終点)
+     * - 奥(「その他 ▾」): 読み込んだ状態に戻す / 残りを全部、左(右)の内容にそろえる(まとめて動かす・めったに使わない)
+     * ⚠ `data-pkc-action` / `data-pkc-field` は変えない(受け手・押せない状態・鍵はそのまま届く)。⚠ 消した物は無い(奥へ移しただけ)。
+     */
+    markPrimary(save);
+    const more = makeBarMenu('diff-bar-more', 'その他', '読み込んだ状態に戻す / 残りを全部そろえる', [reset, allRight, allLeft]);
+    tools.append(undo, redo, toggle, makeBarSpacer(), more, save);
 
     const summary = document.createElement('p');
     summary.setAttribute('data-pkc-field', 'diff-summary');

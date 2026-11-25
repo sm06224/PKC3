@@ -347,6 +347,15 @@ export function collectPageErrors(page: Page): string[] {
  * playwright が落ちるので、それ自体が「封印が効いている」の観測点になる。
  */
 export async function createEntry(page: Page, archetype: string): Promise<void> {
+  // 🔴 #1442 S3-2: 予定・アプリ・連絡先・グラフなどのタブでは作る帯を畳んでいる(音/動画・時間・フォルダでは出ている)。
+  //   user と同じに、フォルダのタブへ移って作り、元のタブへ戻る(作った後に続く spec の前提 = 開いているタブを動かさない)
+  let back: string | null = null;
+  if ((await page.locator('[data-pkc-region="sidebar"][data-pkc-filer-fold~="create"]').count()) > 0) {
+    back = await page.evaluate(
+      () => document.querySelector('[data-pkc-region="browse-tabs"] [data-pkc-action="set-browse"][data-pkc-active]')?.getAttribute('data-pkc-browse') ?? null,
+    );
+    await openBrowse(page, 'filer');
+  }
   // 🔴 **user と同じ手順**(P10 で分割ボタンへ → #1054 段②で「選ぶ」自体が
   //   「作る」を兼ねる合成メニューへ)── ▼ を押して種類を選ぶ。
   // ⚠ `selectOption` だけでは足りない ── 本体のボタンが `data-pkc-archetype` を持ち、
@@ -356,6 +365,7 @@ export async function createEntry(page: Page, archetype: string): Promise<void> 
   //   (実際にフル smoke で 22 件が timeout した)。
   await clickReal(page, '[data-pkc-field="create-pick"]');
   await clickReal(page, `[data-pkc-region="create-menu"] [data-pkc-archetype="${archetype}"]`);
+  if (back !== null && back !== 'filer') await openBrowse(page, back);
 }
 
 /**
@@ -1352,6 +1362,18 @@ export async function clickBarMoreItem(page: Page, itemSelector: string): Promis
   await expect(menu, '帯の「その他 ▾」を押しても一覧が出ない').toBeVisible();
   await expect(menu.locator(itemSelector), `${itemSelector} が「その他 ▾」の一覧に無い`).toBeVisible();
   await clickReal(page, `[data-pkc-region="context-menu"] ${itemSelector}`);
+}
+
+/**
+ * 🔴 **帯の「書き出す ▾」「その他 ▾」(`bar-menu.ts` の `<details>`)を実マウスで開く**(#1442 S3-2)。
+ * ⚠ 集計・差分マージ・計算・テキスト整形・2 ペイン・SQL の、たまにしか使わない操作は**このメニューの奥**にある ──
+ *   中のボタンを直に押すと「見えない」で落ちる。開いていれば押さない(押すと閉じる)。押したあとメニューは閉じる。
+ */
+export async function openBarMenu(page: Page, field: string): Promise<void> {
+  const d = page.locator(`details[data-pkc-field="${field}"]`).first();
+  if ((await d.getAttribute('open')) !== null) return;
+  await clickReal(page, d.locator('> summary'));
+  await expect(d, `${field} のメニューが開かない`).toHaveAttribute('open', '');
 }
 
 /**
