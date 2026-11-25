@@ -473,13 +473,16 @@
   color-scheme: dark;
 }
 
-/* アクセントの色の選択(#1982 段 4)。配色とは独立に --accent 系の 4 トークンだけを差し替える。
+/* アクセントの色の選択(#1982 段 4)。配色とは独立に --accent 系の 4 トークンと、輪郭の近接発光(ネオン)の 2 色(`--neon` / `--neon-core`)を差し替える。
+   ⚠ ネオンの色相は --accent から取る ── ネオンを差し替えないと、アクセントを青にしてもネオンだけ配色の元の色(緑など)で光る。
    明るい地向け / 暗い地向けの 2 組(`data-pkc-tone` は applyTheme が立てる)。全配色 × 全色のコントラストは tests/adapter/accent-matrix.test.ts */
 :root[data-pkc-tone='light'][data-pkc-accent='green'] {
   --accent: #14663c;
   --accent-fg: #ffffff;
   --accent-dim: #dcebe2;
   --accent-dim-fg: #0d3f26;
+  --neon: #0c924d;
+  --neon-core: #0f4c2d;
 }
 
 :root[data-pkc-tone='light'][data-pkc-accent='blue'] {
@@ -487,6 +490,8 @@
   --accent-fg: #ffffff;
   --accent-dim: #dbe8f6;
   --accent-dim-fg: #0a2f57;
+  --neon: #0f7ff0;
+  --neon-core: #084582;
 }
 
 :root[data-pkc-tone='light'][data-pkc-accent='brown'] {
@@ -494,6 +499,8 @@
   --accent-fg: #ffffff;
   --accent-dim: #ecdfd0;
   --accent-dim-fg: #3b1d08;
+  --neon: #d06011;
+  --neon-core: #68340e;
 }
 
 :root[data-pkc-tone='light'][data-pkc-accent='purple'] {
@@ -501,6 +508,8 @@
   --accent-fg: #ffffff;
   --accent-dim: #e8dff3;
   --accent-dim-fg: #2f1750;
+  --neon: #a05cf2;
+  --neon-core: #502f78;
 }
 
 :root[data-pkc-tone='dark'][data-pkc-accent='green'] {
@@ -508,6 +517,8 @@
   --accent-fg: #04140b;
   --accent-dim: #1e3a2a;
   --accent-dim-fg: #cfeadb;
+  --neon: #55f19b;
+  --neon-core: #ddfdeb;
 }
 
 :root[data-pkc-tone='dark'][data-pkc-accent='blue'] {
@@ -515,6 +526,8 @@
   --accent-fg: #04101f;
   --accent-dim: #1c3556;
   --accent-dim-fg: #d6e6ff;
+  --neon: #4798ff;
+  --neon-core: #ddebfd;
 }
 
 :root[data-pkc-tone='dark'][data-pkc-accent='brown'] {
@@ -522,6 +535,8 @@
   --accent-fg: #1a0f05;
   --accent-dim: #4a3220;
   --accent-dim-fg: #f5e6d0;
+  --neon: #f1a455;
+  --neon-core: #fdeddd;
 }
 
 :root[data-pkc-tone='dark'][data-pkc-accent='purple'] {
@@ -529,6 +544,8 @@
   --accent-fg: #12062a;
   --accent-dim: #3b2a5c;
   --accent-dim-fg: #e9ddff;
+  --neon: #a274f4;
+  --neon-core: #e9ddfd;
 }
 
 /* 幾何とフォント ── **テーマで変えない**(配色ではないので) */
