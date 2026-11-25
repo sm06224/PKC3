@@ -790,3 +790,36 @@ test('🔴 フォーカス: キーボード(Tab)で入力欄・追記欄の枠�
   expect(on[0]!.border).not.toBe(off[0]!.border);
   expect(errors, `console / page error: ${errors.join(' | ')}`).toEqual([]);
 });
+
+test('🔴 アクセントの色を変えると、ネオンの色もその色に付いていく(明 / 暗)', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('accent-set')) {
+      localStorage.setItem('pkc3.accent', 'blue');
+      sessionStorage.setItem('accent-set', '1');
+    }
+  });
+  await gotoApp(page);
+  const read = (): Promise<{ accent: string; neon: string; core: string }> =>
+    page.evaluate(() => {
+      const cs = getComputedStyle(document.documentElement);
+      return { accent: cs.getPropertyValue('--accent').trim(), neon: cs.getPropertyValue('--neon').trim(), core: cs.getPropertyValue('--neon-core').trim() };
+    });
+  for (const [theme, accent, neon, core] of [
+    ['light', '#0b5cad', '#0f7ff0', '#084582'],
+    ['dark', '#5aa2ff', '#4798ff', '#ddebfd'],
+  ] as const) {
+    await page.evaluate((t) => {
+      document.documentElement.setAttribute('data-pkc-theme', t);
+      document.documentElement.setAttribute('data-pkc-tone', t);
+    }, theme);
+    await expect(page.locator('html')).toHaveAttribute('data-pkc-accent', 'blue');
+    expect(await read(), `${theme}: アクセントは青なのにネオンが配色の元の色のまま`).toEqual({ accent, neon, core });
+  }
+  // 対照群: 配色どおり(アクセントを選んでいない)に戻すと、ネオンは配色の色(ライト = 緑)
+  await page.evaluate(() => {
+    document.documentElement.removeAttribute('data-pkc-accent');
+    document.documentElement.setAttribute('data-pkc-theme', 'light');
+    document.documentElement.setAttribute('data-pkc-tone', 'light');
+  });
+  expect((await read()).neon).toBe('#008f52');
+});
