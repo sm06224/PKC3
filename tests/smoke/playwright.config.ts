@@ -133,6 +133,23 @@ export default defineConfig({
    * 中を並べると物語が壊れる ── 並べるのは **spec と spec の間**だけである。
    */
   fullyParallel: false,
+  /**
+   * 🔴 **計測(`@perf`)は並列の外で、最後に 1 人で回す**(2026-11-25。PR #2073 の着地前のフル smoke で実際に落ちた)。
+   *
+   * ⚠ `neon-perf.smoke.spec.ts` の 600 コマ計測は rAF の間隔を数える。ほかの worker の Chromium と
+   *   CPU を取り合うと、発光側の 1 回にだけ負荷が乗って「発光 1,7 / 対照 0,0」(差 4 > 1)で赤くなった
+   *   (同じビルドを `--workers 1 --repeat-each 3` で回すと 3 回とも緑)。閾値は動かさない(CLAUDE.md §2-10)。
+   * 🔑 だから `@perf` を別 project にして、本体(`smoke`)の **teardown** に置く:
+   *   - teardown は本体の test が**全部終わってから**走る ── そのとき他の worker は 1 つも居ない(並列の外)。
+   *   - 本体に赤があっても走る(dependencies と違い、本体の赤で `@perf` が skip されて「確かめていない」にならない)。
+   *   - ファイルを指定した実行(`pick-smoke` / `smoke-record`)では、指定の中にある物だけが走る。
+   *   - ⚠ `--shard` では各 shard の最後に走ってしまうので、spec 側で **shard 1 だけ**に絞る(重複させない)。
+   * ⚠ `npm run test:smoke` 1 本で全量、という運用は変えない(project を指定しない実行は両方を回す)。
+   */
+  projects: [
+    { name: 'smoke', grepInvert: /@perf/, teardown: 'perf' },
+    { name: 'perf', grep: /@perf/ },
+  ],
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${PORT}`,

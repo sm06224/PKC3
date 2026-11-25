@@ -11,7 +11,7 @@
  * | コマ落ち | ページ内の rAF 間隔。**中央値の 2 倍以上**の間隔を 1 つと数える |
  * | 再計算・レイアウト・スクリプトの時間 | CDP `Performance.getMetrics` の前後差(`RecalcStyleDuration` / `LayoutDuration` / `ScriptDuration`) |
  *
- * 🔑 **対照群 = 測りたい操作(発光)だけを外したもの**(perf-measurement の作法)。同じ起動・同じ道筋で、発光だけを外した群と通常を**交互に 2 回ずつ**測る(温め 1 回は捨てる)。
+ * 🔑 **対照群 = 測りたい操作(発光)だけを外したもの**(perf-measurement の作法)。同じ起動・同じ道筋で、発光だけを外した群と通常を**交互に 2 回ずつ**(ABBA の順で)測る(温め 1 回は捨てる)。
  * ⚠ **`prefers-reduced-motion: reduce` は対照群に使わない** ── 発光のほか、すべての transition / animation / smooth scroll も止めるので「発光だけの差」にならない。
  *   代わりに init script で `matchMedia` を包み、**`GLOW_QUERY`(`neon-glow.ts` の正本をそのまま import)だけ** `matches: false` を返して `change` を送る。
  *   ほかの media query は触らず、`reducedMotion` は両群とも `no-preference` のまま。
@@ -30,6 +30,15 @@ import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, dis
 
 test.use({ deviceScaleFactor: 2 });
 test.skip(process.env.PKC3_SKIP_PERF === '1', 'PKC3_SKIP_PERF=1');
+/**
+ * 🔴 **`--shard` のときは shard 1 だけで測る**(`playwright.config.ts` の `projects` を参照)。
+ * ⚠ この spec は本体の teardown(`perf` project)として**並列の外・最後に 1 人で**走る。teardown は各 shard の最後に付くので、
+ *   絞らないと 3 shard で 3 回測る(しかも shard の割り当てに関係なく重複する)。shard 1 には本体の test が必ず入るので、ここで 1 回になる。
+ */
+test.beforeEach(() => {
+  const shard = test.info().config.shard;
+  test.skip(shard !== null && shard.current !== 1, 'shard 1 だけで測る(--shard の重複を避ける)');
+});
 
 /** 🔴 発光だけを外す: `GLOW_QUERY` の問いにだけ `matches: false` を返し(`change` も送る)、ほかの media query は本物のまま。 */
 test.beforeEach(async ({ page }) => {
@@ -287,12 +296,14 @@ test('🔴 ネオンの 600 コマ計測: 対照群(発光だけを外す)と通
   const scenes = ['計測用のログ', '計測用のノート', '計測用のノート#fields'];
 
   const runs: Run[] = [];
+  // 🔑 **ABBA(対照 → 発光 → 発光 → 対照)の順で測る**(2026-11-25)。ABAB だと時間とともに増える外乱(温度・GC・裏の負荷)が
+  //   いつも後ろの発光側に多く乗る。ABBA なら両群の時刻の重心が同じになり、直線的な傾きは平均の差で打ち消し合う。
   const order: [string, boolean][] = [
     ['温め(捨てる)', false],
     ['control-1', true],
     ['glow-1', false],
-    ['control-2', true],
     ['glow-2', false],
+    ['control-2', true],
   ];
   for (const [label, glowOff] of order) {
     await page.evaluate((v) => (window as unknown as { __pkcGlowOff: (o: boolean) => void }).__pkcGlowOff(v), glowOff);
