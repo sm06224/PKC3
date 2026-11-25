@@ -85,6 +85,70 @@ export const NOTICES_SEEDED_STORAGE_STATE = {
   })),
 };
 
+/** 並列の外で回す計測の印(題に `@perf` を書く)。 */
+export const PERF_TAG = /@perf/;
+/** `@perf` の spec を絞り込みに当てるときの見本(file の path と題)。 */
+const PERF_PROBE = 'tests/smoke/neon-perf.smoke.spec.ts 🔴 ネオンの 600 コマ計測 @perf';
+/** 値を 1 つ取る CLI の旗(`--x=値` の形は 1 語なので数えない)。 */
+const VALUE_OPTS = new Set([
+  '-c', '--config', '-g', '--grep', '-G', '--grep-invert', '-j', '--workers', '--shard', '--repeat-each', '--retries',
+  '--project', '--reporter', '--add-reporter', '--timeout', '--global-timeout', '--max-failures', '--output', '--trace',
+  '--tsconfig', '--ui-port', '--ui-host', '--browser', '--last-failed-file', '--update-source-method', '--run-agents',
+]);
+/** 値を取っても取らなくてもよい旗と、その値の候補(候補でない次の語は値ではない)。 */
+const OPTIONAL_OPTS: Record<string, RegExp> = {
+  '-u': /^(all|changed|missing|none)$/,
+  '--update-snapshots': /^(all|changed|missing|none)$/,
+  '--debug': /^(inspector|cli)$/,
+  '--shuffle': /^\d+$/,
+};
+/** 何が選ばれるかを CLI から読めない旗(このときは安全側 = 計測を最後に 1 人で回す形を付ける)。 */
+const OPAQUE_OPTS = new Set(['--last-failed', '--only-changed', '--test-list', '--test-list-invert']);
+
+/**
+ * 🔴 **`@perf` を本体の teardown にするか**(= 計測を並列の外・最後に 1 人で回すか)。
+ *
+ * ⚠ teardown の project は **ファイル指定も `-g` も効かない**(本体が 1 件でも走れば必ず走る。playwright 1.65 で実測)。
+ *   付けっぱなしだと、`pick-smoke` / `smoke-record` が別の spec を 1 本回すたびに 1.8 分の計測が乗る。
+ * 🔑 だから付けるのは ①絞り込みが無い(全量。`--shard` も含む)②絞り込みが `@perf` の spec に当たる ③何が選ばれるか読めない、のときだけ。
+ *   付けないときの perf project は、ふつうの project として絞り込みどおり 0 件になる。
+ * ⚠ 設定は runner でも worker でも読まれるが、teardown は runner の並べ方にしか効かない(project の名前と並びは変わらない)。
+ */
+export function perfTeardownWanted(argv: readonly string[]): boolean {
+  const at = argv.indexOf('test');
+  if (at < 0) return true;
+  const files: string[] = [];
+  const greps: string[] = [];
+  const rest = argv.slice(at + 1);
+  for (let i = 0; i < rest.length; i += 1) {
+    const a = rest[i]!;
+    const [flag = a, inline] = a.startsWith('--') && a.includes('=') ? [a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1)] : [a, undefined];
+    if (OPAQUE_OPTS.has(flag)) return true;
+    if (VALUE_OPTS.has(flag)) {
+      const v = inline ?? rest[(i += 1)] ?? '';
+      if (flag === '-g' || flag === '--grep') greps.push(v);
+      continue;
+    }
+    if (flag in OPTIONAL_OPTS) {
+      if (inline === undefined && OPTIONAL_OPTS[flag]!.test(rest[i + 1] ?? '')) i += 1;
+      continue;
+    }
+    if (a.startsWith('-')) continue;
+    files.push(a.replace(/:\d+(?::\d+)?$/, ''));
+  }
+  if (files.length === 0 && greps.length === 0) return true;
+  const hits = (src: string, probe: string): boolean => {
+    try {
+      return new RegExp(src).test(probe);
+    } catch {
+      return probe.includes(src);
+    }
+  };
+  const fileOk = files.length === 0 || files.some((f) => hits(f, PERF_PROBE.split(' ')[0]!));
+  const grepOk = greps.length === 0 || greps.some((g) => hits(g, PERF_PROBE));
+  return fileOk && grepOk;
+}
+
 export default defineConfig({
   testDir: '.',
   testMatch: '**/*.smoke.spec.ts',
@@ -142,13 +206,14 @@ export default defineConfig({
    * 🔑 だから `@perf` を別 project にして、本体(`smoke`)の **teardown** に置く:
    *   - teardown は本体の test が**全部終わってから**走る ── そのとき他の worker は 1 つも居ない(並列の外)。
    *   - 本体に赤があっても走る(dependencies と違い、本体の赤で `@perf` が skip されて「確かめていない」にならない)。
-   *   - ファイルを指定した実行(`pick-smoke` / `smoke-record`)では、指定の中にある物だけが走る。
+   *   - ⚠ teardown はファイル指定も `-g` も効かない。だから付けるのは全量のときと絞り込みが `@perf` に当たるときだけ
+   *     (`perfTeardownWanted`)── `pick-smoke` / `smoke-record` が別の spec を回すときに計測が乗らない。
    *   - ⚠ `--shard` では各 shard の最後に走ってしまうので、spec 側で **shard 1 だけ**に絞る(重複させない)。
    * ⚠ `npm run test:smoke` 1 本で全量、という運用は変えない(project を指定しない実行は両方を回す)。
    */
   projects: [
-    { name: 'smoke', grepInvert: /@perf/, teardown: 'perf' },
-    { name: 'perf', grep: /@perf/ },
+    { name: 'smoke', grepInvert: PERF_TAG, ...(perfTeardownWanted(process.argv) ? { teardown: 'perf' } : {}) },
+    { name: 'perf', grep: PERF_TAG },
   ],
   reporter: [['list']],
   use: {
