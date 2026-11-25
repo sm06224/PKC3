@@ -81,8 +81,11 @@ describe('アクセントの色 × 全配色', () => {
         }
         if (t.dark) expect(lum(over['--neon-core']!), '暗い配色の芯が線より明るくない').toBeGreaterThan(lum(over['--neon']!));
         else expect(lum(over['--neon-core']!), '明るい配色の芯が線より濃くない').toBeLessThan(lum(over['--neon']!));
-        const dh = hueDiff(over['--neon']!, over['--accent']!);
-        expect(dh, `${a.id}: ネオンの色相がアクセントから離れた(${dh} 度)`).toBeLessThanOrEqual(40);
+        // 線と芯の両方がアクセントと同じ色相(実測の差は 0〜5 度。15 度で締める ── 別の色の芯に差し替えると落ちる)
+        for (const k of ['--neon', '--neon-core']) {
+          const dh = hueDiff(over[k]!, over['--accent']!);
+          expect(dh, `${a.id}: ${k} の色相がアクセントから離れた(${dh} 度)`).toBeLessThanOrEqual(15);
+        }
       });
     }
   }

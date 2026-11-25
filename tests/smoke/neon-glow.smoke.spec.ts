@@ -804,16 +804,25 @@ test('🔴 アクセントの色を変えると、ネオンの色もその色に
       const cs = getComputedStyle(document.documentElement);
       return { accent: cs.getPropertyValue('--accent').trim(), neon: cs.getPropertyValue('--neon').trim(), core: cs.getPropertyValue('--neon-core').trim() };
     });
-  for (const [theme, accent, neon, core] of [
-    ['light', '#0b5cad', '#0f7ff0', '#084582'],
-    ['dark', '#5aa2ff', '#4798ff', '#ddebfd'],
+  // 保存した選択(青)が起動時に属性まで届く
+  await expect(page.locator('html')).toHaveAttribute('data-pkc-accent', 'blue');
+  // 4 色 × 明 / 暗: 属性 → 効く変数(アクセントとネオンが同じ組から来る)
+  for (const [theme, acc, accent, neon, core] of [
+    ['light', 'blue', '#0b5cad', '#0f7ff0', '#084582'],
+    ['dark', 'blue', '#5aa2ff', '#4798ff', '#ddebfd'],
+    ['light', 'green', '#14663c', '#0c924d', '#0f4c2d'],
+    ['dark', 'green', '#4cba7d', '#55f19b', '#ddfdeb'],
+    ['light', 'brown', '#8b4513', '#d06011', '#68340e'],
+    ['dark', 'brown', '#d9a066', '#f1a455', '#fdeddd'],
+    ['light', 'purple', '#6b3fa0', '#a05cf2', '#502f78'],
+    ['dark', 'purple', '#b794f4', '#a274f4', '#e9ddfd'],
   ] as const) {
-    await page.evaluate((t) => {
+    await page.evaluate(([t, a]) => {
       document.documentElement.setAttribute('data-pkc-theme', t);
       document.documentElement.setAttribute('data-pkc-tone', t);
-    }, theme);
-    await expect(page.locator('html')).toHaveAttribute('data-pkc-accent', 'blue');
-    expect(await read(), `${theme}: アクセントは青なのにネオンが配色の元の色のまま`).toEqual({ accent, neon, core });
+      document.documentElement.setAttribute('data-pkc-accent', a);
+    }, [theme, acc] as const);
+    expect(await read(), `${theme} × ${acc}: ネオンがアクセントの色に付いていかない`).toEqual({ accent, neon, core });
   }
   // 対照群: 配色どおり(アクセントを選んでいない)に戻すと、ネオンは配色の色(ライト = 緑)
   await page.evaluate(() => {
