@@ -106,6 +106,41 @@ async function shot(page: Page, name: string): Promise<void> {
   if (dir !== undefined && dir !== '') await page.screenshot({ path: `${dir}/${name}.png` });
 }
 
+/**
+ * 「今すぐ同期」を押し、**その回が終わるまで**待つ(実クリック)。
+ * ⚠ 状態の字を押す前から見張り、「同期しています…」を一度見てから、終わりの字(`done`)になるのを待つ
+ *   ── 前の回と同じ「最終同期 …」の字で素通りしない。
+ */
+async function syncAndSettle(page: Page, done: RegExp = /最終同期/): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __pkcS3Seen?: string[]; __pkcS3Obs?: MutationObserver };
+    w.__pkcS3Obs?.disconnect();
+    const seen: string[] = [];
+    const root = document.querySelector('[data-pkc-region="settings-sync-s3"]') ?? document.body;
+    const obs = new MutationObserver(() => {
+      const t = document.querySelector('[data-pkc-field="sync-s3-status"]')?.textContent ?? '';
+      if (seen[seen.length - 1] !== t) seen.push(t);
+    });
+    obs.observe(root, { subtree: true, childList: true, characterData: true });
+    w.__pkcS3Seen = seen;
+    w.__pkcS3Obs = obs;
+  });
+  await clickReal(page, '[data-pkc-region="settings-sync-s3"] [data-pkc-action="sync-folder-now"]');
+  await expect
+    .poll(
+      () =>
+        page.evaluate((src) => {
+          const seen = (window as unknown as { __pkcS3Seen?: string[] }).__pkcS3Seen ?? [];
+          const i = seen.findIndex((t) => t.includes('同期しています'));
+          const now = document.querySelector('[data-pkc-field="sync-s3-status"]')?.textContent ?? '';
+          return i >= 0 && !now.includes('同期しています') && new RegExp(src).test(now);
+        }, done.source),
+      { timeout: 20_000, message: `手の同期が終わらない(${done.source})` },
+    )
+    .toBe(true);
+  await page.evaluate(() => (window as unknown as { __pkcS3Obs?: MutationObserver }).__pkcS3Obs?.disconnect());
+}
+
 const e2eField = (page: Page, name: string) => page.locator(`[data-pkc-region="settings-sync-s3"] [data-pkc-field="${name}"]`);
 
 /**
@@ -194,6 +229,8 @@ test('🔴 S3 互換の保管先: 分離した実ブラウザから読み書き�
     expect(mock.s3.seen.some((x) => x.method === 'PUT' && x.url.endsWith('/keyring.json') && x.headers['if-none-match'] === '*'), 'keyring.json の初回作成は If-None-Match: *').toBe(true);
     // 🔴 置き場の中身に、ノートの字・パスフレーズ・回復キー・zip の印(PK)が無い
     const enc = [...mock.s3.objects.entries()].find(([k]) => k.endsWith('.enc'))!;
+    /** A のファイルのキー(この時点で `.enc` は A の 1 つだけ)── 412 はこのキーにだけ起こす。 */
+    const aEncKey = enc[0];
     expect(Buffer.from(enc[1].body).subarray(0, 8).toString(), '暗号化したファイルの印').toBe('PKC3E2E1');
     for (const [k, o] of mock.s3.objects) {
       const raw = Buffer.from(o.body);
@@ -244,18 +281,27 @@ test('🔴 S3 互換の保管先: 分離した実ブラウザから読み書き�
     expect(mock.s3.objects.size, '2 台ぶん + keyring.json').toBe(3);
 
     // ── 🔴 412: A が書く間に、別の端末が A のファイルを書き換えた ── 上書きせずに止まる
-    await clickReal(A, '[data-pkc-region="settings-sync-s3"] [data-pkc-action="sync-folder-now"]');
-    await expect(status(A)).toContainText('最終同期', { timeout: 20_000 });
+    //   ⚠ まず A の手の同期を**本当に終わるまで**待つ(前と同じ「最終同期 …」の字で素通りすると、その回が後で確定したノートを書いてしまい、
+    //     次に押した同期には書く物が無く PUT が起きない ── フル smoke の負荷で踏んだ)
+    await syncAndSettle(A);
+    // 🔴 race は A のファイルのキーに限り、ノートを確定する**前**に立てる ── 無人の同期・手の同期のどちらが先に書いても 412 を踏む
+    mock.race = aEncKey;
     await createEntry(A, 'text');
     await A.locator('[data-pkc-field="editor-title"]').fill('412 の間に書いたメモ');
     await clickReal(A, '[data-pkc-action="commit-edit"]');
     await openS3(A);
-    mock.race = true;
     await clickReal(A, '[data-pkc-region="settings-sync-s3"] [data-pkc-action="sync-folder-now"]');
     await expect(status(A), '412 で止まらない').toContainText('上書きしませんでした', { timeout: 20_000 });
-    const aKey = [...mock.s3.objects.keys()].find((k) => mock.s3.objects.get(k)!.etag === '"racer"');
-    expect(aKey, '別の端末が書いた物が残っている(上書きされた)').toBeDefined();
-    expect(new TextDecoder().decode(mock.s3.objects.get(aKey!)!.body)).toBe('別の端末が書いた');
+    expect(mock.raced, '空振り防止: 別の端末の書き込み(412)が 1 回だけ起きた').toBe(1);
+    const racer = (): { body: string; etag: string } | null => {
+      const o = mock.s3.objects.get(aEncKey);
+      return o === undefined ? null : { body: new TextDecoder().decode(o.body), etag: o.etag };
+    };
+    expect(racer(), '別の端末が書いた物が残っていない(上書きされた)').toEqual({ body: '別の端末が書いた', etag: '"racer"' });
+    // 🔴 次の回(手で押す)も、相手が書いたファイルを上書きしない(読めない自分の名前のファイルは取り込めず、書く条件 If-Match が合わずに止まる)
+    await syncAndSettle(A, /上書きしませんでした|止まっています/);
+    expect(racer(), '次の回で別の端末の物を上書きした').toEqual({ body: '別の端末が書いた', etag: '"racer"' });
+    expect(mock.raced, '2 回目の 412 は作り物が起こした物ではない').toBe(1);
 
     // ── CORS を外す ── 理由(CORS)を言って失敗する
     mock.cors = false;
