@@ -4544,6 +4544,19 @@ dd[data-pkc-field='inspector-toc'] {
 .pkc-md-rendered .pkc-md-block:not(:has(> .pkc-md-edit-btn)):has(> .pkc-code-collapse-top-btn) .pkc-code-lang {
   right: 52px;
 }
+/* 🔴 **言語バッジを「‹/›」(図・表とソースの切替)に重ねない**(Stage 4。user 指摘 2026-11-25「MERMAID の D が </> に掛かる」)。
+ *   切替は ⧉ の左(右から 26px、幅 24px)に居るので、素の 52px ではバッジの右端と切替の左端の間が 2px しかなかった(Mermaid)。
+ *   表の囲みでは切替が ▾ の左(48px)へ寄るため、バッジ(52px)が切替の真下に**丸ごと隠れていた**(csv)。
+ *   切替の左端 + 6px の位置へバッジを寄せる。⚠ 指の端末(切替 28px / 表 50px)は末尾の `@media (hover: none) and (pointer: coarse)` で同じ式。
+ *   守り: `tests/smoke/code-badge-gap.smoke.spec.ts` がバッジと右上のボタンの矩形を突き合わせる。 */
+.pkc-md-rendered .pkc-md-block:has(> .pkc-render-toggle) > .pkc-code-lang.pkc-code-lang {
+  right: 56px;
+  /* 表として描いた囲みでは、表の見出しの行(位置を持つ)が後から塗られてバッジの上半分を隠していた ── 切替と同じ段(z-index: 1)に上げる */
+  z-index: 1;
+}
+.pkc-md-rendered .pkc-md-block:has(> .pkc-md-copy-menu-btn):has(> .pkc-render-toggle) > .pkc-code-lang.pkc-code-lang {
+  right: 78px;
+}
 /* 表を出す囲みでは右上に ⧉ ▾ の 2 つが入るので、ソース切替をその左へ寄せる。
  * ⚠ 言語名(csv / tsv / psv)を CSS に書かない ── その一覧は `csv-table.ts` の
  *    1 本きりで、ここに写すと 2 か所目になる(片方だけ古くなる) */
@@ -13030,6 +13043,17 @@ h3[data-pkc-section] {
    *    守り: `touch-targets.smoke.spec.ts` が 3 つの矩形を**隣どうしで**突き合わせる。 */
   .pkc-md-rendered .pkc-md-block:has(> .pkc-md-copy-menu-btn) > .pkc-render-toggle {
     right: 50px;
+  }
+  /* 言語バッジは右上のボタンの左端 + 6px(素の規則と同じ式 ── ✎ 26px + 24px / 切替 28px + 24px / 表 50px + 24px)。
+   * ⚠ 指の端末では ✎ も 24px 幅になるので、素の 52px ではコードのバッジが ✎ に 2px まで寄っていた */
+  .pkc-md-rendered .pkc-md-block:has(> .pkc-md-edit-btn):not(:has(> .pkc-code-collapse-top-btn)) > .pkc-code-lang.pkc-code-lang {
+    right: 56px;
+  }
+  .pkc-md-rendered .pkc-md-block:has(> .pkc-render-toggle) > .pkc-code-lang.pkc-code-lang {
+    right: 58px;
+  }
+  .pkc-md-rendered .pkc-md-block:has(> .pkc-md-copy-menu-btn):has(> .pkc-render-toggle) > .pkc-code-lang.pkc-code-lang {
+    right: 80px;
   }
   /* ④ **目次の行**:情報ペインの目次(12px)と本文の `:::toc`(15px)を 24px に。
    *    ⚠ 本文側は行間を広げるのではなく、リンクを行ボックスにして丈を持たせる。 */
