@@ -18,14 +18,17 @@ async function measure(page: Page): Promise<{ kind: string; gaps: { btn: string;
   for (let i = 0; i < 3; i++) {
     const b = blocks.nth(i);
     await b.hover();
-    await page.waitForTimeout(250);
+    // 触れたときに出るボタン(‹/› など)が出切るまで待つ ── 透明のまま測ると、見えていない物との隙間を測ってしまう
+    await expect
+      .poll(() => b.evaluate((el) => [...el.querySelectorAll<HTMLElement>(':scope > .pkc-render-toggle, :scope > .pkc-md-copy-btn')].every((c) => getComputedStyle(c).opacity === '1')))
+      .toBe(true);
     out.push(
       await b.evaluate((el) => {
         const badge = el.querySelector(':scope > .pkc-code-lang')!.getBoundingClientRect();
         const gaps: { btn: string; gap: number }[] = [];
         for (const c of el.querySelectorAll<HTMLElement>(':scope > :is(.pkc-md-copy-btn, .pkc-md-copy-menu-btn, .pkc-md-edit-btn, .pkc-render-toggle, .pkc-code-collapse-top-btn)')) {
           const r = c.getBoundingClientRect();
-          if (r.width < 2 || getComputedStyle(c).opacity === '0') continue;
+          if (r.width < 2) continue;
           if (r.bottom <= badge.top || r.top >= badge.bottom) continue; // 別の段
           // 横の隙間(負 = 重なり)
           const gap = r.left >= badge.left ? r.left - badge.right : badge.left - r.right;
@@ -50,6 +53,8 @@ for (const touch of [false, true]) {
     try {
       await useSplitEditor(page);
       await gotoApp(page);
+      // 前提: 指の端末の context が、本当に指の端末の規則(`(hover: none) and (pointer: coarse)`)に当たっている
+      expect(await page.evaluate(() => matchMedia('(hover: none) and (pointer: coarse)').matches), '前提: 指の端末の条件が成り立っていない').toBe(touch);
       await dismissAnnounce(page);
       await createEntry(page, 'text');
       await page.fill('[data-pkc-field="editor-body"]', SRC);
@@ -57,9 +62,12 @@ for (const touch of [false, true]) {
       await page.waitForSelector('[data-pkc-action="start-edit"]');
       const rows = await measure(page);
       expect(rows.map((r) => r.kind).sort(), '前提: mermaid / コード / csv の 3 つ').toEqual(['code', 'csv', 'mermaid']);
+      // 前提: 種類ごとに、バッジと同じ段で測ったボタンが揃っている(切替・▾・✎ が測れていないまま「重ならない」と言わない)
+      const want: Record<string, string[]> = { mermaid: ['‹/›', '⧉'], csv: ['‹/›', '▾', '⧉'], code: ['✎', '⧉'] };
       for (const r of rows) {
-        expect(r.gaps.length, `${r.kind}: 前提 ── バッジと同じ段にボタンが居ない(空振り)`).toBeGreaterThan(0);
-        for (const g of r.gaps) expect(g.gap, `${r.kind}: バッジが「${g.btn}」に掛かっている(隙間 ${g.gap}px)`).toBeGreaterThanOrEqual(4);
+        expect(r.gaps.map((g) => g.btn).sort(), `${r.kind}: 前提 ── 測ったボタンが足りない(空振り)`).toEqual([...want[r.kind]!].sort());
+        // 名目の隙間は 6px(ボタンの左端 + 6)。端数の丸めだけ許す ── 指の端末の規則を消すと 4px になり、ここで落ちる
+        for (const g of r.gaps) expect(g.gap, `${r.kind}: バッジが「${g.btn}」に寄りすぎ / 掛かっている(隙間 ${g.gap}px)`).toBeGreaterThanOrEqual(5.5);
       }
       // 🔴 表として描いた囲み(csv)のバッジが、表の見出しの行(位置を持ち、後から塗られる)の**下に隠れていない**。
       //    矩形が空いていても重なり順で負ければ見えない ── バッジに当たり判定を一時的に持たせ、上下 2 段 × 左右 3 点で一番上に居る物を見る(直す前は下半分が見出しの行に塗られていた)

@@ -4401,6 +4401,12 @@ dd[data-pkc-field='inspector-toc'] {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   line-height: 18px;
+  /* 幅を 24px に固定する ── 言語バッジの位置(右から 56px = 26 + 24 + 6)がこの幅を前提にしている。
+   * 字体によって「‹/›」の字幅が変わると、切替の左端が動いてバッジに掛かる(Stage 4)。字は真ん中に置く */
+  width: 24px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
   cursor: pointer;
   opacity: 0;
 }
@@ -4549,6 +4555,10 @@ dd[data-pkc-field='inspector-toc'] {
  *   表の囲みでは切替が ▾ の左(48px)へ寄るため、バッジ(52px)が切替の真下に**丸ごと隠れていた**(csv)。
  *   切替の左端 + 6px の位置へバッジを寄せる。⚠ 指の端末(切替 28px / 表 50px)は末尾の `@media (hover: none) and (pointer: coarse)` で同じ式。
  *   守り: `tests/smoke/code-badge-gap.smoke.spec.ts` がバッジと右上のボタンの矩形を突き合わせる。 */
+.pkc-md-rendered .pkc-md-block:has(> .pkc-md-edit-btn):not(:has(> .pkc-code-collapse-top-btn)) > .pkc-code-lang.pkc-code-lang {
+  /* コードの ✎(右から 26px・幅 22px)の左端 + 6px。素の 52px では隙間が 4px だった */
+  right: 54px;
+}
 .pkc-md-rendered .pkc-md-block:has(> .pkc-render-toggle) > .pkc-code-lang.pkc-code-lang {
   right: 56px;
   /* 表として描いた囲みでは、表の見出しの行(位置を持つ)が後から塗られてバッジの上半分を隠していた ── 切替と同じ段(z-index: 1)に上げる */
