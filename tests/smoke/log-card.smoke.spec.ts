@@ -361,7 +361,20 @@ test('🔴 見出し(# / ## / ###)の左の帯はカードの外へ出ず、畳�
     const tag = await h.evaluate((e) => e.tagName.toLowerCase());
     const btn = h.locator('[data-pkc-field="heading-fold"]');
     await h.scrollIntoViewIfNeeded();
-    await btn.hover();
+    /**
+     * ⚠ 触れてから測るまでの間に、上のカードの図(焼き上がり)などで配置が動くとポインタが見出しから外れ、`:hover` が落ちる(負荷の高いフル smoke で実際に踏んだ)。
+     *   ポインタを当て直しながら ▾ が見える状態を待つ ── 製品の主張(触れたら ▾ が出る)は下の expect がそのまま見る。
+     */
+    await expect
+      .poll(
+        async () => {
+          await h.scrollIntoViewIfNeeded();
+          await btn.hover();
+          return h.evaluate((el) => getComputedStyle(el.querySelector('[data-pkc-field="heading-fold"]')!, '::after').opacity);
+        },
+        { timeout: 5000 },
+      )
+      .toBe('1');
     const r = await h.evaluate((el) => {
       const b = el.querySelector('[data-pkc-field="heading-fold"]') as HTMLElement;
       const hb = el.getBoundingClientRect();
