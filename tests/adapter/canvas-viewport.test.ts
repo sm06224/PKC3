@@ -26,6 +26,7 @@ import {
   canvasBackgroundTarget,
   canvasCameraOf,
   canvasDrawSession,
+  canvasSelectionCount,
   canvasZoomOf,
   CULLED_ATTR,
   flushCanvasFrame,
@@ -704,6 +705,53 @@ describe('🔴 複数選択(Shift + クリック / 範囲選択)→ 一括移動
     expect(groups).toEqual([{ lid: 'n1', lines: [0, 4] }]);
   });
 
+  it('🔴 回した付箋は回した外接四角で揃え、本文の x= には同じだけずらした値を書く', () => {
+    const rot = RENDERED.replace('id="p2"', 'id="p2" data-pkc-rotate="90"');
+    const host = board(rot);
+    const moves: Array<ReadonlyArray<{ line: number; x: number; y: number }>> = [];
+    offs.push(installCanvasViewport(document.body, { setDefault: () => {}, movePlaces: (_l, m) => moves.push(m) }));
+    syncBoardView(host, 'n1', BOARD);
+    cmd('mode').click();
+    sizeViewport(800, 600);
+    liveHostRect(host);
+    shiftClick(p1(host));
+    shiftClick(p2(host));
+    cmd('align').click();
+    bar().querySelector<HTMLButtonElement>('[data-pkc-canvas-align="left"]')!.click();
+    // p2: 200 × 100 を 90° 回すと外接四角は x 650..750(中心 700)。左端を 120 へ → 本文の x= は 600 − 530 = 70
+    expect(moves).toEqual([[{ line: 4, x: 70, y: 40 }]]);
+  });
+
+  it('🔴 本文の行の数が変わったら、開き行で覚えた選択は捨てる(別の付箋を指さない)/ id で覚えた選択は残す', () => {
+    const noId = RENDERED.replace(' id="p2"', '');
+    const host = board(noId);
+    offs.push(installCanvasViewport(document.body, { setDefault: () => {} }));
+    syncBoardView(host, 'n1', BOARD);
+    cmd('mode').click();
+    sizeViewport(800, 600);
+    shiftClick(p1(host));
+    const second = host.querySelectorAll<HTMLElement>('.pkc-place')[1]!;
+    shiftClick(second);
+    expect(canvasSelectionCount(host)).toBe(2);
+    // 動かした(行の数は同じ)→ 残る
+    syncBoardView(host, 'n1', BOARD.replace('x=600', 'x=640'));
+    expect(canvasSelectionCount(host)).toBe(2);
+    // 上に 1 行足した(行がずれた)→ 開き行の選択だけ捨てる
+    syncBoardView(host, 'n1', `メモ\n${BOARD.replace('x=600', 'x=640')}`);
+    expect(canvasSelectionCount(host)).toBe(1);
+    expect(p1(host).getAttribute('data-pkc-canvas-selected')).toBe('1');
+    expect(second.hasAttribute('data-pkc-canvas-selected')).toBe(false);
+  });
+
+  it('開き行の印が無い付箋は、グループにしない(行 0 の別の付箋を巻き込まない)', () => {
+    const { host, groups } = canvasWithPorts();
+    shiftClick(p1(host));
+    shiftClick(p2(host));
+    p2(host).removeAttribute('data-pkc-place-line');
+    cmd('group').click();
+    expect(groups).toEqual([]);
+  });
+
   it('選択は描き直し(syncBoardView)の後も保ち、通常表示へ戻すと外れる', () => {
     const { host } = canvasWithPorts();
     shiftClick(p1(host));
@@ -872,6 +920,16 @@ describe('🔴 手書き(描く面の生成・置く・終了時の破棄)', () 
     } finally {
       restore();
     }
+  });
+
+  it('🔴 枠ごと DOM から外れた後は、手書きが Esc を握らない(開いているノートの Esc へ通す)', () => {
+    const { vp } = drawCanvas();
+    cmd('draw').click();
+    vp.remove();
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(false);
+    expect(vp.querySelector('canvas')).toBeNull();
   });
 
   it('置けなかった(口が false)なら面を閉じない(描いた線を失わせない)', async () => {

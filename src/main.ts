@@ -17,11 +17,14 @@ import './styles/app.css';
  */
 import 'katex/dist/katex.min.css';
 
+import { endsInsideOpenBlock } from '@features/markdown/place-notation';
 import { Dispatcher } from '@adapter/state/dispatcher';
 import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
 import { createUnloadGuard } from '@adapter/platform/unload-guard';
 import {
   bodyWriteBlockReason,
+  PLACE_OPEN_BLOCK_REFUSAL,
+  screenBodyOf,
   blockedWithSuffix,
   hasUnsavedTyping,
   isAsidePane,
@@ -1827,9 +1830,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
      * ⚠ 書く前に門を確かめる ── 書けないのに添付だけ残さない。
      */
     placeDrawing: async (lid, png, rect) => {
-      const blocked = bodyWriteBlockReason(dispatcher.getState(), lid);
-      if (blocked !== null) {
-        dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
+      /**
+       * 🔑 **書けるかを先に確かめる**(着地前レビュー)── 書けないのに添付だけ残さない。
+       *   門は付箋を置くとき(`ADD_PLACE`)と同じ 3 つ: 編集・取り込みの門 / 画面に本文が在る / 末尾が閉じている。
+       */
+      const refusal = (): string | null => {
+        const st = dispatcher.getState();
+        const blocked = bodyWriteBlockReason(st, lid);
+        if (blocked !== null) return blocked;
+        const shown = screenBodyOf(st, lid);
+        if (shown === null) return 'ボードが画面に出ていないため、手書きを置けませんでした';
+        if (endsInsideOpenBlock(shown)) return PLACE_OPEN_BLOCK_REFUSAL;
+        return null;
+      };
+      const first = refusal();
+      if (first !== null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: first });
         return false;
       }
       let ok = false;
@@ -1855,16 +1871,32 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       });
       const attached = out as Awaited<ReturnType<typeof attachOne>>;
       if (attached === null) return false;
-      const before = dispatcher.getState().error;
-      dispatcher.dispatch({
-        type: 'ADD_PLACE',
-        lid,
-        x: rect.x,
-        y: rect.y,
-        image: { asset: attached.assetKey, w: rect.w, h: rect.h },
+      /**
+       * 🔴 **置けたかは「本文の書換の依頼が出たか」で見る**(エラーの字の差分では見ない ── 同じ字が続くと成功に化ける)。
+       *   添付の間に編集が始まった・本文が変わったなどで置けなければ、作った添付を片付けて理由を出す(描いた線は面に残る)。
+       */
+      let requested = false;
+      const off = dispatcher.onEvent((ev) => {
+        if (ev.type === 'REQUEST_BODY_REWRITE') requested = true;
       });
-      const after = dispatcher.getState().error;
-      return after === null || after === before;
+      try {
+        if (refusal() === null) {
+          dispatcher.dispatch({
+            type: 'ADD_PLACE',
+            lid,
+            x: rect.x,
+            y: rect.y,
+            image: { asset: attached.assetKey, w: rect.w, h: rect.h },
+          });
+        }
+      } finally {
+        off();
+      }
+      if (requested) return true;
+      const why = refusal() ?? '手書きを置けませんでした';
+      dispatcher.dispatch({ type: 'DELETE_ENTRY', lid: attached.lid });
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${why}(描いた線はそのまま残しています)` });
+      return false;
     },
   });
   /**

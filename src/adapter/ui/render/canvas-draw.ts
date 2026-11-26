@@ -300,7 +300,14 @@ export function openFreehand(opts: FreehandOptions): FreehandSession {
     }
   };
   const onKey = (e: KeyboardEvent): void => {
+    // 🔴 枠ごと DOM から外れていたら(描き直しで器が捨てられた)自分を閉じて、以後の Esc を握らない
+    if (!vp.isConnected) {
+      close();
+      return;
+    }
     if (e.key !== 'Escape') return;
+    // ⚠ 上に開いているダイアログの Esc は奪わない
+    if (doc.querySelector('dialog[open]') !== null) return;
     // ⚠ 開いているノートの選択解除などへ Esc を渡さない(手書きだけを閉じる)
     e.preventDefault();
     e.stopImmediatePropagation();

@@ -223,6 +223,21 @@ export function placeKeyOf(el: Element): string | null {
   return line === null ? null : `@${line}`;
 }
 
+/** 付箋の開き行(`data-pkc-place-line`)。⚠ 属性が無ければ `null`(`Number(null)` = 0 で行 0 を指さない)。 */
+function placeLineOf(el: Element): number | null {
+  const raw = el.getAttribute('data-pkc-place-line');
+  if (raw === null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/** 本文の行数(選択の `@行` を捨てるかの目安)。 */
+function lineCountOf(body: string): number {
+  let n = 1;
+  for (let i = 0; i < body.length; i += 1) if (body.charCodeAt(i) === 10) n += 1;
+  return n;
+}
+
 /** 器で選んでいる付箋の数(キャンバスでなければ 0)。 */
 export function canvasSelectionCount(host: Element | null): number {
   if (!(host instanceof HTMLElement)) return 0;
@@ -546,8 +561,8 @@ function runAlign(c: Canvas, lid: string, kind: AlignKind): boolean {
   const moves: Array<{ line: number; x: number; y: number }> = [];
   for (const s of sel) {
     const t = to.get(s.key);
-    const line = Number(s.el.getAttribute('data-pkc-place-line'));
-    if (t === undefined || !Number.isInteger(line)) return false;
+    const line = placeLineOf(s.el);
+    if (t === undefined || line === null) return false;
     const raw = rectOf(s.el);
     const x = Math.round(raw.x + (t.x - s.rect.x));
     const y = Math.round(raw.y + (t.y - s.rect.y));
@@ -985,6 +1000,15 @@ export function syncBoardView(host: HTMLElement, lid: string, body: string): boo
     closeCanvas(view.canvas);
     view.canvas = null;
   }
+  /**
+   * 🔴 **本文の行の数が変わったら、開き行で覚えた選択(`@行`)を捨てる**(着地前レビュー)。
+   * ⚠ 付箋を消す・上に足す・別のタブで書く・元に戻すで行がずれると、同じ行番号が**別の付箋**を指す
+   *   (整列・グループ・まとめて動かすの相手が入れ替わる)。動かす・揃える・グループにするは行の数を変えないので残る。
+   *   id(`#…`)で覚えた選択は行がずれても同じ付箋を指すので残す。
+   */
+  if (view.canvas !== null && view.body !== body && lineCountOf(view.body) !== lineCountOf(body)) {
+    for (const k of [...view.canvas.selected]) if (k.startsWith('@')) view.canvas.selected.delete(k);
+  }
   view.lid = lid;
   view.body = body;
   const want = canvasModeFor(lid, body);
@@ -1117,10 +1141,10 @@ export function runCanvasCommand(
       return true;
     case 'group': {
       if (c === null || c.selected.size < 2) return true;
-      const lines = selectedRects(c)
-        .map((s) => Number(s.el.getAttribute('data-pkc-place-line')))
-        .filter((n) => Number.isInteger(n));
-      if (lines.length >= 2) ports?.groupPlaces?.(view.lid, lines);
+      const sel = selectedRects(c);
+      const lines = sel.map((s) => placeLineOf(s.el)).filter((n): n is number => n !== null);
+      // ⚠ 1 枚でも行を引けなければ書かない(行 0 などの別の付箋をグループに入れない)
+      if (lines.length >= 2 && lines.length === sel.length) ports?.groupPlaces?.(view.lid, lines);
       return true;
     }
     case 'draw':

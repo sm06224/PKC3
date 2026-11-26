@@ -10699,15 +10699,18 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: 'ボードにするつながりがありません' });
       return;
     }
-    if (st.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
+    const lid = generateLid();
     dispatcher.dispatch({
       type: 'CREATE_ENTRY',
       archetype: 'text',
-      lid: generateLid(),
+      lid,
       title: GRAPH_BOARD_DEFAULT_TITLE,
       body: graphViewToBoardMarkdown(view),
       edit: false,
     });
+    // 🔑 作れたときだけ本文の画面へ切り替える(作れなかったのに画面だけ動かさない)
+    const now = dispatcher.getState();
+    if (now.entryMetas.has(lid) && now.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
   },
   /** 🔴 **やめる**(#683 段①)── 器へ返すのは描画器の `syncBorrow` が引き取る。 */
   'capture-stop': (dispatcher) => {
