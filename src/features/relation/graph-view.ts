@@ -18,6 +18,11 @@ import type { GraphEdge, PlacedNode, TitleLookup } from './neighbourhood';
 
 /** 図に出す節点の上限。⚠ これ以上は押せる大きさで並べられない。 */
 export const GRAPH_MAX_NODES = 60;
+/**
+ * 🔴 **大規模表示(GPU の 2D / 3D)の節点の上限**(v4.0 Phase 3 / PR-13、ビジョン 1-C)。
+ * ⚠ 節点は `<button>` ではなく 1 回の draw call の絵 + 当たり判定(`graph-gpu-layout.ts` の `pickGraphNode`)で押す。
+ */
+export const GRAPH_GPU_MAX_NODES = 1000;
 /** 手先の数の上限(画面の増減ボタンの範囲)。 */
 export const GRAPH_MAX_DEPTH = 6;
 /** 手先の数の既定(情報ペインの図と同じ 2)。 */
@@ -145,7 +150,9 @@ function wholeGraph(edges: readonly GraphEdge[], titles: TitleLookup, limit: num
   const order = ranked.slice(0, limit);
   const kept = new Set(order);
   const inside = edges.filter((e) => kept.has(e.fromLid) && kept.has(e.toLid));
-  const pos = forceLayout(order, inside);
+  // 🔴 上限(60)を超える節点は O(N²) の力学配置に通さない ── 格子で近所だけ押し合う配置へ分ける
+  //    (⚠ 60 以下は今までの配置を 1 バイトも変えない)
+  const pos = order.length > GRAPH_MAX_NODES ? gridForceLayout(order, inside) : forceLayout(order, inside);
   const nodes: PlacedNode[] = order.map((lid, i) => ({
     lid,
     title: titles.get(lid) ?? lid,
@@ -220,7 +227,11 @@ function forceLayout(
       p[i]![1] += (d[i]![1] / len) * step;
     }
   }
-  // 枠へ正規化(縦横を別々に伸ばすと形が歪むので、長いほうに合わせて同じ倍率)
+  return normalizeToFrame(p);
+}
+
+/** 枠へ正規化(縦横を別々に伸ばすと形が歪むので、長いほうに合わせて同じ倍率)。出力は 0.06..0.94。 */
+function normalizeToFrame(p: readonly (readonly [number, number])[]): [number, number][] {
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
@@ -236,4 +247,129 @@ function forceLayout(
   const offX = 0.5 - ((minX + maxX) / 2) * scale;
   const offY = 0.5 - ((minY + maxY) / 2) * scale;
   return p.map(([x, y]) => [x * scale + offX, y * scale + offY]);
+}
+
+/** 格子の配置の反復回数(固定 ── 同じ入力は同じ座標)。 */
+const GRID_LAYOUT_ITER = 60;
+
+/**
+ * 🔴 **大規模の配置**(v4.0 Phase 3 / PR-13)── 節点が `GRAPH_MAX_NODES` を超えたときだけ使う。
+ *
+ * `forceLayout` は全組の押し合い(O(N²) × 120 回)で、1,000 件では数秒メインスレッドを止める。
+ * ここは同じ考え方(押し合い + ばね)を **格子に分けた近所だけ**で行う:
+ * - 押し合いは、同じ升と周り 8 升に居る節点とだけ(升の幅 = 押し合いの届く距離 2k)
+ * - ばねは辺の数だけ(O(E))
+ * - 固定 60 回・温度は線形に下げる
+ * ⚠ **乱数を使わない**(初期配置は `forceLayout` と同じ黄金角の渦巻き。升の走査順も決まっている)。
+ */
+function gridForceLayout(order: readonly string[], edges: readonly GraphEdge[]): [number, number][] {
+  const n = order.length;
+  const index = new Map(order.map((l, i) => [l, i]));
+  const xs = new Float64Array(n);
+  const ys = new Float64Array(n);
+  for (let i = 0; i < n; i += 1) {
+    const a = i * 2.399963; // 黄金角(つながりの多い順に内側から)
+    const r = 0.02 + (0.46 * Math.sqrt(i + 1)) / Math.sqrt(n);
+    xs[i] = 0.5 + Math.cos(a) * r;
+    ys[i] = 0.5 + Math.sin(a) * r;
+  }
+  const k = Math.sqrt(1 / n) * 0.9;
+  const reach = 2 * k;
+  const reach2 = reach * reach;
+  const pairs: number[] = [];
+  for (const e of edges) {
+    const a = index.get(e.fromLid);
+    const b = index.get(e.toLid);
+    if (a !== undefined && b !== undefined && a !== b) pairs.push(a, b);
+  }
+  const dx = new Float64Array(n);
+  const dy = new Float64Array(n);
+  const cellOf = new Int32Array(n);
+  const next = new Int32Array(n);
+  for (let it = 0; it < GRID_LAYOUT_ITER; it += 1) {
+    const t = 0.05 * (1 - it / GRID_LAYOUT_ITER) + 0.001;
+    dx.fill(0);
+    dy.fill(0);
+    // 升へ分ける(連結リスト。⚠ 升の数は節点の数と同じ桁に抑える)
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < n; i += 1) {
+      if (xs[i]! < minX) minX = xs[i]!;
+      if (xs[i]! > maxX) maxX = xs[i]!;
+      if (ys[i]! < minY) minY = ys[i]!;
+      if (ys[i]! > maxY) maxY = ys[i]!;
+    }
+    const cols = Math.max(1, Math.min(256, Math.ceil((maxX - minX) / reach) + 1));
+    const rows = Math.max(1, Math.min(256, Math.ceil((maxY - minY) / reach) + 1));
+    const head = new Int32Array(cols * rows).fill(-1);
+    for (let i = n - 1; i >= 0; i -= 1) {
+      const cx = Math.min(cols - 1, Math.floor((xs[i]! - minX) / reach));
+      const cy = Math.min(rows - 1, Math.floor((ys[i]! - minY) / reach));
+      const c = cy * cols + cx;
+      cellOf[i] = c;
+      next[i] = head[c]!;
+      head[c] = i;
+    }
+    for (let i = 0; i < n; i += 1) {
+      const c = cellOf[i]!;
+      const cx = c % cols;
+      const cy = (c - cx) / cols;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        const yy = cy + oy;
+        if (yy < 0 || yy >= rows) continue;
+        for (let ox = -1; ox <= 1; ox += 1) {
+          const xx = cx + ox;
+          if (xx < 0 || xx >= cols) continue;
+          for (let j = head[yy * cols + xx]!; j !== -1; j = next[j]!) {
+            if (j <= i) continue; // 1 組を 1 回だけ
+            let ddx = xs[i]! - xs[j]!;
+            let ddy = ys[i]! - ys[j]!;
+            let d2 = ddx * ddx + ddy * ddy;
+            if (d2 > reach2) continue;
+            if (d2 < 1e-10) {
+              ddx = 1e-3 * ((i + j) % 2 === 0 ? 1 : -1);
+              ddy = 1e-3;
+              d2 = ddx * ddx + ddy * ddy;
+            }
+            const dist = Math.sqrt(d2);
+            const f = (k * k) / dist;
+            const fx = (ddx / dist) * f;
+            const fy = (ddy / dist) * f;
+            dx[i] = dx[i]! + fx;
+            dy[i] = dy[i]! + fy;
+            dx[j] = dx[j]! - fx;
+            dy[j] = dy[j]! - fy;
+          }
+        }
+      }
+    }
+    for (let q = 0; q < pairs.length; q += 2) {
+      const a = pairs[q]!;
+      const b = pairs[q + 1]!;
+      const ddx = xs[a]! - xs[b]!;
+      const ddy = ys[a]! - ys[b]!;
+      const dist = Math.max(Math.sqrt(ddx * ddx + ddy * ddy), 1e-4);
+      const f = (dist * dist) / k;
+      const fx = (ddx / dist) * f;
+      const fy = (ddy / dist) * f;
+      dx[a] = dx[a]! - fx;
+      dy[a] = dy[a]! - fy;
+      dx[b] = dx[b]! + fx;
+      dy[b] = dy[b]! + fy;
+    }
+    // 弱い重力(つながっていない島が遠くへ飛ばない)
+    for (let i = 0; i < n; i += 1) {
+      dx[i] = dx[i]! + (0.5 - xs[i]!) * k * 0.5;
+      dy[i] = dy[i]! + (0.5 - ys[i]!) * k * 0.5;
+      const len = Math.max(Math.hypot(dx[i]!, dy[i]!), 1e-9);
+      const step = Math.min(len, t);
+      xs[i] = xs[i]! + (dx[i]! / len) * step;
+      ys[i] = ys[i]! + (dy[i]! / len) * step;
+    }
+  }
+  const out: [number, number][] = [];
+  for (let i = 0; i < n; i += 1) out.push([xs[i]!, ys[i]!]);
+  return normalizeToFrame(out);
 }

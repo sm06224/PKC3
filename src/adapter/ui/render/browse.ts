@@ -433,6 +433,8 @@ export class BrowseRouter {
        *   タブが変われば必ず `render` が走る)。
        */
       if (this.last === 'launcher') this.launcher.disposeAssets();
+      // 🔴 関係グラフの大規模 / 3D の図は GPU を借りている ── 出たら返す(v4.0 PR-13。戻れば `render` が組み直す)
+      if (this.last === 'graph') this.graph.onHidden();
       this.last = mode;
     }
     // 🔴 **札の帯は面に関係なく描く**(#478)── 面の中の renderer に持たせると、

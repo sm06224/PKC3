@@ -180,8 +180,11 @@ import { join } from 'node:path';
  *   見る相手は「3D の無いノート・外部 URL の図では Three.js の chunk を**一度も**取りに行かない」で、他の spec の道中では
  *   既に読まれた chunk が混ざる。3D の無いノート → 外部 URL → 3D の図(-norender / -render / -both・操作・切替)を 1 本にまとめ、
  *   添付の 3D モデルは何も開いていない状態から添付する(添付がその場で開く)もう 1 つの起動で見る。
+ * - 2026-11-26(v4.0 Phase 3 / PR-13): **663**(そのときの実数 663)。`graph-gpu.smoke.spec.ts` を新設(起動 1 つ)。⚠ 既存の道中には載せられない ──
+ *   見る相手は「関係グラフの通常の図では Three.js の chunk を**一度も**取りに行かない」で、他の spec の道中では
+ *   既に読まれた chunk が混ざる。通常 → 大規模 → 3D(回転・ズーム・リセット・押下で移動)→ 通常 → 大規模を 1 本にまとめた。
  */
-export const BOOT_BUDGET = 662;
+export const BOOT_BUDGET = 663;
 // 2026-11-25(Stage 4): **650**(実数 650)。⚠ main が 649 > 641 で赤だった(#2069 / #2071 / #2073 で上げ忘れ。PR の CI は test-pr の選択でこの test を回さず、
 //   main への push の全量でだけ鳴っていた)── 事実に合わせた。足した起動は次の 9 つ:
 //   - #2069(#1442 S3-1)`builtin-apps.smoke.spec.ts` に 2 本(起動 2 つ)── 広い別ウィンドウの予定表の 2 ペインで本体の › が左の小さな月も送る / 900px で縦に積む。
@@ -236,7 +239,7 @@ export const BOOT_BUDGET = 662;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 331; // v4.0 Phase 3 / PR-12: 実数 662 の半分(下限は実数の半分以上 ── smoke-budget.test)
+export const BOOT_FLOOR = 332; // v4.0 Phase 3 / PR-13: 実数 663 の半分(切り上げ)(下限は実数の半分以上 ── smoke-budget.test)
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {

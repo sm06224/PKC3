@@ -15702,6 +15702,79 @@ h6:hover > .pkc-heading-anchor,
   font-weight: 600;
 }
 
+/* 🔴 関係グラフの描き方(通常 / 大規模 / 3D。v4.0 Phase 3 / PR-13)── 押されている物を形(太字・下線)で示す */
+[data-pkc-field='graph-modes'] {
+  display: inline-flex;
+  gap: 0;
+}
+[data-pkc-field='graph-modes'] button[aria-pressed='true'] {
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+[data-pkc-field='graph-more'] {
+  margin-left: var(--s1);
+  padding: 0 6px;
+  font-size: var(--fs-sm);
+}
+/* 大規模 / 3D の描画面 ── 従来の図と同じ比(1 : 0.82)。canvas・ポスター・2D の簡易表示を描画面いっぱいに */
+[data-pkc-field='graph-gpu'] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+[data-pkc-field='graph-gpu-stage'] {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 0.82;
+  max-height: 80vh;
+  min-height: 160px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+[data-pkc-field='graph-gpu'][data-pkc-graph-panning] [data-pkc-field='graph-gpu-stage'] {
+  cursor: grabbing;
+}
+[data-pkc-field='graph-gpu-stage']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+[data-pkc-field='graph-gpu-stage'] > canvas,
+[data-pkc-field='graph-gpu-stage'] > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+/* ホバーの節点の札 ── 絵の上に浮かべるだけ(ポインタは下の描画面へ通す) */
+[data-pkc-field='graph-gpu-hover'] {
+  position: absolute;
+  z-index: 1;
+  transform: translate(-50%, calc(-100% - 10px));
+  max-width: 60%;
+  padding: 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--btn-fs-sm);
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+[data-pkc-field='graph-gpu-hover'][hidden] {
+  display: none;
+}
+[data-pkc-field='graph-gpu-note'] {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
 /* ── 予定の「カンバン」(#277。user 指示 2026-08-19「カンバンとカレンダーを復活」)────────
  * 未完了 / 完了の 2 列。札は一覧と同じ札(`schedule-cards` の直下)なので、押す・掴む・縦線の色は一覧の規則が
  * そのまま効く。ここが足すのは列の置き場所と、**落とせる列が掴んで通ったときに光る**線だけ。
