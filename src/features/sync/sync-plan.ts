@@ -76,6 +76,11 @@ export interface SyncSummary {
   pinsChanged: number;
   /** 両方で違う色を付けた(こちらを残した)。 */
   attrConflicts: number;
+  /**
+   * 🔴 選択同期(#2066 段 5-A): こちらが選択同期のとき、**こちらの選択の外のノート**(と、それに付いた印・つながり)への
+   * 相手からの変更・削除を反映しなかった数。こちらの原本と同期の記録はそのまま。
+   */
+  skippedUnselected: number;
 }
 
 export interface SyncPlan {
@@ -94,6 +99,11 @@ export interface SyncPlan {
   conflicts: PlanConflict[];
   /** 本文が入っていなくて取り込めなかったノートの題名(こちらに題名が無ければ lid)。 */
   needFull: string[];
+  /**
+   * 🔴 選択同期(#2066 段 5-A): こちらが選択同期のとき、相手から新しく入るノートのうち、こちらの直接指定に足す lid
+   * (親がこちらの `direct ∪ descendant` にも、今回入る新しいフォルダの中にも無い物)。足さないと、次の書き出しで相手へ返らない。
+   */
+  selectiveSelectAdds: string[];
   summary: SyncSummary;
 }
 
@@ -115,6 +125,11 @@ export interface PlanInput {
   /** 競合のコピーの題名に付ける日付(`YYYY-MM-DD`)。 */
   date: string;
   genLid(): string;
+  /**
+   * 🔴 こちらが選択同期のとき(#2066 段 5-A)。`selectedLids` = こちらの対象の集合 S(閉包)/
+   * `directAndDescendantLids` = こちらの `direct ∪ descendant`。省略 = こちらは全部のノート(今までと同じ)。
+   */
+  localSelective?: { selectedLids: ReadonlySet<string>; directAndDescendantLids: ReadonlySet<string> };
 }
 
 /** 競合のコピーの題名。⚠ 検索で拾える固定の語「同期の競合」を必ず入れる(競合の一覧の代わり。初回の同期は「初回の同期の競合」= 同じ語を含む)。 */
@@ -126,7 +141,14 @@ export function conflictCopyTitle(title: string, firstSync: boolean, date: strin
 const emptySummary = (): SyncSummary => ({
   created: 0, updated: 0, restored: 0, merged: 0, trashed: 0, keptLocal: 0, conflicts: 0, firstSync: 0,
   relationsAdded: 0, relationsRemoved: 0, orphans: 0, danglingRelations: 0, labelsChanged: 0, pinsChanged: 0, attrConflicts: 0,
+  skippedUnselected: 0,
 });
+
+/** つながりのキー(`rel:<from>|<to>|<kind>`)の両端。 */
+function relEndsOf(key: string): [string, string] {
+  const [from, to] = key.slice(4).split('|');
+  return [from ?? '', to ?? ''];
+}
 
 /**
  * 判定に使う前回の合意。保存してある物に、相手が「こちらの版をこう見ていた」(`peerBase`)を重ねる:
@@ -188,20 +210,58 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   const baseline: Baseline = carriesAttrs
     ? fullBaseline
     : Object.fromEntries(Object.entries(fullBaseline).filter(([k]) => !isAttrKey(k)));
+  /**
+   * 🔴 **相手が選択同期のファイル(`scope: 'selective'`)は、相手の全体ではない**(#2066 段 5-A)。
+   * 一覧に無いノートを「相手が消した」と見なさない(`remoteIsComplete: false`)── 消えたノートは削除の記録で届く。
+   * ただし、相手の一覧に**両端のノートが載っている**つながり・**ノートが載っている**印は、相手の全体が見えている:
+   * 記録に在って相手に無ければ外した物(つながり・印は削除の記録を持たないので、ここで同じ形の記録に直して判定へ渡す)。
+   */
+  const remoteSelective = remote.manifest.scope === 'selective';
+  const remoteTombs: Tombstone[] = [...c.tombstones];
+  if (remoteSelective) {
+    const tombKeys = new Set(remoteTombs.map((t) => t.key));
+    for (const [k, fp] of Object.entries(baseline)) {
+      if (remoteFp.has(k) || tombKeys.has(k)) continue;
+      let covered = false;
+      if (isRelKey(k)) {
+        const [a, b] = relEndsOf(k);
+        covered = remoteFp.has(a) && remoteFp.has(b);
+      } else if (isAttrKey(k)) {
+        covered = remoteFp.has(attrLidOf(k) ?? '');
+      }
+      if (covered) remoteTombs.push({ key: k, lastFp: fp as Fp, device: remote.manifest.device, seq: remote.manifest.seq });
+    }
+  }
   const decisions = decideMerge({
     baseline,
     local: judgedLocal,
     remote: remoteStates,
-    remoteTombstones: c.tombstones,
+    remoteTombstones: remoteTombs,
     localTombstones: input.localTombstones,
-    remoteIsComplete: true,
+    remoteIsComplete: !remoteSelective,
   });
 
   // こちらで生きているノート(つながりでない物)。後でゴミ箱・新規で更新して「取り込み後に生きている」集合にする。
   const finalLive = new Set<string>();
   for (const s of input.localStates) if (isNoteKey(s.key)) finalLive.add(s.key);
+  /**
+   * 🔴 **こちらの選択の外を守る**(#2066 段 5-A)。こちらが選択同期のとき、こちらで生きていて選択の外のノート
+   * (と、それに付いた印・それに触れるつながり)には、相手からの変更・削除を反映しない。
+   */
+  const localLiveNotes = new Set(finalLive);
+  const ls = input.localSelective;
+  const outside = (lid: string): boolean => ls !== undefined && localLiveNotes.has(lid) && !ls.selectedLids.has(lid);
+  const isProtected = (key: string): boolean => {
+    if (ls === undefined) return false;
+    if (isRelKey(key)) {
+      const [a, b] = relEndsOf(key);
+      return outside(a) || outside(b);
+    }
+    if (isAttrKey(key)) return outside(attrLidOf(key) ?? '');
+    return outside(key);
+  };
   for (const d of decisions) {
-    if (!isNoteKey(d.key)) continue;
+    if (!isNoteKey(d.key) || isProtected(d.key)) continue;
     if (d.action === 'trash-local') finalLive.delete(d.key);
     else if (d.action === 'take-remote' || (d.action === 'conflict' && d.resolution === 'restore-remote')) finalLive.add(d.key);
   }
@@ -217,6 +277,15 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   const needFull: string[] = [];
   const next = Object.create(null) as Record<string, Fp>;
   const s = emptySummary();
+  /**
+   * 相手が選択同期で、一覧に載っていないキー(相手の選択の外)は、相手の版が見えていない ── 記録を落とさず持ち越す
+   * (落とすと、次の往復で相手の持っている版を「無い」と読み違える)。
+   */
+  const keepUnseen = (key: string): void => {
+    if (!remoteSelective) return;
+    const b = input.baseline[key];
+    if (b !== undefined) next[key] = b;
+  };
   const titleOf = (lid: string): string => input.localTitles.get(lid) ?? noteByLid.get(lid)?.title ?? lid;
 
   /** 取り込む親フォルダ。宛先が取り込み後に無ければルート(約束 6)。 */
@@ -308,6 +377,7 @@ export function planSyncImport(input: PlanInput): SyncPlan {
       case 'push-local':
       case 'push-delete':
         if (R !== undefined) next[d.key] = R;
+        else if (d.action === 'push-local') keepUnseen(d.key);
         return;
       case 'merge':
         // 印に place は無いので来ない。来たら相手の版を記録に残し、こちらはそのまま(次の書き出しで送る)
@@ -326,6 +396,13 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   };
 
   for (const d of decisions as readonly Decision[]) {
+    if (d.action !== 'noop' && isProtected(d.key)) {
+      // こちらを書き換える判定だけを数える(相手へ送る判定は、こちらを触らない)
+      if (d.action === 'take-remote' || d.action === 'trash-local' || d.action === 'merge' || d.action === 'conflict') s.skippedUnselected++;
+      const b = input.baseline[d.key];
+      if (b !== undefined) next[d.key] = b;
+      continue;
+    }
     if (isAttrKey(d.key)) {
       decideAttr(d);
       continue;
@@ -352,6 +429,8 @@ export function planSyncImport(input: PlanInput): SyncPlan {
         if (localFp.has(d.key)) next[d.key] = relationFp();
       } else if (R !== undefined) {
         next[d.key] = R;
+      } else if (d.action === 'push-local') {
+        keepUnseen(d.key);
       }
       continue;
     }
@@ -382,6 +461,7 @@ export function planSyncImport(input: PlanInput): SyncPlan {
       case 'push-delete':
         s.keptLocal++;
         if (R !== undefined) next[d.key] = R;
+        else if (d.action === 'push-local') keepUnseen(d.key);
         break;
       case 'merge': {
         const l = localFp.get(d.key) as KeyedState;
@@ -450,5 +530,30 @@ export function planSyncImport(input: PlanInput): SyncPlan {
   if (!carriesAttrs) {
     for (const [k, fp] of Object.entries(input.baseline)) if (isAttrKey(k)) next[k] = fp;
   }
-  return { upserts, trash, trashExpect, relationAdds, relationRemoves, labelSets, pinSets, baseline: nextBaseline(Object.entries(next).map(([key, fp]) => ({ key, ...fp }))), conflicts, needFull, summary: s };
+  // 🔴 こちらが選択同期: 新しく入るノートを直接指定へ足す(親がこちらの対象の下 / 今回入る新しいフォルダの下なら、足さなくても子孫で入る)
+  const selectiveSelectAdds: string[] = [];
+  if (ls !== undefined) {
+    const fresh = new Set(upserts.filter((u) => !u.existed).map((u) => u.lid));
+    for (const u of upserts) {
+      if (u.existed) continue;
+      const parent = u.place?.parentLid ?? null;
+      if (parent !== null && (ls.directAndDescendantLids.has(parent) || fresh.has(parent))) continue;
+      selectiveSelectAdds.push(u.lid);
+    }
+    selectiveSelectAdds.sort();
+  }
+  return {
+    upserts,
+    trash,
+    trashExpect,
+    relationAdds,
+    relationRemoves,
+    labelSets,
+    pinSets,
+    baseline: nextBaseline(Object.entries(next).map(([key, fp]) => ({ key, ...fp }))),
+    conflicts,
+    needFull,
+    selectiveSelectAdds,
+    summary: s,
+  };
 }

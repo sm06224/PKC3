@@ -1072,3 +1072,33 @@ describe('🔴 レビュー対応(段 4b-B): 別の置き場への切り替え�
     expect(unlocked.ok, '残った保管を消せるようになれば開ける').toBe(true);
   });
 });
+
+describe('🔴 選択同期(#2066 段 5-A)は S3(暗号化 / 平文)の同期の回でも効く', () => {
+  it('A で選んだノートだけが B に届く・私的なメモは届かない(暗号化)/ 平文の接続でも同じ(置き場の平文に私的な本文が無い)', async () => {
+    for (const encrypted of [true, false]) {
+      const s3 = fakeS3(SECRET);
+      const A = await rig('A', s3, encrypted ? {} : { e2e: false });
+      const B = await rig('B', s3, encrypted ? {} : { e2e: false });
+      await A.d.put('s', '共有のメモ', 'shared');
+      await A.d.put('x', '私的なメモ', 'PRIVATE-S3-CANARY');
+      await A.d.request({ op: 'syncSetSelectiveScope', cid: A.d.cid, mode: 'selective', related: 'off', add: ['s'] });
+      if (encrypted) {
+        await provisionFirst(A, s3);
+        await provisionNext(B, s3);
+      }
+      const form = encrypted ? FORM : plain(FORM);
+      expect(await A.sf.connectRemote(form)).toBe(true);
+      await A.sf.syncNow(true);
+      if (!encrypted) {
+        const body = Buffer.from(s3.objects.get(`pkc3/${folderFileName(await deviceId(A.d))}`)!.body);
+        expect(body.length, '対照: 平文のファイルが置かれた').toBeGreaterThan(0);
+        const f = await readDiffZip(new Blob([body]));
+        expect(f.manifest.version).toBe(3);
+        expect(f.container.notes.map((n) => n.lid)).toEqual(['s']);
+      }
+      expect(await B.sf.connectRemote(form)).toBe(true);
+      expect(B.fails).toEqual([]);
+      expect(await titles(B.d), `encrypted=${encrypted}`).toEqual(['共有のメモ']);
+    }
+  });
+});

@@ -132,6 +132,8 @@ export const QUOTA_ALLOWED_WRITES: readonly string[] = [
   'syncSnapshot',
   // 端末間の同期の記録を全部消す(#2000 段 2)── 行を消すだけ(減らす側)。空きが無くても消せる
   'syncForget',
+  // 選択同期の設定(#2066 段 5-A)── `settings` の数行(外すときは減る)。空きが無くても対象を付け外しできる
+  'syncSetSelectiveScope',
   // ワークスペース(#1455)── 切り替え・改名は 1 行を上書きするだけ。削除は減らす側。空きが無くても通す
   'switchWorkspace',
   'renameWorkspace',

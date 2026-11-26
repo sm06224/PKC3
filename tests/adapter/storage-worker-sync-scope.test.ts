@@ -259,3 +259,62 @@ describe('バックアップの書き出しは設定の表を読まない', () =
     expect(/FROM settings|SELECT[^;]*\bsettings\b/i.test(src)).toBe(false);
   });
 });
+
+describe('🔴 選択同期(#2066 段 5-A)の設定の行', () => {
+  const entry = (lid: string) => ({ lid, title: lid, archetype: 'text', body: 'b', entryOrder: 1, status: null, date: null, archived: false });
+
+  it('同期が切の間は 1 行も書かない(設定の op は断る・消しても削除の記録を書かない)/ 入なら書く / 人に渡す画像には入らない', async () => {
+    const w = await spawn();
+    await w.request({ op: 'init', dbName: 'sel1', memory: true });
+    await w.request({ op: 'openContainer', cid: 'c1', title: 'unit' });
+    await w.request({ op: 'syncConfigure', enabled: false });
+    await w.request({ op: 'upsertEntry', cid: 'c1', entry: entry('a'), checkpoint: true });
+    await w.request({ op: 'upsertEntry', cid: 'c1', entry: entry('b'), checkpoint: true });
+    await expect(w.request({ op: 'syncSetSelectiveScope', cid: 'c1', mode: 'selective', add: ['a'] })).rejects.toThrow('端末間の同期がオフ');
+    await w.request({ op: 'deleteEntry', cid: 'c1', lid: 'b' });
+    expect(await syncScopesIn((await w.request({ op: 'exportImage' })).image), '同期が切なのに同期の行が書かれた').toEqual([]);
+
+    await w.request({ op: 'syncConfigure', enabled: true });
+    await w.request({ op: 'syncSetSelectiveScope', cid: 'c1', mode: 'selective', related: 'recursive', add: ['a'] });
+    const full = await openRaw((await w.request({ op: 'exportImage' })).image);
+    try {
+      const ks = full.selectObjects(`SELECT k FROM settings WHERE scope = '__sync__:c1' ORDER BY k`).map((r) => String(r.k));
+      expect(ks, '対照: 入なら選択の行が在る').toEqual(['scope:mode', 'scope:related', 'sel:a']);
+    } finally {
+      full.close();
+    }
+    expect(await syncScopesIn((await w.request({ op: 'exportImage', withoutMessages: true })).image), '選択の行が人に渡る画像に入った').toEqual([]);
+    // 既定に戻すと行そのものが消える(読みの既定値の補完で同じ値に見えても、行が残っていれば落ちる)
+    await w.request({ op: 'syncSetSelectiveScope', cid: 'c1', mode: 'all', related: '1hop', remove: ['a'] });
+    const back = await openRaw((await w.request({ op: 'exportImage' })).image);
+    try {
+      expect(back.selectObjects(`SELECT k FROM settings WHERE scope = '__sync__:c1'`).map((r) => String(r.k)), '既定値の行が残った').toEqual([]);
+    } finally {
+      back.close();
+    }
+  }, 60_000);
+
+  it('ワークスペースの削除で、そのワークスペースの選択の行も消える(他のワークスペースは残る)', async () => {
+    const w = await spawn();
+    await w.request({ op: 'init', dbName: 'sel2', memory: true });
+    await w.request({ op: 'openContainer', cid: 'c1', title: 'unit' });
+    const other = (await w.request({ op: 'createWorkspace', title: '別' })).cid;
+    await w.request({ op: 'syncConfigure', enabled: true });
+    await w.request({ op: 'syncSetSelectiveScope', cid: 'c1', mode: 'selective', add: ['a'] });
+    await w.request({ op: 'syncSetSelectiveScope', cid: other, mode: 'selective', add: ['z'] });
+    await w.request({ op: 'deleteWorkspace', cid: other });
+    const scopes = await syncScopesIn((await w.request({ op: 'exportImage' })).image);
+    expect(scopes.includes(`__sync__:${other}`), '消したワークスペースの選択の行が残った').toBe(false);
+    expect(scopes.filter((s) => s === '__sync__:c1')).toHaveLength(2);
+  }, 60_000);
+
+  it('同期の記録を全部消す(syncForget)と、選択の行も消える', async () => {
+    const w = await spawn();
+    await w.request({ op: 'init', dbName: 'sel3', memory: true });
+    await w.request({ op: 'openContainer', cid: 'c1', title: 'unit' });
+    await w.request({ op: 'syncConfigure', enabled: true });
+    await w.request({ op: 'syncSetSelectiveScope', cid: 'c1', mode: 'selective', add: ['a'] });
+    await w.request({ op: 'syncForget' });
+    expect(await syncScopesIn((await w.request({ op: 'exportImage' })).image)).toEqual([]);
+  }, 60_000);
+});

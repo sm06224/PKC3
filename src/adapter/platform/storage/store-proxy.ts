@@ -157,6 +157,8 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'syncSeed',
   'syncMeasureNotes',
   'syncForget',
+  // 選択同期(#2066 段 5-A)の設定 ── 同期の対象の印(`__sync__:<cid>` の行)だけを書く。ノートは動かない
+  'syncSetSelectiveScope',
   // 中身を消す操作は、他タブへは onContainerWiped で知らせる
   'wipeStorage',
   // 中身を変えない保守(救出の読み出し / 詰め直し / 索引の作り直し / 検査の記録)

@@ -98,6 +98,8 @@ export const CORRUPT_BLOCKED_OPS: readonly string[] = [
   'syncSnapshot',
   // 🔴 同期の記録を消す(行を消す書き込み)。問題のある DB には打たない
   'syncForget',
+  // 🔴 選択同期の設定(#2066 段 5-A)── `settings` の行を書く。壊れた DB には打たない
+  'syncSetSelectiveScope',
   // 🔴 メッセージの追記(設計 doc §7、段②a)── 書き込みなので止める。
   //    断られた分は adapter 側の控え(IndexedDB)へ積み、書けるようになった時点で流し込む。
   'appendMessage',
