@@ -283,6 +283,10 @@ const OBJECT_LONE: readonly string[] = [
   //   画面に足したのは、既にある情報ペインの行 1 つで、別の面を作っていない。
   'clear-entry-owner',
   'set-entry-owner',
+  // ⚠ 2026-11-26(v4.0 Phase 1 / PR-03): ノートのページ設定を選ぶ / すべて戻す。出口は情報ペインの「ページ設定」の行 1 か所だけ
+  //   (担当と同じ形 ── 効く先は選んでいるノート)。別の面は作っていない(書式バーの「ページ設定」は次の PR-04 で足す)。
+  'reset-note-layout',
+  'set-note-layout',
   'close-other-note-tabs',
   'deliver-to-extension',
   'dual-bookmark-open',

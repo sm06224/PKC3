@@ -106,6 +106,19 @@ import {
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 import { canChangeKind } from '@features/flavor/kind-change';
 import { setTipTitle } from './tooltip';
+import { isPrintLayoutOn, paintPrintLayoutButton } from './note-layout';
+import { plainChoiceLabel } from './settings/default-mark';
+import {
+  EMPTY_NOTE_LAYOUT,
+  hasNoteLayout,
+  NOTE_LAYOUT_FIELDS,
+  NOTE_LAYOUT_LABELS,
+  noteLayoutApplies,
+  noteLayoutChoices,
+  readNoteLayout,
+  type NoteLayoutField,
+  type NoteLayoutSpec,
+} from '@features/page-layout';
 import { selectiveActive, SELECTIVE_ADD_LABEL, SELECTIVE_OUTSIDE_LABEL, SELECTIVE_REASON_LABELS, SELECTIVE_REMOVE_LABEL } from '@features/sync/selective-view';
 import { isReservedSyncLid } from '@features/sync/sync-guard';
 
@@ -281,6 +294,8 @@ export class InspectorRenderer {
    *   ⚠ lid で憶えると、同じノートを書き換えたときに古い枚数が残る。
    */
   private imgCount: { body: string; count: number } | null = null;
+  /** ページ設定の選択欄の控え(本文が同じなら前書きを読み直さない ── v4.0 Phase 1 / PR-03)。 */
+  private layoutOf: { body: string | null; spec: NoteLayoutSpec } | null = null;
 
   /**
    * 🔴 **チェック項目の件数**(#1216)。`imgCount` と同じ作り ── 本文の字を鍵に憶え、
@@ -1434,6 +1449,7 @@ export class InspectorRenderer {
     this.paintDate(meta, editing, blockedNote);
     this.paintOwner(state, meta, editing, blockedNote);
     this.paintSyncScope(state, meta);
+    this.paintPageLayout(state, meta, editing, blockedNote);
     this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
     //    「どこへ」書くのか分からない操作になる。⚠ 行の有無は形(= build 側)
@@ -1781,6 +1797,83 @@ export class InspectorRenderer {
   }
 
   /**
+   * 🔴 **ページ設定**を塗る(v4.0 Phase 1 / PR-03)。
+   *
+   * - 印刷レイアウト表示の切替(`aria-pressed`)── この端末の見方(`pkc3.print-layout`)。
+   * - このノートの紙面・余白・段組み・字体の 4 つの選択欄。先頭は常に「アプリの設定に従う」(選ぶとキーが前書きから消える)。
+   * - 1 つ以上ノート個別の指定があるときだけ「すべてアプリの設定に戻す」を押せる(片道を作らない)。
+   * - ⚠ 編集中などは担当・日付と同じ規律で押せなくする(断りの字を添える)。本文がまだ届いていない間は選べない。
+   * - ⚠ 器は使い回す(押す寸前の選択欄を作り直さない)。値は前書きから読む(本文が同じなら読み直さない)。
+   */
+  private paintPageLayout(state: AppState, meta: EntryMeta, editing: boolean, blockedNote: string): void {
+    const dd = this.rows.get('inspector-page-layout');
+    if (!dd) return;
+    const dt = dd.previousElementSibling;
+    const body = state.openBody?.lid === meta.lid ? state.openBody.body : null;
+    const failed = body === null && bodyLoadFailed(state);
+    const show = noteLayoutApplies(meta.lid, meta.archetype) && !failed;
+    dd.hidden = !show;
+    if (dt instanceof HTMLElement) dt.hidden = !show;
+    if (!show) return;
+    let toggle = dd.querySelector<HTMLButtonElement>('[data-pkc-action="toggle-print-layout"]');
+    let reset = dd.querySelector<HTMLButtonElement>('[data-pkc-action="reset-note-layout"]');
+    if (toggle === null || reset === null) {
+      dd.textContent = '';
+      toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.setAttribute('data-pkc-action', 'toggle-print-layout');
+      toggle.setAttribute('data-pkc-field', 'inspector-print-layout');
+      const grid = document.createElement('span');
+      grid.setAttribute('data-pkc-field', 'inspector-note-layout');
+      for (const f of NOTE_LAYOUT_FIELDS) {
+        const label = document.createElement('label');
+        const name = document.createElement('span');
+        name.textContent = NOTE_LAYOUT_LABELS[f];
+        const sel = document.createElement('select');
+        sel.setAttribute('data-pkc-action', 'set-note-layout');
+        sel.setAttribute('data-pkc-note-layout-field', f);
+        sel.setAttribute('aria-label', `このノートの${NOTE_LAYOUT_LABELS[f]}`);
+        const inherit = document.createElement('option');
+        inherit.value = '';
+        inherit.textContent = 'アプリの設定に従う';
+        sel.append(inherit);
+        for (const c of noteLayoutChoices(f)) {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = plainChoiceLabel(c.label);
+          sel.append(opt);
+        }
+        label.append(name, sel);
+        grid.append(label);
+      }
+      reset = document.createElement('button');
+      reset.type = 'button';
+      reset.setAttribute('data-pkc-action', 'reset-note-layout');
+      reset.textContent = 'すべてアプリの設定に戻す';
+      dd.append(toggle, grid, reset);
+    }
+    paintPrintLayoutButton(toggle, isPrintLayoutOn(document.documentElement));
+    if (this.layoutOf?.body !== body) this.layoutOf = { body, spec: body === null ? EMPTY_NOTE_LAYOUT : readNoteLayout(body) };
+    const spec = this.layoutOf.spec;
+    const locked = editing || body === null;
+    for (const sel of dd.querySelectorAll<HTMLSelectElement>('select[data-pkc-action="set-note-layout"]')) {
+      const f = sel.getAttribute('data-pkc-note-layout-field') as NoteLayoutField;
+      const v = spec[f] ?? '';
+      if (sel.value !== v) sel.value = v;
+      sel.disabled = locked;
+      const base = `このノートだけの${NOTE_LAYOUT_LABELS[f]}です。「アプリの設定に従う」を選ぶと、本文の先頭の情報から消えます`;
+      const tip = editing ? withBlockedNote(base, blockedNote) : base;
+      if (sel.title !== tip) sel.title = tip;
+    }
+    const any = hasNoteLayout(spec);
+    reset.disabled = locked || !any;
+    const resetBase = any
+      ? 'このノートのページ設定をすべて消して、アプリの設定に従うように戻します'
+      : 'このノートだけのページ設定はありません';
+    reset.title = editing ? withBlockedNote(resetBase, blockedNote) : resetBase;
+  }
+
+  /**
    * 🔴 **同期対象**を塗る(#2066 段 5-B)。
    * - 状態を言葉で出す(直接指定 / 親フォルダ配下 / 関連 / 親フォルダの階層のみ / 対象外)。
    * - ⚠ **置けるなら外せる**: 直接指定でなければ「同期対象にする」、直接指定なら「同期対象から外す」。
@@ -2050,6 +2143,12 @@ export class InspectorRenderer {
      * ⚠ 同期が入 かつ「選んだエントリだけ同期」のとき、user 領域のエントリだけ(それ以外は行ごと畳む)。
      */
     row('同期対象', 'inspector-sync-scope');
+    /**
+     * 🔴 **ページ設定**(v4.0 Phase 1 / PR-03)── 印刷レイアウト表示の切替と、このノートの紙面・余白・段組み・字体。
+     * ⚠ user 領域の文書だけ(フォルダ・system 領域では行ごと畳む ── `noteLayoutApplies`)。
+     */
+    card('page-layout');
+    row('ページ設定', 'inspector-page-layout');
     /**
      * 🔴 **見出しから自動で作る目次**(#493)。
      *

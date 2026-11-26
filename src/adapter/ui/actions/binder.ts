@@ -266,6 +266,8 @@ import { chooseColumnRule } from '@adapter/ui/render/column-rule';
 import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
+import { choosePrintLayout, refreshNoteLayout, togglePrintLayout } from '@adapter/ui/render/note-layout';
+import { CLEAR_NOTE_LAYOUT, noteLayoutPatchFor, printLayoutToggledText } from '@features/page-layout';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
 import { isCheckedValue, joinGroupValue, normalizeDatetime, parseGroupValue } from '@features/markdown/form-def';
@@ -3756,6 +3758,9 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔴 ノートの担当を書く / 外すのも前書きを書く(#283)── 日付と同じ門
   'set-entry-owner',
   'clear-entry-owner',
+  // 🔴 ノートのページ設定を書く / 戻すのも前書きを書く(v4.0 Phase 1 / PR-03)── 担当と同じ門
+  'set-note-layout',
+  'reset-note-layout',
   // 🔴 ワークスペースの操作(#1455)── 取り込み・書き出しの最中に器を足したり替えたり消したりしない(切り替えは読み込み直しも伴う)
   'workspace-create',
   'workspace-switch',
@@ -7608,6 +7613,18 @@ export function runGlobalCommand(
     if (dry) return true;
     prevent();
     cycleReadColumns(root, notify);
+    // 🔴 印刷レイアウト表示の紙の中の段数も当て直す(v4.0 Phase 1 / PR-03)
+    refreshNoteLayout();
+    return true;
+  }
+  /**
+   * 🔴 **印刷レイアウト表示を切り替える**(v4.0 Phase 1 / PR-03)。⚠ 情報ペインのボタン(`toggle-print-layout`)と
+   *   同じ関数を呼ぶ ── ボタンは本文の画面でしか出ないので、操作を探す・ショートカットキーからは直に受ける。
+   */
+  if (cmd === 'toggle-print-layout') {
+    if (dry) return true;
+    prevent();
+    notify(printLayoutToggledText(togglePrintLayout(document.documentElement)));
     return true;
   }
   if (cmd === 'toggle-focus-mode') {
@@ -17855,6 +17872,52 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'cycle-read-columns': (_dispatcher, _target, services, root) => {
     cycleReadColumns(root, (text) => services.showStatus?.(text));
+    refreshNoteLayout();
+  },
+  /**
+   * 🔴 **印刷レイアウト表示を切り替える**(v4.0 Phase 1 / PR-03。情報ペインの「ページ設定」のボタン)。
+   * ⚠ ショートカットキー・操作を探すと**同じ関数**(`togglePrintLayout`)── 切替の規則を 2 か所に置かない。
+   */
+  'toggle-print-layout': (_dispatcher, _target, services) => {
+    services.showStatus?.(printLayoutToggledText(togglePrintLayout(document.documentElement)));
+  },
+  /** 設定の画面の「印刷レイアウト表示」のチェック(押した後の値をそのまま当てる)。 */
+  'set-print-layout': (_dispatcher, target, services) => {
+    if (!(target instanceof HTMLInputElement)) return;
+    choosePrintLayout(document.documentElement, target.checked);
+    services.showStatus?.(printLayoutToggledText(target.checked));
+  },
+  /**
+   * 🔴 **このノートのページ設定を 1 項目変える**(v4.0 Phase 1 / PR-03。情報ペインの選択欄)。
+   * 先頭の「アプリの設定に従う」(値 `''`)は、その項目のキーを前書きから消す ── 片道を作らない。
+   * ⚠ 断り(編集中・読み取り専用・取り込み中)は reducer が声に出す(`SET_NOTE_LAYOUT`)。
+   */
+  'set-note-layout': (dispatcher, target, services) => {
+    if (!(target instanceof HTMLSelectElement)) return;
+    const field = target.getAttribute('data-pkc-note-layout-field');
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null || field === null) return;
+    const patch = noteLayoutPatchFor(field, target.value);
+    if (patch === null) return;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      'ページ設定を変えられませんでした(別のタブの編集を確かめられませんでした)。もう一度選んでください',
+      () => dispatcher.dispatch({ type: 'SET_NOTE_LAYOUT', lid, patch }),
+    );
+  },
+  /** 🔴 **このノートのページ設定をすべてアプリの設定に戻す**(4 つのキーを前書きから消す)。 */
+  'reset-note-layout': (dispatcher, _target, services) => {
+    const lid = dispatcher.getState().selectedLid;
+    if (lid === null) return;
+    actUnlessEditedElsewhere(
+      dispatcher,
+      services,
+      [lid],
+      'ページ設定を戻せませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+      () => dispatcher.dispatch({ type: 'SET_NOTE_LAYOUT', lid, patch: CLEAR_NOTE_LAYOUT }),
+    );
   },
   /**
    * 🔴 **いま読んでいるノートを横へ留める**(#505 段②)。

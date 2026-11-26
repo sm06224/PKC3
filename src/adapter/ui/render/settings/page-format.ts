@@ -9,6 +9,8 @@
  */
 import { DEFAULT_PAGE_FORMAT, PAGE_FORMATS } from '@features/page-format';
 import { currentPageFormat } from '../page-format';
+import { isPrintLayoutOn } from '../note-layout';
+import { buildCheckboxRow, syncCheckbox } from './checkbox';
 import { markDefault } from './default-mark';
 import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
@@ -39,7 +41,21 @@ export function createPageFormatSection(region: HTMLElement): SettingsSection {
       }
       pd.append(pselect);
       pd.append(buildSettingsNote('読み幅が決まります。印刷の紙は A4 / A3 のときだけ決まり、ほかはブラウザの既定です。'));
-      return [pt, pd];
+      /**
+       * 🔴 **印刷レイアウト表示**(v4.0 Phase 1 / PR-03)── 情報ペインの「ページ設定」の切替と同じ保存(`pkc3.print-layout`)。
+       * ⚠ flag ではない(正規設定)。この端末の見方なので container には入れない。
+       */
+      const print = buildCheckboxRow({
+        term: '印刷レイアウト表示',
+        action: 'set-print-layout',
+        field: 'print-layout',
+        label: ' 本文を印刷する1 枚の紙のように表示する',
+        title:
+          '本文を、印刷する紙の大きさ・余白で、1 枚の紙のように中央に表示します。改ページ(+++)の位置も見えます。' +
+          'フル HD・4:3 などの画面用のページ設定では A4 縦を紙の基準にします。情報ペインの「ページ設定」からも切り替えられます。',
+        notes: ['ノートごとの用紙・余白・段組み・字体は、情報ペインの「ページ設定」で変えられます。'],
+      });
+      return [pt, pd, print.dt, print.dd];
     },
     /**
      * ⚠ 画面の値を**いまの紙面に合わせる**(2026-08-08)。
@@ -55,6 +71,7 @@ export function createPageFormatSection(region: HTMLElement): SettingsSection {
       // ⚠ 正本は DOM(`applyPageFormat` が当てた属性)── 保存を読み直さない
       const cur = currentPageFormat(document.documentElement);
       if (select && select.value !== cur) select.value = cur;
+      syncCheckbox(region, 'print-layout', () => isPrintLayoutOn(document.documentElement));
     },
   };
 }

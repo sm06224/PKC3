@@ -23,10 +23,11 @@ import {
   syncShownBodies,
 } from '../app-state';
 import { isAppendable } from '@features/flavor/append-spec';
+import { noteLayoutApplies, noteLayoutKeys } from '@features/page-layout';
 import { applyBodyRewrite } from '@features/markdown/body-rewrite';
 import { BLOCK_MOVED_NOTICE, moveLinesWithInverse } from '@features/markdown/line-move';
 
-export type BlockOpsAction = Extract<Dispatchable, { type: 'MOVE_BLOCK' | 'SPLIT_CHAPTER' | 'RESTORE_CHAPTER' | 'HANDOFF_BLOCK' | 'INSERT_LINES' | 'UNDO_MOVE' | 'SET_ENTRY_DATE' | 'TOGGLE_TODO_STATUS' | 'BODY_REWRITTEN' }>;
+export type BlockOpsAction = Extract<Dispatchable, { type: 'MOVE_BLOCK' | 'SPLIT_CHAPTER' | 'RESTORE_CHAPTER' | 'HANDOFF_BLOCK' | 'INSERT_LINES' | 'UNDO_MOVE' | 'SET_ENTRY_DATE' | 'SET_NOTE_LAYOUT' | 'TOGGLE_TODO_STATUS' | 'BODY_REWRITTEN' }>;
 
 export function reduceBlockOps(state: AppState, action: BlockOpsAction): ReduceResult {
   switch (action.type) {
@@ -275,6 +276,34 @@ export function reduceBlockOps(state: AppState, action: BlockOpsAction): ReduceR
               ...(action.time === undefined ? {} : { time: action.time }),
               ...(action.raw === undefined ? {} : { raw: action.raw }),
             },
+          },
+        ],
+      };
+    }
+    /**
+     * 🔴 **ノート 1 件のページ設定**(v4.0 Phase 1 / PR-03)── 前書きの 4 つのキーを足す / 書き換える / 消す。
+     * 🔑 書換は既存の `frontmatter` 1 本(`spliceFrontmatterKeys`)── 新しい書込経路を作らない(`SET_ENTRY_OWNER` と同じ)。
+     * ⚠ 断りは lid で判定する(編集中・読み取り専用・取り込み中は声に出して断る)。
+     * ⚠ フォルダ・system 領域のノートには書かない(画面にも出していない ── 撃たれても no-op)。
+     */
+    case 'SET_NOTE_LAYOUT': {
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return { state: { ...state, error: blockedWithSuffix(blocked, 'ページ設定を変えてください') }, events: [] };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta || !noteLayoutApplies(meta.lid, meta.archetype)) return { state, events: [] };
+      const keys = noteLayoutKeys(action.patch);
+      if (Object.keys(keys).length === 0) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'frontmatter', keys },
           },
         ],
       };

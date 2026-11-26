@@ -58,6 +58,9 @@ import {
   type PageFormat,
 } from '../page-format';
 import { DEFAULT_PROSE_ALIGN, proseAlignCss, type ProseAlign } from '../prose-align';
+import { DEFAULT_FONT, fontSpec, type FontChoice } from '../appearance-choice';
+import { hasNoteLayout, readNoteLayout, resolveEffectiveLayout, type NoteLayoutSpec, type PageMargin } from '../page-layout';
+import { DEFAULT_READ_COLUMNS } from '../read-columns';
 import type { ArchiveSource } from './pkc3-archive';
 import { insertPlacedNoteTitles } from './placed-note-title';
 import { MINUS_LIKE, PLAIN_DECIMAL } from '../markdown/table-sort-key';
@@ -229,12 +232,20 @@ export async function* base64Chunks(blob: Blob): AsyncGenerator<string> {
 }
 
 /**
+ * ノートの字体の指定(`page_font`)を焼く分。⚠ 指定が無ければ空文字(従来の出力のまま)。
+ * 器(`body`)に `--font` を置き、本文の箱(`.b`)の字体をそれで当て直す。
+ */
+function noteFontCss(font: FontChoice | null): string {
+  return font === null ? '' : `body{--font:${fontSpec(font).ui}}.b{font-family:var(--font)}`;
+}
+
+/**
  * 閲覧 UI(依存ゼロ・インライン)。**読めるだけ**に留める(P7 の Pages product が本番)。
  *
  * ⚠ **紙面フォーマットを受ける**(2026-08-08)ので関数である ── 書き出した瞬間の
  * 設定を焼く。器(`<body>`)に印を 1 つ付け、値の差し替えは style の末尾で行う。
  */
-function viewer(pageFormat: PageFormat, proseAlign: ProseAlign): string {
+function viewer(pageFormat: PageFormat, proseAlign: ProseAlign, margin: PageMargin | null = null, font: FontChoice | null = null): string {
   return `
 <style>
 :root{color-scheme:light dark}
@@ -409,7 +420,7 @@ object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
    ⚠ 値の正本は features/page-format.ts の表 1 枚(アプリの tokens.css と同じ値)。
    ⚠ 紙系(A4 / A3)のときだけ @page が出る ── 画面用(フル HD / 4:3)は
      受け手の既定紙に任せる。 */
-${pageFormatCss(pageFormat)}
+${pageFormatCss(pageFormat, margin)}${noteFontCss(font)}
 /* 🔴 **本文の置き場所**(#722、2026-09-08)── 書き出した瞬間の設定を焼く。
    ⚠ 当たる先は上と同じ**器の body 要素**(data-pkc-prose-align を下に付けてある)で、
      焼いたトークンの :root{--prose-lead:auto} とは**別の要素**である ──
@@ -1122,6 +1133,8 @@ export async function writePortableHtml(
   const assetKeys = allAssets.map((a) => a.key).filter((k) => k !== '');
 
   let entryCount = 0;
+  /** ノート 1 件だけの書き出しで、そのノートにページ設定が書いてあればその値(v4.0 Phase 1 / PR-03)。 */
+  let singleLayout: NoteLayoutSpec | null = null;
   /**
    * 🔴 **入っていないノートへのリンクを数える**(#1087 の見直し 2026-10-13)── 閲覧側ではそのリンクを押せない字に
    *   するが、渡す側には何も言っていなかった(会議メモは別ノートへのリンクが多い ── 渡してから気づく)。
@@ -1144,6 +1157,10 @@ export async function writePortableHtml(
           `本文はあるが一覧に無いノートを飛ばしました: ${r.lid}`,
         );
         continue;
+      }
+      if (metas.length === 1) {
+        const layout = readNoteLayout(r.body);
+        if (hasNoteLayout(layout)) singleLayout = layout;
       }
       const { skip, refs } = frontmatterAssets(r.body);
       for (const ref of refs) {
@@ -1316,7 +1333,16 @@ export async function writePortableHtml(
     assetCount++;
   }
   parts.push('}}');
-  parts.push('</script>', viewer(pageFormat, proseAlign));
+  /**
+   * 🔴 **ノート 1 件の書き出しは、そのノートのページ設定を優先する**(v4.0 Phase 1 / PR-03)── 前書きの
+   *   `page_format` / `page_margin` / `page_font` を読み幅・`@page`・字体へ焼く。
+   * ⚠ 書いていないノート・複数件の書き出しは従来と 1 バイトも変わらない(引数をそのまま渡す)。
+   */
+  const eff = singleLayout === null ? null : resolveEffectiveLayout(singleLayout, { pageFormat, readColumns: DEFAULT_READ_COLUMNS, font: DEFAULT_FONT });
+  parts.push(
+    '</script>',
+    eff === null ? viewer(pageFormat, proseAlign) : viewer(eff.pageFormat, proseAlign, eff.pageMargin, singleLayout!.pageFont),
+  );
 
   // 🔴 畳んだぶんの行をここで足す(#202)── 呼ばないと「超えた件数」が消える
   warn.finish();

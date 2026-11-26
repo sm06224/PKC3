@@ -48,6 +48,27 @@ export const READ_COLUMNS_VAR = '--pkc-read-cols';
 export const COLUMNS_ON_ATTR = 'data-pkc-columns-on';
 
 /**
+ * 🔴 **ノートが段組みを指定しているときだけ器に付く印**(v4.0 Phase 1 / PR-03。前書きの `page_columns`)。
+ * 当てるのは `note-layout.ts`、読むのはここ(段数の判定)── 綴りの正本をここに置くのは循環 import を避けるため。
+ */
+export const NOTE_COLUMNS_ATTR = 'data-pkc-note-columns';
+
+/**
+ * 🔴 **印刷レイアウト表示の印**(`<html>` に付く。v4.0 Phase 1 / PR-03)。入の間は横送りの段組みを止める
+ * (紙のシートの中で縦流しの段組みにする ── `app.css`)。当てるのは `note-layout.ts`。
+ */
+export const PRINT_LAYOUT_ATTR = 'data-pkc-print-layout';
+
+/**
+ * 🔴 **器の上で効いている段数**(段数の出どころを 1 か所に)。
+ * ノートが段組みを指定していればそれ(器の印)、無ければアプリの設定(`<html>` の印)。
+ */
+export function effectiveReadColumnsFor(pane: Element | null, root: HTMLElement): ReadColumns {
+  const v = pane?.getAttribute(NOTE_COLUMNS_ATTR) ?? null;
+  return v !== null && isReadColumns(v) ? v : currentReadColumns(root);
+}
+
+/**
  * 🔴 **段の高さを CSS へ渡す変数**(#527)。⚠ **パーセントでは効かない**ので px で渡す
  * (多段組の中では高さのパーセントが解決できない ── 実測)。
  * ⚠ 予備の値を書かない `var()` は**宣言ごと捨てられる**ので、当てる側は必ず既定を書く
@@ -360,7 +381,13 @@ export function fitColumnHeight(root: ParentNode, doc: Document = document): num
   };
   // ⚠ 切るときは**印も高さも外す** ── どちらかが残ると、縦送りの面が刈られる
   if (host === null || pane === null) return off();
-  const count = readColumnsSpec(currentReadColumns(doc.documentElement)).count;
+  /**
+   * 🔴 **印刷レイアウト表示の間は横送りの段組みを止める**(v4.0 Phase 1 / PR-03)── 固定の高さの横送りは
+   *   紙のシートを壊す。段組みは紙の中で縦流しにする(`app.css` の印刷レイアウトの節)。
+   */
+  if (doc.documentElement.getAttribute(PRINT_LAYOUT_ATTR) === '1') return off();
+  // 🔴 ノートが段組みを指定していれば、それを使う(v4.0 Phase 1 / PR-03)
+  const count = readColumnsSpec(effectiveReadColumnsFor(pane, doc.documentElement)).count;
   const before = pane.getBoundingClientRect();
   // ⚠ 採寸できない環境(happy-dom / 畳んだ面)では触らない ── 0px にすると本文が消える
   if (before.height === 0 || before.width === 0) return null;
@@ -613,7 +640,8 @@ export function installColumnFit(root: HTMLElement, doc: Document = document): (
        *   ⚠ 消すなら「面の高さが変わらない切替」を作る test と対で消すこと。
        */
       inner?.observe(pane, { childList: true });
-      inner?.observe(pane, { attributes: true, attributeFilter: ['data-pkc-detail-mode'] });
+      // 🔴 ノートの段組みの指定(`page_columns`)が変わったときも測り直す(v4.0 Phase 1 / PR-03)
+      inner?.observe(pane, { attributes: true, attributeFilter: ['data-pkc-detail-mode', NOTE_COLUMNS_ATTR] });
       watched = pane;
     }
     fit();
@@ -643,7 +671,8 @@ export function installColumnFit(root: HTMLElement, doc: Document = document): (
   const rootAttrs = MO === undefined ? null : new MO(fit);
   rootAttrs?.observe(doc.documentElement, {
     attributes: true,
-    attributeFilter: [READ_COLUMNS_ATTR, TEXT_SCALE_ATTR],
+    // 🔴 印刷レイアウト表示の切替でも測り直す(入では横送りを止める ── v4.0 Phase 1 / PR-03)
+    attributeFilter: [READ_COLUMNS_ATTR, TEXT_SCALE_ATTR, PRINT_LAYOUT_ATTR],
   });
 
   /**
@@ -684,8 +713,10 @@ export function installColumnFit(root: HTMLElement, doc: Document = document): (
  */
 export function installColumnWheel(root: HTMLElement, doc: Document = document): () => void {
   const onWheel = (ev: WheelEvent): void => {
-    // ⚠ 1 段のときは**何もしない**(ふつうの縦送りを奪わない)
-    if (currentReadColumns(doc.documentElement) === '1') return;
+    // ⚠ 1 段のときは**何もしない**(ふつうの縦送りを奪わない)。🔴 ノートの段組みの指定も見る(v4.0 Phase 1 / PR-03)
+    if (effectiveReadColumnsFor(root.querySelector('[data-pkc-view-pane="detail"]'), doc.documentElement) === '1') return;
+    // ⚠ 印刷レイアウト表示の間は横送りしない(紙の中は縦流し)
+    if (doc.documentElement.getAttribute(PRINT_LAYOUT_ATTR) === '1') return;
     const host = columnScroller(root);
     if (host === null) return;
     // ⚠ その器の中で起きたホイールだけ(右の情報ペインの送りを奪わない)

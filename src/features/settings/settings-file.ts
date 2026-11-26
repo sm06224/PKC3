@@ -105,6 +105,8 @@ export const PORTABLE_KEYS: readonly PortableKey[] = [
   { key: 'pkc3.editor-mode', label: '編集の仕方', valid: (v) => isEditorMode(v) },
   { key: 'pkc3.open-in-edit', label: '「開く」で編集に入るか', valid: isOnOff },
   { key: 'pkc3.page-format', label: 'ページ設定', valid: (v) => isPageFormat(v) },
+  // 🔴 印刷レイアウト表示(v4.0 Phase 1 / PR-03)── ページ設定と対。見たい形は人に付くので運ぶ(入 = '1' のときだけ鍵が在る)
+  { key: 'pkc3.print-layout', label: '印刷レイアウト表示', valid: (v) => v === '1' },
   /**
    * ⚠ **紙面と対**(#722、2026-09-08)── 片方だけ運ぶと「読み幅は移ったのに
    *   置き場所は既定」になる。⚠ 別の端末でも**同じ意味**になる

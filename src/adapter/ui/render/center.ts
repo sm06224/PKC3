@@ -7,6 +7,7 @@
  * 非 active pane には render を呼ばない(裏で毎 state 仕事をしない)──
  * active 化した瞬間の render が指紋差分で追いつく。
  */
+import { noteLayoutBodyOf, syncNoteLayout } from './note-layout';
 import type { AppState, ViewMode } from '@adapter/state/app-state';
 import { DetailRenderer, type AssetLender } from './detail';
 import { SplitView } from './split-view';
@@ -459,6 +460,12 @@ export class CenterRouter {
     //    ここへ足し忘れると、`PaneView` の網羅で tsc が落ちる形にはならないので
     //    「開いたのに何も描かれない」になる。足したら必ずここにも 1 行足す
     else this.help.render(state.cid ?? '');
+    /**
+     * 🔴 **開いているノートのページ設定を中央の本文の器へ当てる**(v4.0 Phase 1 / PR-03)。
+     * ⚠ 本文の画面以外(設定・ヘルプ等)では `null` を渡して器の上書きを外し、`@page` をアプリの紙面へ戻す。
+     * ⚠ 値が変わらなければ何も書かない(`syncNoteLayout` の規律)── 毎回の描画で呼んでよい。
+     */
+    syncNoteLayout(this.panes.detail, view === 'detail' ? noteLayoutBodyOf(state) : null);
     // ② 🔴 **面が入れ替わったときだけ戻す**(2 手のうち②)。
     if (switched) this.restoreScroll(view);
   }
