@@ -16,7 +16,7 @@ import {
   bodyWriteBlockResult,
 } from '../app-state';
 
-export type BodyEditAction = Extract<Dispatchable, { type: 'SET_TASK_DATE' | 'SET_TASK_REPEAT' | 'ADOPT_EXTERNAL_IMAGES' | 'SET_CSV_CELL' | 'SET_FORM_VALUES' | 'SET_FORM_ROW' | 'SET_CSV_SHAPE' | 'SET_TABLE_FORMAT' | 'SET_IMAGE_ATTRS' | 'TOGGLE_TASK' | 'SET_COLOR_CODE' | 'SET_ATTACHMENT_NAME' | 'FIX_SPEAKERS' | 'SET_TASK_RUN' | 'MATERIALIZE_REPEAT' | 'MOVE_REPEAT_OCCURRENCE' }>;
+export type BodyEditAction = Extract<Dispatchable, { type: 'SET_TASK_DATE' | 'SET_TASK_REPEAT' | 'ADOPT_EXTERNAL_IMAGES' | 'SET_CSV_CELL' | 'SET_FORM_VALUES' | 'SET_FORM_ROW' | 'SET_CSV_SHAPE' | 'SET_TABLE_FORMAT' | 'SET_IMAGE_ATTRS' | 'SET_WIDGET_STATE' | 'TOGGLE_TASK' | 'SET_COLOR_CODE' | 'SET_ATTACHMENT_NAME' | 'FIX_SPEAKERS' | 'SET_TASK_RUN' | 'MATERIALIZE_REPEAT' | 'MOVE_REPEAT_OCCURRENCE' }>;
 
 export function reduceBodyEdit(state: AppState, action: BodyEditAction): ReduceResult {
   switch (action.type) {
@@ -328,6 +328,36 @@ export function reduceBodyEdit(state: AppState, action: BodyEditAction): ReduceR
               ...(action.w !== undefined ? { w: action.w } : {}),
               ...(action.align !== undefined ? { align: action.align } : {}),
             },
+          },
+        ],
+      };
+    }
+    /** 🔴 **ウィジェットの状態ブロック**(PR-08)。⚠ `SET_IMAGE_ATTRS` と同じ形 ── 書換は 1 本を通る。 */
+    case 'SET_WIDGET_STATE': {
+      const blocked = bodyWriteBlockReason(state, action.lid);
+      if (blocked !== null)
+        return {
+          state: {
+            ...state,
+            error: blockedWithSuffix(
+              blocked,
+              action.state === null ? 'ウィジェットの状態を初期化してください' : 'ウィジェットの状態をノートに保存してください',
+            ),
+          },
+          events: [],
+        };
+      const meta = state.entryMetas.get(action.lid);
+      if (!meta) return { state, events: [] };
+      return {
+        state,
+        events: [
+          {
+            type: 'REQUEST_BODY_REWRITE',
+            lid: meta.lid,
+            title: meta.title,
+            archetype: meta.archetype,
+            entryOrder: meta.entryOrder,
+            rewrite: { kind: 'widget-state', widgetId: action.widgetId, state: action.state === null ? null : { ...action.state } },
           },
         ],
       };

@@ -12,11 +12,21 @@
  * 6. 「状態を初期化」で保存が消え、はじめの状態で置き直される(押せる / 押せないも合う)
  * 7. 別のノートへ持ち越された箱は、前のノートの領域へ書かない
  * 8. ノートを完全に消したら、そのノートのウィジェットの保存も消える
+ *
+ * PR-08(ビジョン 5-B):
+ * 9. 🔴 `readNoteContext` / `readTables` / `readFrontmatter` は**置いたノート 1 件**の前書きと表だけを返す。
+ *    なりすまし・別ノートへ持ち越された箱・登録の無い箱には空を返す
+ * 10. 「ノートへ保存」で本文に状態ブロックを書き、端末の保存を消して置き直すとブロックから元どおりになる
+ * 11. 🔴 「状態を初期化」で端末の保存と本文の状態ブロックの両方が消え、置き直しても復活しない
+ * 12. 🔴 箱の合図からは本文を書かない(書くのは親のボタンだけ)
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   hydrateWidgets,
   installWidgetBridge,
+  resolveWidgetSeed,
+  setWidgetNoteHost,
+  type WidgetNoteHost,
   keepWidgetSeedFresh,
   remountStaleWidgets,
   WIDGET_LID_ATTR,
@@ -31,6 +41,8 @@ import {
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { buildHtmlSandboxIframe } from '../../src/features/markdown/html-sandbox';
 import {
+  WIDGET_CONTEXT_REQ_MSG_TYPE,
+  WIDGET_CONTEXT_RES_MSG_TYPE,
   WIDGET_READY_MSG_TYPE,
   WIDGET_STORAGE_LIMIT,
   WIDGET_TOTAL_STORAGE_LIMIT,
@@ -40,6 +52,13 @@ import {
 } from '../../src/features/markdown/widget-bridge';
 import { resetAppDialogForTest, DIALOG_REGION } from '../../src/adapter/ui/render/app-dialog';
 import { hydrateReact, setReactRuntimeLoader } from '../../src/adapter/ui/render/react-sandbox';
+import {
+  readWidgetStateBlock,
+  removeWidgetStateBlock,
+  upsertWidgetStateBlock,
+} from '../../src/features/markdown/widget-state-block';
+import { applyBodyRewrite } from '../../src/features/markdown/body-rewrite';
+import { reduce, initialState, type AppState } from '../../src/adapter/state/app-state';
 
 type FakeWin = { posted: unknown[]; postMessage: (m: unknown) => void };
 const fakeWin = (): FakeWin => {
@@ -97,6 +116,7 @@ beforeEach(() => {
 afterEach(() => {
   off?.();
   off = null;
+  setWidgetNoteHost(null);
   vi.unstubAllGlobals();
   setReactRuntimeLoader(null);
 });
@@ -465,5 +485,269 @@ describe('ゴミ箱を空にする配線(store-port)', () => {
     await port.purgeTrash();
     expect(hasWidgetStorage('kept', 'a')).toBe(false);
     expect(hasWidgetStorage('alive', 'a'), 'ゴミ箱に無いノートの保存が消えた').toBe(true);
+  });
+});
+
+/** 本文を持つ親の口(reducer の代わりに、書く側の純関数で本文を書き換える)。 */
+function fakeHost(bodies: Record<string, string>): WidgetNoteHost & { calls: string[]; fails: string[]; blocked: string | null } {
+  const h = {
+    calls: [] as string[],
+    fails: [] as string[],
+    blocked: null as string | null,
+    bodyOf: (lid: string) => bodies[lid] ?? null,
+    writeBlockReason: () => h.blocked,
+    saveState: (lid: string, wid: string, state: Readonly<Record<string, string>>) => {
+      h.calls.push(`save:${lid}:${wid}`);
+      const r = upsertWidgetStateBlock(bodies[lid] ?? '', wid, state);
+      if (r.ok) bodies[lid] = r.body;
+    },
+    removeState: (lid: string, wid: string) => {
+      h.calls.push(`remove:${lid}:${wid}`);
+      bodies[lid] = removeWidgetStateBlock(bodies[lid] ?? '', wid);
+    },
+    fail: (m: string) => {
+      h.fails.push(m);
+    },
+  };
+  return h;
+}
+
+const ask = (id: string, reqId: number): Record<string, unknown> => ({ type: WIDGET_CONTEXT_REQ_MSG_TYPE, id, reqId });
+const answers = (w: FakeWin): { reqId: number; context: { frontmatter: Record<string, unknown>; tables: unknown[] } }[] =>
+  w.posted.filter((m) => (m as { type?: string }).type === WIDGET_CONTEXT_RES_MSG_TYPE) as never;
+const NOTE_L1 = '---\ntitle: 家計\nbudget: 5000\n---\n| 品目 | 金額 |\n|---|---|\n| 米 | 2000 |\n\n```html id="sum"\n<p>x</p>\n```\n';
+const NOTE_L2 = '---\nsecret: 他のノート\n---\n```csv\na,b\n9,9\n```\n';
+
+describe('🔴 同じノートのデータの読み取り(PR-08)', () => {
+  it('🔴 登録した箱には、置いたノート 1 件の前書きと表だけを返す', () => {
+    setWidgetNoteHost(fakeHost({ L1: NOTE_L1, L2: NOTE_L2 }));
+    const { body, scope } = mount('L1', NOTE_L1);
+    const f = frameOf(body);
+    const w = giveWindow(f);
+    post(ask(f.getAttribute('data-pkc-html-render-id')!, 7), w);
+    const got = answers(w);
+    expect(got).toHaveLength(1);
+    expect(got[0]!.reqId).toBe(7);
+    expect(got[0]!.context.frontmatter).toEqual({ title: '家計', budget: 5000 });
+    expect(got[0]!.context.tables).toEqual([{ index: 0, kind: 'markdown', headers: ['品目', '金額'], rows: [['米', '2000']] }]);
+    // 他のノートの字は 1 字も来ない
+    expect(JSON.stringify(w.posted)).not.toContain('他のノート');
+    scope.dispose();
+  });
+
+  it('🔴 なりすまし(別の窓が箱の id を名乗る)・登録の無い箱・持ち越された箱には空を返す', () => {
+    setWidgetNoteHost(fakeHost({ L1: NOTE_L1, L2: NOTE_L2 }));
+    const { body, scope } = mount('L1', NOTE_L1);
+    const f = frameOf(body);
+    const id = f.getAttribute('data-pkc-html-render-id')!;
+    giveWindow(f);
+    // ① 別の窓が箱の id を名乗る
+    const spoof = fakeWin();
+    post(ask(id, 1), spoof);
+    expect(answers(spoof)).toEqual([{ type: WIDGET_CONTEXT_RES_MSG_TYPE, reqId: 1, context: { frontmatter: {}, tables: [] } }]);
+    // ② id= の無い(登録の無い)箱
+    const plain = document.createElement('div');
+    plain.setAttribute(WIDGET_LID_ATTR, 'L1');
+    plain.innerHTML = buildHtmlSandboxIframe('<p>y</p>', '', 0);
+    document.body.append(plain);
+    const pf = plain.querySelector('iframe')!;
+    const pw = giveWindow(pf);
+    post(ask(pf.getAttribute('data-pkc-html-render-id')!, 2), pw);
+    expect(answers(pw)[0]!.context).toEqual({ frontmatter: {}, tables: [] });
+    // ③ 別のノート(L2)へ持ち越された箱 ── L2 の本文も L1 の本文も返さない
+    const w = giveWindow(f);
+    body.setAttribute(WIDGET_LID_ATTR, 'L2');
+    post(ask(id, 3), w);
+    expect(answers(w)[0]!.context).toEqual({ frontmatter: {}, tables: [] });
+    // ④ reqId の無い問い合わせは捨てる
+    post({ type: WIDGET_CONTEXT_REQ_MSG_TYPE, id }, w);
+    expect(answers(w)).toHaveLength(1);
+    scope.dispose();
+  });
+
+  it('🔴 保存しない面(プレビュー・埋め込み)の id= の箱には空を返す', () => {
+    setWidgetNoteHost(fakeHost({ L1: NOTE_L1 }));
+    const body = document.createElement('div');
+    body.setAttribute(WIDGET_LID_ATTR, 'L1');
+    body.innerHTML = renderMarkdown(NOTE_L1, {});
+    document.body.append(body);
+    const f = body.querySelector<HTMLIFrameElement>('iframe')!;
+    const w = giveWindow(f);
+    post(ask(f.getAttribute('data-pkc-html-render-id')!, 1), w);
+    expect(answers(w)[0]!.context).toEqual({ frontmatter: {}, tables: [] });
+  });
+
+  it('箱の中の口(readTables / readFrontmatter / readNoteContext)と、答えの来ないときの空', () => {
+    const f = buildHtmlSandboxIframe('<p>z</p>', '', 0);
+    const doc = f.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    expect(doc).toContain('api.readNoteContext=');
+    expect(doc).toContain('api.readTables=');
+    expect(doc).toContain('api.readFrontmatter=');
+    expect(doc).toContain(WIDGET_CONTEXT_REQ_MSG_TYPE);
+    expect(doc).toContain(WIDGET_CONTEXT_RES_MSG_TYPE);
+    // 🔴 答えは親(e.source===parent)からの物だけ受ける(同じ listener の門)
+    expect(doc).toMatch(/if\(e\.source!==window\.parent\)return;var d=e\.data;if\(d&&d\.type===CRES/);
+  });
+});
+
+describe('🔴 ノートへ保存と、状態ブロックからの復元(PR-08)', () => {
+  it('🔴 保存 → 端末の保存を消して置き直す → 本文の状態ブロックから元どおり', () => {
+    const bodies: Record<string, string> = { L1: '```html id="a"\n<p>x</p>\n```\n' };
+    const host = fakeHost(bodies);
+    setWidgetNoteHost(host);
+    const { body, scope } = mount('L1', bodies.L1!);
+    const save = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-save"]')!;
+    expect(save.textContent).toBe('ノートへ保存');
+    expect(save.disabled, '保存が無いのに押せる').toBe(true);
+    post(set('count', '4', 1), giveWindow(frameOf(body)));
+    expect(save.disabled, '保存したのに押せない').toBe(false);
+    save.click();
+    expect(host.calls).toEqual(['save:L1:a']);
+    expect(readWidgetStateBlock(bodies.L1!, 'a')).toEqual({ count: '4' });
+    scope.dispose();
+    // 別の端末(端末の保存が空)で開いた形
+    localStorage.clear();
+    const again = mount('L1', bodies.L1!);
+    expect(frameOf(again.body).srcdoc, '本文の状態ブロックから seed されていない').toContain('{"count":"4"}');
+    // 🔑 読んだ値は端末の保存へ写す(次に変えた鍵だけが届いても、他の鍵が消えない)
+    expect(readWidgetStorage('L1', 'a')).toEqual({ count: '4' });
+    again.scope.dispose();
+  });
+
+  it('🔴 端末の保存が在れば、本文の状態ブロックより端末の保存が勝つ', () => {
+    const bodies: Record<string, string> = { L1: '```html id="a"\n<p>x</p>\n```\n\n```json widget-state="a"\n{"count":"1"}\n```\n' };
+    setWidgetNoteHost(fakeHost(bodies));
+    applyWidgetStorageOp('L1', 'a', { op: 'set', key: 'count', value: '9' });
+    expect(resolveWidgetSeed('L1', 'a')).toEqual({ count: '9' });
+    localStorage.clear();
+    expect(resolveWidgetSeed('L1', 'a')).toEqual({ count: '1' });
+    // 壊れたブロックは無視(空)
+    bodies.L1 = '```json widget-state="a"\n{oops\n```\n';
+    localStorage.clear();
+    expect(resolveWidgetSeed('L1', 'a')).toEqual({});
+  });
+
+  it('🔴 書けないとき(編集中など)は押せず、押されても書かずに理由を言う', () => {
+    const bodies: Record<string, string> = { L1: '```html id="a"\n<p>x</p>\n```\n' };
+    const host = fakeHost(bodies);
+    host.blocked = '編集を保存するか、編集をやめてからもう一度押してください';
+    setWidgetNoteHost(host);
+    applyWidgetStorageOp('L1', 'a', { op: 'set', key: 'k', value: 'v' });
+    const { body, scope } = mount('L1', bodies.L1!);
+    const save = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-save"]')!;
+    expect(save.disabled).toBe(true);
+    expect(save.title).toContain('編集を保存するか');
+    save.disabled = false;
+    save.click();
+    expect(host.calls).toEqual([]);
+    expect(host.fails).toEqual([host.blocked]);
+    scope.dispose();
+  });
+
+  it('🔴 箱の合図(保存の差分)では本文を書かない', () => {
+    const bodies: Record<string, string> = { L1: '```html id="a"\n<p>x</p>\n```\n' };
+    const host = fakeHost(bodies);
+    setWidgetNoteHost(host);
+    const { body, scope } = mount('L1', bodies.L1!);
+    const w = giveWindow(frameOf(body));
+    post(set('count', '4', 1), w);
+    post({ type: 'pkc-widget-save', state: { count: '4' } }, w);
+    expect(host.calls).toEqual([]);
+    expect(bodies.L1).toBe('```html id="a"\n<p>x</p>\n```\n');
+    scope.dispose();
+  });
+
+  it('🔴 「状態を初期化」で端末の保存と本文の状態ブロックの両方を消し、置き直しても復活しない', async () => {
+    const bodies: Record<string, string> = {
+      L1: '```html id="a"\n<p>x</p>\n```\n\n```json widget-state="a"\n{"count":"4"}\n```\n',
+    };
+    const host = fakeHost(bodies);
+    setWidgetNoteHost(host);
+    const { body, scope } = mount('L1', bodies.L1!);
+    expect(frameOf(body).srcdoc).toContain('{"count":"4"}');
+    const btn = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-reset"]')!;
+    expect(btn.disabled).toBe(false);
+    btn.click();
+    const dialog = document.querySelector<HTMLDialogElement>(`[data-pkc-region="${DIALOG_REGION}"]`)!;
+    expect(dialog.textContent).toContain('ノートに保存済みの状態ブロックも削除します');
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(host.calls).toEqual(['remove:L1:a']);
+    expect(hasWidgetStorage('L1', 'a')).toBe(false);
+    expect(readWidgetStateBlock(bodies.L1!, 'a')).toBeNull();
+    expect(bodies.L1).toBe('```html id="a"\n<p>x</p>\n```\n');
+    expect(frameOf(body).srcdoc, '置き直した箱に古い値が残った').not.toContain('"count"');
+    expect(btn.disabled).toBe(true);
+    scope.dispose();
+    // 開き直しても(端末の保存も本文のブロックも無い)はじめの状態
+    const again = mount('L1', bodies.L1!);
+    expect(frameOf(again.body).srcdoc).not.toContain('"count"');
+    again.scope.dispose();
+  });
+
+  it('🔴 本文の書込が終わる前に置き直しても、消すはずのブロックから復活させない', async () => {
+    const bodies: Record<string, string> = {
+      L1: '```html id="a"\n<p>x</p>\n```\n\n```json widget-state="a"\n{"count":"4"}\n```\n',
+    };
+    const host = fakeHost(bodies);
+    // 書込が遅れる形(removeState は記録だけして本文を変えない)
+    host.removeState = (lid, wid) => {
+      host.calls.push(`remove:${lid}:${wid}`);
+    };
+    setWidgetNoteHost(host);
+    const { body, scope } = mount('L1', bodies.L1!);
+    body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-reset"]')!.click();
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(frameOf(body).srcdoc).not.toContain('"count"');
+    expect(hasWidgetStorage('L1', 'a'), '古いブロックを端末の保存へ写した').toBe(false);
+    // もう一度「ノートへ保存」したら、本文のブロックがまた正になる
+    post(set('count', '1', 1), giveWindow(frameOf(body)));
+    body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-save"]')!.click();
+    expect(host.calls.at(-1)).toBe('save:L1:a');
+    scope.dispose();
+  });
+
+  it('🔴 保存しない面(書き出し・プレビュー)の箱も、本文の状態ブロックを初期値にする(保存はしない)', () => {
+    const md = '```html id="a"\n<p>x</p>\n```\n\n```json widget-state="a"\n{"count":"7"}\n```\n';
+    const html = renderMarkdown(md, {});
+    expect(html.replace(/&quot;/g, '"')).toContain('{"count":"7"}');
+    // 状態ブロックの無い本文では初期値は空のまま
+    expect(renderMarkdown('```html id="a"\n<p>x</p>\n```\n', {}).replace(/&quot;/g, '"')).not.toContain('"count"');
+    // React の器にも写しを添える(保存つきの面には添えない)
+    const r = '```react id="c"\nexport default function A(){return <b/>}\n```\n\n```json widget-state="c"\n{"n":"3"}\n```\n';
+    expect(renderMarkdown(r, {})).toContain('data-pkc-widget-seed=');
+    expect(renderMarkdown(r, { liveWidgets: true })).not.toContain('data-pkc-widget-seed=');
+  });
+});
+
+describe('🔴 書込の経路(reducer → REQUEST_BODY_REWRITE。PR-08)', () => {
+  const withEntry = (): AppState => {
+    const st = initialState as AppState;
+    const metas = new Map(st.entryMetas);
+    metas.set('L1', { lid: 'L1', title: 't', archetype: 'text', entryOrder: 0 } as never);
+    return { ...st, phase: 'ready', entryMetas: metas };
+  };
+  it('SET_WIDGET_STATE は本文の書換の 1 本(widget-state)を撃ち、書けないときは断る', () => {
+    const r = reduce(withEntry(), { type: 'SET_WIDGET_STATE', lid: 'L1', widgetId: 'a', state: { k: 'v' } });
+    expect(r.events).toEqual([
+      expect.objectContaining({
+        type: 'REQUEST_BODY_REWRITE',
+        lid: 'L1',
+        rewrite: { kind: 'widget-state', widgetId: 'a', state: { k: 'v' } },
+      }),
+    ]);
+    const del = reduce(withEntry(), { type: 'SET_WIDGET_STATE', lid: 'L1', widgetId: 'a', state: null });
+    expect(del.events[0]).toMatchObject({ rewrite: { kind: 'widget-state', widgetId: 'a', state: null } });
+    const busy = reduce({ ...withEntry(), phase: 'exporting' }, { type: 'SET_WIDGET_STATE', lid: 'L1', widgetId: 'a', state: { k: 'v' } });
+    expect(busy.events).toEqual([]);
+    expect(busy.state.error).toContain('ウィジェットの状態をノートに保存してください');
+  });
+  it('applyBodyRewrite(widget-state)は書く・消す・上限で断る', () => {
+    const body = '```html id="a"\nx\n```\n';
+    const saved = applyBodyRewrite(body, { kind: 'widget-state', widgetId: 'a', state: { k: 'v' } })!;
+    expect(readWidgetStateBlock(saved, 'a')).toEqual({ k: 'v' });
+    expect(applyBodyRewrite(saved, { kind: 'widget-state', widgetId: 'a', state: null })).toBe(body);
+    expect(applyBodyRewrite(body, { kind: 'widget-state', widgetId: 'a', state: { k: 'x'.repeat(70000) } })).toBeNull();
   });
 });

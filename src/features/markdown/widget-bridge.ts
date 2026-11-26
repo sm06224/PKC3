@@ -44,6 +44,15 @@ export const WIDGET_STORAGE_MESSAGE = 'pkc3.widget.storage';
 export const WIDGET_THEME_MSG_TYPE = 'pkc-widget-theme';
 /** 箱の準備ができた合図(箱 → 親。1 回だけ)。 */
 export const WIDGET_READY_MSG_TYPE = 'pkc-widget-ready';
+/**
+ * 同じノートのデータの問い合わせ(箱 → 親。PR-08)。`{ type, id: 箱の id, reqId }`。
+ * 🔴 親は**登録した箱**にだけ、その箱を置いたノート 1 件の本文から組んだ答えを返す(`widget-bridge.ts`)。
+ */
+export const WIDGET_CONTEXT_REQ_MSG_TYPE = 'pkc-widget-context-req';
+/** 問い合わせの答え(親 → 箱)。`{ type, reqId, context }`。 */
+export const WIDGET_CONTEXT_RES_MSG_TYPE = 'pkc-widget-context-res';
+/** 箱が答えを待つ上限(親の居ない書き出しの HTML では、これを過ぎたら空の答えで返す)。 */
+export const WIDGET_CONTEXT_TIMEOUT_MS = 3000;
 
 /**
  * 箱へ渡す CSS 変数(箱の中の名前 → 親の名前)。
@@ -137,11 +146,11 @@ export const WIDGET_BASE_STYLE =
  * 箱の中で走る台本(ES5。外側のテンプレートリテラルと衝突する記法を使わない)。
  * - `pkc-widget-theme` を受けたら `--pkc-*`・`data-pkc-tone`・`color-scheme` を当て、`onTheme` の購読者へ知らせる
  * - 起動時に親へ `pkc-widget-ready` を 1 回送る(初回のテーマを受け取る)
- * - `window.pkcWidget`(`id` / `getTheme` / `onTheme` / `storage`)を置く
+ * - `window.pkcWidget`(`id` / `getTheme` / `onTheme` / `storage` / `readNoteContext` / `readTables` / `readFrontmatter`)を置く
  * ⚠ 受けるのは**親から来た**合図だけ(`e.source === parent`)。
  */
 const THEME_PRELUDE_SOURCE =
-  '(function(iframeId,wid,names,THEME,READY){' +
+  '(function(iframeId,wid,names,THEME,READY,CREQ,CRES,CTO){' +
   "'use strict';" +
   'var subs=[];var cur={tone:null,tokens:{}};' +
   'function copy(o){var r={};for(var k in o){if(Object.prototype.hasOwnProperty.call(o,k))r[k]=o[k];}return r;}' +
@@ -150,6 +159,19 @@ const THEME_PRELUDE_SOURCE =
   "onTheme:function(cb){if(typeof cb!=='function')return function(){};subs.push(cb);" +
   'return function(){var i=subs.indexOf(cb);if(i>=0)subs.splice(i,1);};},' +
   'storage:null};' +
+  // 🔑 同じノートのデータの問い合わせ(PR-08)── 答えが来なければ CTO ミリ秒で空の答え(書き出しでも止まらない)
+  'var pend={};var rq=0;' +
+  'function empty(){return {frontmatter:{},tables:[]};}' +
+  "function norm(c){if(!c||typeof c!=='object')return empty();" +
+  "return {frontmatter:(c.frontmatter&&typeof c.frontmatter==='object'&&!Array.isArray(c.frontmatter))?c.frontmatter:{}," +
+  'tables:Array.isArray(c.tables)?c.tables:[]};}' +
+  'function ask(){return new Promise(function(res){rq+=1;var n=rq;' +
+  'var t=setTimeout(function(){delete pend[n];res(empty());},CTO);' +
+  'pend[n]=function(c){clearTimeout(t);delete pend[n];res(norm(c));};' +
+  "try{window.parent.postMessage({type:CREQ,id:iframeId,reqId:n},'*');}catch(e){clearTimeout(t);delete pend[n];res(empty());}});}" +
+  'api.readNoteContext=function(){return ask();};' +
+  'api.readTables=function(){return ask().then(function(c){return c.tables;});};' +
+  'api.readFrontmatter=function(){return ask().then(function(c){return c.frontmatter;});};' +
   // 🔑 id の在る箱だけ:前の script(保存の prelude)が差し替えた localStorage と同じ物を指す
   'if(wid!==null){try{api.storage=window.localStorage;}catch(e){api.storage=null;}}' +
   "try{Object.defineProperty(window,'pkcWidget',{value:Object.freeze(api),writable:false,enumerable:true,configurable:true});}" +
@@ -163,6 +185,7 @@ const THEME_PRELUDE_SOURCE =
   'cur={tone:tone,tokens:next};' +
   'var list=subs.slice();for(var j=0;j<list.length;j++){try{list[j](api.getTheme());}catch(e){}}}' +
   "window.addEventListener('message',function(e){if(e.source!==window.parent)return;var d=e.data;" +
+  "if(d&&d.type===CRES&&typeof d.reqId==='number'){var f=pend[d.reqId];if(f)f(d.context);return;}" +
   'if(!d||d.type!==THEME)return;apply(d);});' +
   // ⚠ 文書の解析より前に送る ── 早く受け取れば、最初の描画から親の配色で出る(白く光らない)
   'try{window.parent.postMessage({type:READY,id:iframeId},\'*\');}catch(e){}' +
@@ -178,7 +201,8 @@ export function widgetThemePreludeScript(iframeId: string, widgetId: string | nu
     '<script>' +
     THEME_PRELUDE_SOURCE +
     `(${inlineJson(iframeId)},${inlineJson(widgetId)},${inlineJson(WIDGET_THEME_TOKENS.map(([n]) => n))},` +
-    `${inlineJson(WIDGET_THEME_MSG_TYPE)},${inlineJson(WIDGET_READY_MSG_TYPE)});` +
+    `${inlineJson(WIDGET_THEME_MSG_TYPE)},${inlineJson(WIDGET_READY_MSG_TYPE)},` +
+    `${inlineJson(WIDGET_CONTEXT_REQ_MSG_TYPE)},${inlineJson(WIDGET_CONTEXT_RES_MSG_TYPE)},${String(WIDGET_CONTEXT_TIMEOUT_MS)});` +
     '</script>'
   );
 }
@@ -208,6 +232,11 @@ export const WIDGET_ID_ATTR = 'data-pkc-widget-id';
 export const WIDGET_KIND_ATTR = 'data-pkc-widget-kind';
 /** 保存つきの面で描いた器の印(React の器に付く。` ```html ` の器は器そのものが保存つきの面でしか出ない)。 */
 export const WIDGET_LIVE_ATTR = 'data-pkc-widget-live';
+/**
+ * 保存しない面の React の器に添える、本文の状態ブロックの写し(JSON。PR-08)。箱の中だけの `localStorage` の初期値になる。
+ * ⚠ 保存つきの面の器には付けない(保存のたびに塊の HTML を変えない)。
+ */
+export const WIDGET_SEED_ATTR = 'data-pkc-widget-seed';
 
 /**
  * `id=` の在る ` ```html ` の器(placeholder)。

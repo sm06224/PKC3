@@ -1,6 +1,6 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
-import { installWidgetBridge } from '@adapter/ui/render/widget-bridge';
+import { installWidgetBridge, setWidgetNoteHost } from '@adapter/ui/render/widget-bridge';
 import { errorText, diagramExportErrorText } from '@features/error-text';
 import { APP_GROUP_REORDER_OK_LABEL, FOLDER_EXPORT_NOTE } from '@features/entry-actions';
 import { bootFailureText } from '@features/boot-failure-text';
@@ -21,6 +21,7 @@ import { loadSplitLids, saveSplitLids } from '@adapter/platform/split-store';
 import { createUnloadGuard } from '@adapter/platform/unload-guard';
 import {
   bodyWriteBlockReason,
+  blockedWithSuffix,
   hasUnsavedTyping,
   isAsidePane,
   phaseBlockReason,
@@ -6989,6 +6990,43 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   installHtmlSandboxResizer();
   // 🔑 ノートに埋め込んだウィジェットのテーマ配信と保存の受け口(PR-07)。配色の見張りは箱が来てから付く
   installWidgetBridge();
+  /**
+   * 🔴 **ウィジェットとノートの本文をつなぐ口**(PR-08)── 同じノートのデータの読み取り(前書き・表)と、
+   *   親のボタン(「ノートへ保存」/「状態を初期化」)からの本文の書込。
+   * ⚠ 読ませる本文は**読む面で開いているノート 1 件**(`openBody`)だけ。書込は `SET_WIDGET_STATE` → `REQUEST_BODY_REWRITE`
+   *   の 1 本で、別のタブ・ウィンドウがそのノートを編集中なら断る(他の本文の書換と同じ門)。
+   */
+  const widgetWrite = (lid: string, act: () => void): void => {
+    void editedElsewhereReason(dispatcher, editLockPort, lid)
+      .then((why) => {
+        if (why !== null) {
+          dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+          return;
+        }
+        act();
+      })
+      .catch(() => {
+        dispatcher.dispatch({
+          type: 'OP_FAILED',
+          error: 'ウィジェットの状態を書けませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
+        });
+      });
+  };
+  setWidgetNoteHost({
+    bodyOf: (lid) => {
+      const ob = dispatcher.getState().openBody;
+      return ob !== null && ob.lid === lid ? ob.body : null;
+    },
+    writeBlockReason: (lid) => {
+      const b = bodyWriteBlockReason(dispatcher.getState(), lid);
+      return b === null ? null : blockedWithSuffix(b, 'もう一度押してください');
+    },
+    saveState: (lid, widgetId, state) =>
+      widgetWrite(lid, () => dispatcher.dispatch({ type: 'SET_WIDGET_STATE', lid, widgetId, state })),
+    removeState: (lid, widgetId) =>
+      widgetWrite(lid, () => dispatcher.dispatch({ type: 'SET_WIDGET_STATE', lid, widgetId, state: null })),
+    fail: (message) => dispatcher.dispatch({ type: 'OP_FAILED', error: message }),
+  });
   /**
    * 🔴 **箱が「外部画像を止めた」と言ってきたら帯を出す**(2026-08-06)。
    *

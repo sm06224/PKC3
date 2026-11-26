@@ -101,6 +101,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'insert-entry-link': EDIT,
   'insert-snippet': EDIT,
   'insert-diagram': EDIT,
+  'insert-widget-template': EDIT,
   'insert-icon': EDIT,
   'renumber-lists': EDIT,
   'sort-tasks': EDIT,

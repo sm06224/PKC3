@@ -149,6 +149,8 @@ export function buildHtmlSandboxIframe(
    * 🔑 箱の中だけの `localStorage`(seed 空・親は登録しないので保存されない)を入れる ── 1 行目で止まらない。
    */
   widgetId: string | null = null,
+  /** 箱の中だけの `localStorage` の初期値(本文の状態ブロック。PR-08)。⚠ 保存はしない。 */
+  widgetSeed: Readonly<Record<string, string>> = {},
 ): string {
   // iframe ID:DOM 内 unique(postMessage で iframe を特定)。
   // 🔴 **中身から決める**(乱数にしない ── P8 段⑩ で判明)。かつて
@@ -161,7 +163,7 @@ export function buildHtmlSandboxIframe(
     content,
     iframeId,
     allowExternalImages,
-    widgetId === null ? widgetThemePreludeScript(iframeId) : widgetPrelude(iframeId, widgetId, {}),
+    widgetId === null ? widgetThemePreludeScript(iframeId) : widgetPrelude(iframeId, widgetId, widgetSeed),
   );
 
   // srcdoc attribute は HTML escape(&, ", <, > → entities)。

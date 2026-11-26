@@ -4721,6 +4721,9 @@ export function connectStoreEffects(
               // 🔴 話者を直す回は、何も変わらなくても言う(黙ると「押したのに何も起きない」になる)
               if (ev.rewrite.kind === 'speakers-fix' && !disposed)
                 dispatcher.dispatch({ type: 'OP_NOTICE', message: speakersFixNotice(0, 0) });
+              // 🔴 「ノートへ保存」を押して何も変わらない回も黙らない(PR-08)
+              if (ev.rewrite.kind === 'widget-state' && ev.rewrite.state !== null && !disposed)
+                dispatcher.dispatch({ type: 'OP_NOTICE', message: 'ウィジェットの状態は既にノートに保存されています' });
               return;
             }
             const ext = extractMeta(ev.archetype, newBody);
@@ -4755,8 +4758,12 @@ export function connectStoreEffects(
              */
             const workDelete = ev.rewrite.kind === 'work-log' && ev.rewrite.next === null;
             const speakersFix = ev.rewrite.kind === 'speakers-fix';
+            /** 🔴 ウィジェットの状態ブロックを書く / 消す回も版を積む(PR-08)── 「元に戻す」の行き先。 */
+            const widgetState = ev.rewrite.kind === 'widget-state';
             const revBefore =
-              shapeRemove || runUndo || placeUndo !== null || workDelete || speakersFix ? await newestRevId() : undefined;
+              shapeRemove || runUndo || placeUndo !== null || workDelete || speakersFix || widgetState
+                ? await newestRevId()
+                : undefined;
             /**
              * 🔴 **読んでから書くまでの間に別の窓が書いていたら、1 バイトも書かない**
              * (#178 残り、2026-08-23)。
@@ -4816,6 +4823,7 @@ export function connectStoreEffects(
                 ev.rewrite.kind === 'place-remove' ||
                 // 🔴 話者を直す回も積む(#952 B6)── 名前の付け替え・統合は元へ戻す道が版しか無い
                 ev.rewrite.kind === 'speakers-fix' ||
+                widgetState ||
                 workDelete ||
                 ev.rewrite.kind === 'place-line-remove' ||
                 // 🔴 付箋の字を書き換える回も積む(#1662 1)── 書き換えた字は元へ戻す道が版しか無い
@@ -4888,6 +4896,23 @@ export function connectStoreEffects(
               dispatcher.dispatch({
                 type: 'OP_NOTICE',
                 message: speakersFixNotice(fixed?.renamed ?? 0, fixed?.transcriptLines ?? 0),
+                ...(revAfter !== undefined && revAfter !== revBefore
+                  ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
+                  : {}),
+              });
+            }
+            /**
+             * 🔴 **ウィジェットの状態を書いた / 消した回を言う**(PR-08)。本文へ入った後にだけ(競合・失敗の枝は上で返っている)。
+             * 「元に戻す」は書く前の版へ(表の行・列を消した直後と同じ置き場)。
+             */
+            if (ev.rewrite.kind === 'widget-state' && !disposed) {
+              const revAfter = await newestRevId();
+              dispatcher.dispatch({
+                type: 'OP_NOTICE',
+                message:
+                  ev.rewrite.state === null
+                    ? 'ノートに保存したウィジェットの状態を削除しました'
+                    : 'ウィジェットの状態をノートに保存しました',
                 ...(revAfter !== undefined && revAfter !== revBefore
                   ? { restoreUndo: { lid: ev.lid, revId: revAfter } }
                   : {}),

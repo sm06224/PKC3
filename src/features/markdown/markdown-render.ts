@@ -46,7 +46,8 @@ import { cellEditButtonHtml, detectCsvLang, renderCsvFence, shapeButtonHtml } fr
 import { embedViewSource, isEmbedViewInfo, isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
 import { formHtml, isFormInfo } from './form-def';
 import { buildHtmlSandboxIframe } from './html-sandbox';
-import { parseWidgetId, widgetPlaceholderHtml, WIDGET_ID_ATTR, WIDGET_LIVE_ATTR } from './widget-bridge';
+import { parseWidgetId, widgetPlaceholderHtml, WIDGET_ID_ATTR, WIDGET_LIVE_ATTR, WIDGET_SEED_ATTR } from './widget-bridge';
+import { allWidgetStateBlocks } from './widget-state-block';
 import {
   EXTERNAL_IMAGE_ATTR,
   EXTERNAL_IMAGE_CLASS,
@@ -429,6 +430,11 @@ function buildRenderableSlotHtml(
   firstContentLine: number | undefined,
   /** `id=` の在るウィジェットを保存つきの器で出すか(PR-07。`RenderOptions.liveWidgets`)。 */
   liveWidgets: boolean = false,
+  /**
+   * 本文に書き残したウィジェットの状態(` ```json widget-state="…" `。PR-08)。
+   * 🔑 保存しない面(書き出し・プレビュー・埋め込み)の箱の**初期値**にだけ使う ── 保存つきの面は親が器を埋めるときに読む。
+   */
+  widgetStates: ReadonlyMap<string, Readonly<Record<string, string>>> = new Map(),
 ): string | null {
   switch (fence.lang) {
     case 'html':
@@ -460,7 +466,15 @@ function buildRenderableSlotHtml(
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
       // 🔑 器を出さない面の `id=` は、箱の中だけの `localStorage`(保存しない)を入れて描く(書き出しでも動く)
-      return buildHtmlSandboxIframe(content, '', occurrence, allowExternalImages, widgetId);
+      // 🔑 本文に状態ブロックが在れば、それを箱の初期値にする(書き出した単体 HTML でも続きから動く。PR-08)
+      return buildHtmlSandboxIframe(
+        content,
+        '',
+        occurrence,
+        allowExternalImages,
+        widgetId,
+        widgetId === null ? {} : (widgetStates.get(widgetId) ?? {}),
+      );
     }
     case 'mermaid': {
       // pgc-203 wave-α' polish #24:placeholder div のみ emit。実 SVG render は
@@ -501,10 +515,16 @@ function buildRenderableSlotHtml(
       // 🔑 `id=` の在る React は状態を持つウィジェット(PR-07)── 器に id を添えるだけ(箱は `react-sandbox.ts` が組む)
       const reactWidgetId = parseWidgetId(fence.rest);
       // ⚠ 保存するのは**保存つきの面だけ**(`data-pkc-widget-live`)── ほかの面は箱の中だけの localStorage
+      /**
+       * 🔑 保存しない面では、本文の状態ブロックを初期値として器に添える(PR-08)。
+       * ⚠ 保存つきの面には添えない ── 保存するたびに塊の HTML が変わり、動いている箱が作り直される。
+       */
+      const reactSeed = reactWidgetId !== null && !liveWidgets ? widgetStates.get(reactWidgetId) : undefined;
       const reactWidgetAttr =
         reactWidgetId === null
           ? ''
-          : ` ${WIDGET_ID_ATTR}="${md.utils.escapeHtml(reactWidgetId)}"${liveWidgets ? ` ${WIDGET_LIVE_ATTR}="1"` : ''}`;
+          : ` ${WIDGET_ID_ATTR}="${md.utils.escapeHtml(reactWidgetId)}"${liveWidgets ? ` ${WIDGET_LIVE_ATTR}="1"` : ''}` +
+            (reactSeed === undefined ? '' : ` ${WIDGET_SEED_ATTR}="${md.utils.escapeHtml(JSON.stringify(reactSeed))}"`);
       return `<div class="pkc-react-placeholder" data-pkc-react-src="${escapedReact}"${reactWidgetAttr} data-pkc-md-block-kind="react"><pre class="pkc-react-source"><code class="language-jsx">${escapedReact}</code></pre></div>`;
     }
     default: {
@@ -946,6 +966,7 @@ function renderRenderableFence(
       (env as { allowExternalImages?: boolean } | undefined)?.allowExternalImages === true,
       firstContentLine,
       (env as { liveWidgets?: boolean } | undefined)?.liveWidgets === true,
+      (env as { widgetStates?: ReadonlyMap<string, Readonly<Record<string, string>>> } | undefined)?.widgetStates,
     );
     if (slot !== null) {
       return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, occurrence);
@@ -7043,6 +7064,8 @@ function renderMarkdownCore(
     interactiveCodeBlocks: boolean;
     /** `id=` の在るウィジェットを保存つきの器で出すか(PR-07) */
     liveWidgets: boolean;
+    /** 本文に書き残したウィジェットの状態(PR-08。保存しない面の箱の初期値) */
+    widgetStates: ReadonlyMap<string, Readonly<Record<string, string>>>;
     interactiveTags: boolean;
     phoneLinks: boolean;
     interactiveDates: boolean;
@@ -7082,6 +7105,8 @@ function renderMarkdownCore(
     interactiveCodeBlocks: opts.interactiveCodeBlocks === true,
     // 🔴 ウィジェットを保存つきの器で出すか(PR-07)。既定は出さない(保存しない箱)
     liveWidgets: opts.liveWidgets === true,
+    // 🔑 状態ブロックの無い本文では 1 回の `includes` だけ(定常のコストを増やさない)
+    widgetStates: allWidgetStateBlocks(text),
     // 🔴 本文中のタグを押せる形で出すか(#550 段③)。既定は押せない
     interactiveTags: opts.interactiveTags === true,
     // 🔴 素の電話番号を押せる形にするか(#278 段②)。既定は切

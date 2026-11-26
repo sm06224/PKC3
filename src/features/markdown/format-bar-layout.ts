@@ -59,6 +59,8 @@ export const FORMAT_BAR_MORE_GROUPS: readonly { readonly group: string; readonly
     group: 'insert',
     items: [
       act('insert-diagram'),
+      // 🔴 v4.0 Phase 2 / PR-08: HTML ツールのテンプレート(「図を挿入」と同じ 2 段の一覧)
+      act('insert-widget-template'),
       op('codeblock'),
       op('math'),
       act('insert-callout'),

@@ -8,6 +8,11 @@
  *    新しい値を送る。🔑 **箱は読み直さない**(`srcdoc` を変えない ── 中で動いている状態が消えない)。
  * 2. **保存の受け口** ── `id=` の在る箱の `localStorage` の差分を受けて、親の `localStorage` へ書く。
  * 3. **`id=` の在る ` ```html ` の箱を置く**(`hydrateWidgets`)── 見えたときに、前回の保存を `seed` に焼いて置く。
+ * 4. **同じノートのデータの問い合わせに答える**(PR-08)── 登録した箱にだけ、その箱を置いたノート 1 件の本文から
+ *    前書きと表を組んで返す(`extractWidgetNoteContext`)。他のノート・設定・他のウィジェットの保存は返さない。
+ * 5. **「ノートへ保存」「状態を初期化」**(PR-08)── user が親のボタンを押したときだけ、本文の
+ *    ` ```json widget-state="…" ` を書く / 消す(書くのは reducer → `REQUEST_BODY_REWRITE` の 1 本)。
+ *    🔴 箱から本文を書く口は無い(自動・黙っての書込を作らない)。
  *
  * ## 🔴 セキュリティの不変条件
  *
@@ -29,8 +34,11 @@ import {
   WIDGET_FRAME_ATTR,
 } from '@features/markdown/html-sandbox';
 import {
+  WIDGET_CONTEXT_REQ_MSG_TYPE,
+  WIDGET_CONTEXT_RES_MSG_TYPE,
   WIDGET_ID_ATTR,
   WIDGET_LIVE_ATTR,
+  WIDGET_SEED_ATTR,
   WIDGET_READY_MSG_TYPE,
   WIDGET_SRC_ATTR,
   WIDGET_STORAGE_MESSAGE,
@@ -48,6 +56,19 @@ import {
   readWidgetStorage,
   type WidgetStorageOp,
 } from '@adapter/platform/widget-storage';
+import {
+  hasWidgetStateBlock,
+  parseWidgetStateJson,
+  readWidgetStateBlock,
+  WIDGET_STATE_BLOCK_LIMIT,
+  widgetStateJson,
+  widgetStateTooLargeNote,
+} from '@features/markdown/widget-state-block';
+import {
+  emptyWidgetNoteContext,
+  extractWidgetNoteContext,
+  type WidgetNoteContext,
+} from '@features/markdown/widget-context';
 import { confirmInApp } from './app-dialog';
 import { watchVisible } from './visible-watch';
 import { typingQuietIn } from './typing-gate';
@@ -58,6 +79,60 @@ import { registerLiveScope, type MermaidScope } from './mermaid-hydrate';
  * ⚠ 付いていない面(書き出し・lid の決まらない面)では、`id=` の在る箱も**保存しない**(テーマ連動だけ)。
  */
 export const WIDGET_LID_ATTR = 'data-pkc-widget-lid';
+
+/**
+ * 🔴 **ウィジェットとノートの本文をつなぐ口**(PR-08。`main.ts` が 1 回だけ渡す)。
+ *
+ * ⚠ 本文を書く口(`saveState` / `removeState`)は**親のボタンからしか呼ばない**(箱の合図からは呼ばない)。
+ *   書込は reducer(`SET_WIDGET_STATE`)→ `REQUEST_BODY_REWRITE` の 1 本を通る(門・履歴・別のタブの編集の確認も同じ)。
+ */
+export interface WidgetNoteHost {
+  /** そのノートのいまの本文(読む面で開いているノートの物だけ。読めなければ `null`)。 */
+  bodyOf(lid: string): string | null;
+  /** 本文を書けない理由の文(書けるなら `null`。`bodyWriteBlockReason` と同じ判定。字は言い切りの文で返す)。 */
+  writeBlockReason(lid: string): string | null;
+  /** 状態ブロックを書く(「ノートへ保存」)。 */
+  saveState(lid: string, widgetId: string, state: Readonly<Record<string, string>>): void;
+  /** 状態ブロックを消す(「状態を初期化」)。 */
+  removeState(lid: string, widgetId: string): void;
+  /** 断りを知らせる。 */
+  fail(message: string): void;
+}
+
+let noteHost: WidgetNoteHost | null = null;
+
+/** 本文との口を渡す(`null` で外す ── test 用)。 */
+export function setWidgetNoteHost(host: WidgetNoteHost | null): void {
+  noteHost = host;
+}
+
+/**
+ * 「状態を初期化」で本文のブロックを消すよう頼んだウィジェット(`lid\0widgetId`)。
+ * 🔴 消す書込が終わる前に箱を置き直しても、**消すはずのブロックから古い値を復活させない**。
+ * ⚠ 「ノートへ保存」を押し直したら外す(また本文のブロックを正とする)。
+ */
+const blockSuppressed = new Set<string>();
+const suppressKey = (lid: string, widgetId: string): string => `${lid}\u0000${widgetId}`;
+
+/**
+ * 🔴 **箱の初期値を決める**(PR-08 の復元の優先順)。
+ * 1. この端末の保存(`localStorage`)が 1 件でも在れば、それ(端末での最新の操作)。
+ * 2. 無ければ、本文の ` ```json widget-state="…" `(別の端末へ同期した直後など)。
+ *    🔑 読んだ値は**この端末の保存へ写す** ── 箱は変わった鍵だけを送ってくるので、写さないと次に置いたとき
+ *    変えなかった鍵が消える(端末の保存が 1 件でも在れば 1. が勝つため)。
+ * 3. どちらも無ければ空。
+ */
+export function resolveWidgetSeed(lid: string, widgetId: string): Readonly<Record<string, string>> {
+  const local = readWidgetStorage(lid, widgetId);
+  if (Object.keys(local).length > 0) return local;
+  if (blockSuppressed.has(suppressKey(lid, widgetId))) return local;
+  const body = noteHost?.bodyOf(lid) ?? null;
+  if (body === null) return local;
+  const block = readWidgetStateBlock(body, widgetId);
+  if (block === null) return local;
+  for (const [key, value] of Object.entries(block)) applyWidgetStorageOp(lid, widgetId, { op: 'set', key, value });
+  return block;
+}
 
 /** 器(placeholder / React の器)から、親の DOM が持つ lid を引く。 */
 export function widgetLidOf(host: Element): string | null {
@@ -137,6 +212,36 @@ export function broadcastWidgetTheme(doc: Document): number {
 /** 配色を決める `<html>` の属性(`theme.ts` / `appearance-choice.ts`)。 */
 const THEME_ATTRS = ['data-pkc-theme', 'data-pkc-tone', 'data-pkc-accent'] as const;
 
+/** 同じ本文を何度も組み直さない(箱が続けて問い合わせても、本文が変わらない限り 1 回)。 */
+let contextCache: { body: string; context: WidgetNoteContext } | null = null;
+
+/**
+ * 🔴 **その箱に返してよい「同じノートのデータ」**。登録の無い箱・持ち越された箱・本文の読めないときは空。
+ * ⚠ 本文は**登録した lid**から引く(箱の名乗りは使わない)。
+ */
+export function widgetContextFor(frame: HTMLIFrameElement): WidgetNoteContext {
+  const reg = registry.get(frame);
+  if (reg === undefined || !frame.isConnected || widgetLidOf(frame) !== reg.lid) return emptyWidgetNoteContext();
+  const body = noteHost?.bodyOf(reg.lid) ?? null;
+  if (body === null) return emptyWidgetNoteContext();
+  if (contextCache === null || contextCache.body !== body) {
+    contextCache = { body, context: extractWidgetNoteContext(body) };
+  }
+  // ⚠ 写しを返す(postMessage が複製するが、呼び手に共有の物を渡さない)
+  return JSON.parse(JSON.stringify(contextCache.context)) as WidgetNoteContext;
+}
+
+function postContext(target: MessageEventSource | null, reqId: number, context: WidgetNoteContext): void {
+  if (target === null) return;
+  const w = target as Window;
+  if (typeof w.postMessage !== 'function') return;
+  try {
+    w.postMessage({ type: WIDGET_CONTEXT_RES_MSG_TYPE, reqId, context }, '*');
+  } catch {
+    // 外れかけの箱でも落ちない
+  }
+}
+
 function isStorageOp(d: Record<string, unknown>): WidgetStorageOp | null {
   if (d.op === 'set' && typeof d.key === 'string' && typeof d.value === 'string')
     return { op: 'set', key: d.key, value: d.value };
@@ -184,6 +289,23 @@ export function installWidgetBridge(targetWindow: Window = window): () => void {
       return;
     }
 
+    if (d.type === WIDGET_CONTEXT_REQ_MSG_TYPE) {
+      const reqId = d.reqId;
+      if (typeof reqId !== 'number' || !Number.isInteger(reqId)) return;
+      /**
+       * 🔴 送り主は 2 段で照合する ── ①`event.source === iframe.contentWindow`(`resolveSandboxSender`)
+       *   ②その箱が**登録した箱**であること(`widgetContextFor`)。どちらかで外れたら**空の答え**を返す
+       *   (待たせて止めない。中身は 1 字も渡さない)。
+       */
+      const frame = typeof d.id === 'string' ? resolveSandboxSender(doc, event.source, d.id) : null;
+      if (frame === null) {
+        postContext(event.source, reqId, emptyWidgetNoteContext());
+        return;
+      }
+      postContext(frame.contentWindow, reqId, widgetContextFor(frame));
+      return;
+    }
+
     if (d.tag === WIDGET_STORAGE_MESSAGE) {
       if (event.source === null) return;
       // 🔴 **登録した箱の中から**送り主を探す(id で引かない ── 名乗りは信頼しない)
@@ -222,8 +344,12 @@ export function installWidgetBridge(targetWindow: Window = window): () => void {
 }
 
 /**
- * 「状態を初期化」のボタンを器の上に置く(片道の操作を作らない ── 保存できるなら消せる)。
- * 保存が 0 件のときは押せない。押すと確認してから消し、`remount` で箱をはじめの状態で置き直す。
+ * ウィジェットの上のバー(親の側の UI)──「ノートへ保存」と「状態を初期化」(片道の操作を作らない ── 保存できるなら消せる)。
+ *
+ * - **ノートへ保存**: 端末の保存が在り、かつノートを書けるときに押せる。押すと本文の ` ```json widget-state="…" ` を
+ *   書く / 差し替える(1 回だけ。履歴に残る)。
+ * - **状態を初期化**: 端末の保存か本文の状態ブロックが在るときに押せる。確認してから端末の保存を消し、
+ *   本文に状態ブロックが在れば**それも消す**(端末だけ消して、置き直したときに本文から古い値が戻る矛盾を作らない)。
  */
 export function attachWidgetResetBar(
   host: HTMLElement,
@@ -235,29 +361,84 @@ export function attachWidgetResetBar(
   const bar = doc.createElement('div');
   bar.className = 'pkc-widget-bar';
   bar.setAttribute('data-pkc-field', 'widget-bar');
+  const save = doc.createElement('button');
+  save.type = 'button';
+  save.textContent = 'ノートへ保存';
+  save.setAttribute('data-pkc-variant', 'ghost');
+  save.setAttribute('data-pkc-field', 'widget-save');
   const btn = doc.createElement('button');
   btn.type = 'button';
   btn.textContent = '状態を初期化';
   btn.title = 'このウィジェットに保存した状態を消して、はじめの状態に戻します';
   btn.setAttribute('data-pkc-variant', 'ghost');
   btn.setAttribute('data-pkc-field', 'widget-reset');
-  const sync = (): void => {
-    btn.disabled = !hasWidgetStorage(lid, widgetId);
+  const bodyHasBlock = (): boolean => {
+    const body = noteHost?.bodyOf(lid) ?? null;
+    return body !== null && hasWidgetStateBlock(body, widgetId);
   };
+  const sync = (): void => {
+    const local = hasWidgetStorage(lid, widgetId);
+    const blocked = noteHost === null ? 'ノートを開き直してください' : noteHost.writeBlockReason(lid);
+    save.disabled = !local || blocked !== null;
+    save.title =
+      blocked !== null
+        ? `いまはノートに保存できません。${blocked}`
+        : !local
+          ? 'まだ保存する状態がありません(ウィジェットを操作すると保存できるようになります)'
+          : 'ウィジェットの状態をノートの本文に書き残します(別の端末への同期や書き出した HTML でも、続きから使えます)';
+    btn.disabled = !local && !bodyHasBlock();
+  };
+  save.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const h = noteHost;
+    if (h === null) return;
+    const state = readWidgetStorage(lid, widgetId);
+    if (Object.keys(state).length === 0) return;
+    const json = widgetStateJson(state);
+    // 🔑 断る理由は押した時点で言う(書く側 `upsertWidgetStateBlock` と同じ上限)
+    if (json.length > WIDGET_STATE_BLOCK_LIMIT) {
+      h.fail(widgetStateTooLargeNote(json.length));
+      return;
+    }
+    const blocked = h.writeBlockReason(lid);
+    if (blocked !== null) {
+      h.fail(blocked);
+      return;
+    }
+    blockSuppressed.delete(suppressKey(lid, widgetId));
+    h.saveState(lid, widgetId, state);
+  });
   btn.addEventListener('click', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    void confirmInApp(btn, `ウィジェット「${widgetId}」に保存した状態を消して、はじめの状態に戻します`, {
+    const withBlock = bodyHasBlock();
+    if (withBlock) {
+      const blocked = noteHost?.writeBlockReason(lid) ?? null;
+      if (blocked !== null) {
+        noteHost?.fail(blocked);
+        return;
+      }
+    }
+    const msg =
+      `ウィジェット「${widgetId}」に保存した状態を消して、はじめの状態に戻します` +
+      (withBlock ? '(ノートに保存済みの状態ブロックも削除します)' : '');
+    void confirmInApp(btn, msg, {
       okLabel: '初期化する',
       danger: true,
     }).then((answer) => {
       if (answer !== 'ok') return;
       clearWidgetStorage(lid, widgetId);
+      if (withBlock) {
+        // ⚠ 置き直す前に印を付ける(書込が終わる前の本文から古い値を拾わない)
+        blockSuppressed.add(suppressKey(lid, widgetId));
+        noteHost?.removeState(lid, widgetId);
+      }
       sync();
       remount();
     });
   });
-  bar.append(btn);
+  bar.append(save, btn);
   host.prepend(bar);
   sync();
   return { sync, remove: () => bar.remove() };
@@ -282,7 +463,8 @@ export function keepWidgetSeedFresh(
   frame.addEventListener('load', () => {
     loads += 1;
     if (loads === 1) return;
-    const now = readWidgetStorage(lid, widgetId);
+    // 🔑 置くときと同じ優先順(端末の保存 → 本文の状態ブロック)で引き直す(PR-08)
+    const now = resolveWidgetSeed(lid, widgetId);
     const nowJson = JSON.stringify(now);
     if (nowJson === bakedJson) return;
     bakedJson = nowJson;
@@ -313,8 +495,12 @@ export function widgetMountParts(
    * ⚠ 入れないと、`localStorage.getItem` を 1 行目に書いたウィジェットが**その場で例外で止まる**
    *   (opaque origin では読むだけで投げる ── 実ブラウザの smoke で踏んだ)。
    */
-  if (lid === null) return { lid: null, widgetId, prelude: widgetPrelude(iframeId, widgetId, {}), seed: {} };
-  const seed = readWidgetStorage(lid, widgetId);
+  if (lid === null) {
+    // 🔑 保存しない面でも、本文の状態ブロックを初期値にする(React の器に添えた写し。PR-08)
+    const seed = parseWidgetStateJson(host.getAttribute(WIDGET_SEED_ATTR) ?? '') ?? {};
+    return { lid: null, widgetId, prelude: widgetPrelude(iframeId, widgetId, seed), seed };
+  }
+  const seed = resolveWidgetSeed(lid, widgetId);
   return { lid, widgetId, prelude: widgetPrelude(iframeId, widgetId, seed), seed };
 }
 

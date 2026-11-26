@@ -70,6 +70,7 @@ import { hiddenTaskMask } from './task-hidden';
 import { cutLines, insertLines, moveLines, type InsertAnchor, type MoveLines } from './line-move';
 import { gfmCellText } from './html-to-markdown';
 import { planFormRow, type FormColumn } from './form-table';
+import { removeWidgetStateBlock, upsertWidgetStateBlock } from './widget-state-block';
 import {
   convertTable,
   fencesBelowFrontmatter,
@@ -755,6 +756,18 @@ export type BodyRewrite =
       line: number;
       openLine: string;
       next: string | null;
+    }
+  | {
+      /**
+       * 🔴 **ウィジェットの状態ブロックを書く / 消す**(v4.0 Phase 2 / PR-08)── ` ```json widget-state="<id>" `。
+       *
+       * ⚠ 撃つのは**親のボタン**(「ノートへ保存」/「状態を初期化」)だけ ── 箱の合図からは撃たない。
+       * 🔑 `state` が `null` なら消す(同じ id のブロックを全部)。在れば差し替え、無ければ本体の囲みの直後へ入れる。
+       *   規則は `widget-state-block.ts` の 1 本。上限を超える状態は断る(`null` → `bodyRewriteRefusal` が理由を言う)。
+       */
+      kind: 'widget-state';
+      widgetId: string;
+      state: Readonly<Record<string, string>> | null;
     };
 
 /**
@@ -1239,6 +1252,11 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'speakers-fix') {
     const r = fixSpeakers(body, rewrite.renames, transcriptLinesOf(body), new Date(rewrite.at));
     return r === null ? null : r.body;
+  }
+  if (rewrite.kind === 'widget-state') {
+    if (rewrite.state === null) return removeWidgetStateBlock(body, rewrite.widgetId);
+    const r = upsertWidgetStateBlock(body, rewrite.widgetId, rewrite.state);
+    return r.ok ? r.body : null;
   }
   if (rewrite.kind === 'image-attrs') {
     // 🔑 行ごとの改行コードを保つ(偶数番目が行、奇数番目が改行)
@@ -1969,6 +1987,10 @@ interface CsvShapeRefused {
  */
 export function bodyRewriteRefusal(body: string, rewrite: BodyRewrite): string | null {
   if (rewrite.kind === 'speakers-fix') return '本文に「## 話者」の一覧が見つからないため、話者を直せませんでした(開き直してください)';
+  if (rewrite.kind === 'widget-state' && rewrite.state !== null) {
+    const r = upsertWidgetStateBlock(body, rewrite.widgetId, rewrite.state);
+    return r.ok ? null : r.reason;
+  }
   if (rewrite.kind !== 'csv-shape') return null;
   const r = csvShapeResult(body, rewrite);
   if (r === null || typeof r === 'string') return null;
