@@ -329,8 +329,8 @@ describe('打鍵 → コマンド', () => {
   });
 
   it('🔴 上書きすると既定は当たらなくなる(足すだけの実装を許さない)', () => {
-    const b = resolveBindings({ 'create-entry': ['Alt+M'] });
-    expect(matchCommand(chordOf(ev({ key: 'm', code: 'KeyM', altKey: true })), 'global', b)).toBe(
+    const b = resolveBindings({ 'create-entry': ['Alt+J'] });
+    expect(matchCommand(chordOf(ev({ key: 'j', code: 'KeyJ', altKey: true })), 'global', b)).toBe(
       'create-entry',
     );
     expect(

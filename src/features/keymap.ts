@@ -2186,6 +2186,17 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     defaults: ['Escape'],
   },
   /**
+   * 🔴 **リッチ編集のブロックを、Markdown の原文の編集へ切り替える**(v4.0 Phase 1 / PR-05。フラグ `editor.rich`)。
+   * セルの端の「原文」ボタンと同じ 1 手(片道を作らない ── 記号を隠しても、実態の Markdown へいつでも 1 手で戻れる)。
+   * ⚠ 受けるのはリッチ編集のセルだけ(原文の行の欄では何もしない)。
+   */
+  {
+    id: 'row-rich-source',
+    label: 'リッチ編集のブロックを原文で編集する',
+    contexts: ['row'],
+    defaults: ['Alt+M'],
+  },
+  /**
    * ⚠ **`row-next` / `row-prev`(`Alt+↓` / `Alt+↑`)は 2026-08-28 に外した**(#524)。
    *   🔑 **2026-10-01 に、同じ鍵を行の入れ替えとして再利用した**(#1213 `move-line-up` /
    *   `move-line-down`)── 「欄から欄へ移る」ではなく「欄の中の行を動かす」で、別の操作である

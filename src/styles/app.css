@@ -3253,6 +3253,59 @@ li[data-pkc-row-slot] {
 [data-pkc-field='row-source']:focus-visible {
   outline-width: 1px;
 }
+/* 🔴 **リッチ編集のセル**(v4.0 Phase 1 / PR-05。フラグ `editor.rich`)。
+ * 原文の欄と違い**本文と同じ字**(等幅にしない)── 記号を隠して、読む面とほぼ同じ見た目のまま打てる。
+ * 編集中であることは左端の accent の線で示す(色は意味にだけ使う。枠で囲まない)。
+ * ⚠ `pre-wrap`: 打った空白を詰めない・字の中の改行(貼り付け)をそのまま見せる。 */
+[data-pkc-rich-wrap] {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  border-left: 2px solid var(--accent);
+  padding-left: var(--s2);
+  margin-left: calc(-1 * var(--s2) - 2px);
+}
+[data-pkc-rich-wrap] > blockquote {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-block: 0;
+}
+[data-pkc-field='rich-cell'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 1lh;
+  margin-block: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+  caret-color: var(--accent);
+}
+/* 「原文」に切り替えるボタン ── 端に控えめに(ゴースト型)。焦点・ホバーで濃くする */
+[data-pkc-rich-source] {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--fs-xs, 11px);
+  line-height: 1.6;
+  padding: 0 var(--s1, 4px);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 3px);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.7;
+}
+[data-pkc-rich-source]:hover,
+[data-pkc-rich-source]:focus-visible {
+  opacity: 1;
+  color: var(--fg);
+  border-color: var(--hairline, var(--border));
+}
+[data-pkc-rich-check] {
+  flex: 0 0 auto;
+  margin: 0;
+}
 /* 🔴 **開放終端の色変え**(user 提案 2026-08-05「行を色変え」)。
  * ⚠ 「閉じ待ち」は**エラーではない**ので赤にしない ── 左端の帯だけで示す。
  * ⚠ 行内(`**` など)とブロック(``` / :::)で意味が違う:ブロックは

@@ -14,6 +14,8 @@
 import { appTranscriptFollow } from './transcript-follow';
 import { DAY_NAV_FIELD, paintDayNav } from './day-nav';
 import { renderMarkdown } from '@features/markdown/markdown-render';
+import { FLAG_EDITOR_RICH } from '@features/flags';
+import { appFlags } from '@adapter/platform/flag-store';
 import { flipTaskInDraft } from '@features/markdown/body-rewrite';
 import {
   frontmatterLineCount,
@@ -3363,6 +3365,8 @@ export class DetailRenderer {
         // 🔴 1 画面編集の塊にも SQL の答えを出す(#1223 の残り)。⚠ 鍵は編集に入った時点の本文(2 列の下見と同じ)
         this.sqlEmbeds.sync(pane, initialBody, true);
       },
+      // 🔴 リッチ編集(フラグ `editor.rich`。PR-05)── 開くたびに読む(フラグ画面で切り替えたら次のブロックから効く)
+      richEnabled: () => appFlags.isOn(FLAG_EDITOR_RICH.name),
     });
     /**
      * 🔴 **押した行を開いた状態で編集に入る**(#395 段③)。

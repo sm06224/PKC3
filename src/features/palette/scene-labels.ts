@@ -108,6 +108,7 @@ export const COMMAND_SCENE: Readonly<Record<string, Scene>> = {
   'cancel-edit': EDIT,
   'row-commit': EDIT,
   'row-cancel': EDIT,
+  'row-rich-source': EDIT,
   'edit-all': EDIT,
   undo: EDIT,
   redo: EDIT,

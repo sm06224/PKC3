@@ -45,6 +45,7 @@ import { appOpenedStore } from '@adapter/platform/opened-store';
 import { isRegisteredApp, tileSelectsEntry } from '@features/launcher/tiles';
 import { appEditorMode } from '@adapter/ui/render/editor-mode';
 import { ROW_SOURCE_FIELD, rowDraftBody } from '@adapter/ui/render/row-swap';
+import { RICH_CELL_FIELD } from '@adapter/ui/render/rich-cell';
 import {
   applyTextScale,
   chosenTextScale,
@@ -7395,13 +7396,17 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         el.getAttribute('data-pkc-field') === SECTION_BOX_INPUT_FIELD ||
         el.getAttribute('data-pkc-field') === CODE_BOX_INPUT_FIELD,
       // 🔴 1 面の書き方の行の打ちかけも控える(#1163 依頼 248)。⚠ 探すのは 1 面の編集の面(`editor-live`)の中だけ
+      // 🔴 リッチ編集のセル(PR-05)の打ちかけも同じ口で控える(セルは `<textarea>` ではないので、欄の名前を 2 つ見る)
       readRowBody: () => {
-        const ta = document.querySelector<HTMLTextAreaElement>(
-          `[data-pkc-region="editor-live"] textarea[data-pkc-field="${ROW_SOURCE_FIELD}"]`,
+        const el = document.querySelector<HTMLElement>(
+          `[data-pkc-region="editor-live"] textarea[data-pkc-field="${ROW_SOURCE_FIELD}"], [data-pkc-region="editor-live"] [data-pkc-field="${RICH_CELL_FIELD}"]`,
         );
-        return ta === null ? null : rowDraftBody(ta);
+        return el === null ? null : rowDraftBody(el);
       },
-      isRowInput: (el) => el.getAttribute('data-pkc-field') === ROW_SOURCE_FIELD,
+      isRowInput: (el) => {
+        const f = el.getAttribute('data-pkc-field');
+        return f === ROW_SOURCE_FIELD || f === RICH_CELL_FIELD;
+      },
       isRestoring: (lid) => draftOfferRef?.isRestoring(lid) === true,
       // 追記欄に打っている字も控える(依頼 330)。欄の字は state に無いので欄から読む
       readAppendText: () =>
