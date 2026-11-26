@@ -60,6 +60,8 @@ import {
   advanceSeq,
   dropRevived,
   isDeviceId,
+  isSyncRelatedMode,
+  isSyncScopeMode,
   SYNC_KEY_BASE_PREFIX,
   SYNC_KEY_DEVICE,
   SYNC_KEY_PAIR_PREFIX,
@@ -84,12 +86,14 @@ import {
   readBases,
   readOuts,
   readPairs,
+  readSelective,
   readSeq,
   readTombstones,
   recordDeletion,
   recordDeletions,
   writeBase,
   writeOut,
+  writeSelective,
   writeSeq,
   type RowRecorder,
 } from './sync-rows';
@@ -4197,6 +4201,9 @@ function applySync(database: Database, cid: string, input: SyncApplyInput): Sync
       }
       if (attrPut(scope, x.lid, v)) result.pinsChanged++;
     }
+    // ── 選択同期(#2066 段 5-A): 新しく入ったノートを直接指定へ足す(同じ tx。`rec` が前の値を控える = 取り消しで戻る)
+    const selAdds = (input.selectiveSelectAdds ?? []).filter((lid) => !isReservedSyncLid(lid) && liveRow(database, cid, lid) !== undefined);
+    if (selAdds.length > 0) writeSelective(database, cid, { add: selAdds }, rec);
     // ── 取り消しの控えを仕上げる(🔴 本文は持たず、履歴の版の id を引く。取り込み後の指紋もここで測る)
     const undoEntries: SyncUndoToken['entries'] = [];
     for (const cap of captured.values()) {
@@ -6224,7 +6231,9 @@ const handlers: Handlers = {
         throw err;
       }
     }
-    const snap = measureStates(database, req.cid);
+    // 🔴 選択同期で関連をたどるときだけ、指紋を測る同じ読みで本文の参照も抜き出す(全部のノートの同期では抜き出さない)
+    const selective = readSelective(database, req.cid);
+    const snap = measureStates(database, req.cid, { withBodyRefs: selective.mode === 'selective' && selective.related !== 'off' });
     const present = new Set(snap.notes.map((n) => n.lid));
     return {
       device: isDeviceId(device) ? device : null,
@@ -6238,7 +6247,34 @@ const handlers: Handlers = {
       pairs: readPairs(database, req.cid),
       bases: readBases(database, req.cid),
       outs: readOuts(database, req.cid),
+      selective,
+      bodyRefs: snap.bodyRefs,
     };
+  },
+  syncSetSelectiveScope: (req) => {
+    // 🔴 同期が切のときは断る(選択の行も 1 本も書かない)
+    requireSyncEnabled();
+    if (req.mode !== undefined && !isSyncScopeMode(req.mode)) throw new Error('同期の範囲の値が正しくありません');
+    if (req.related !== undefined && !isSyncRelatedMode(req.related)) throw new Error('関連するノートの範囲の値が正しくありません');
+    const database = need();
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      writeSelective(database, req.cid, {
+        ...(req.mode === undefined ? {} : { mode: req.mode }),
+        ...(req.related === undefined ? {} : { related: req.related }),
+        add: (req.add ?? []).filter((x) => typeof x === 'string'),
+        remove: (req.remove ?? []).filter((x) => typeof x === 'string'),
+      });
+      database.exec('COMMIT');
+    } catch (err) {
+      try {
+        database.exec('ROLLBACK');
+      } catch {
+        /* rollback 失敗は元エラーを優先 */
+      }
+      throw err;
+    }
+    return readSelective(database, req.cid);
   },
   syncCommitExport: (req) => {
     requireSyncEnabled();

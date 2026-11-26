@@ -55,6 +55,47 @@ export const SYNC_KEY_BASE_PREFIX = 'base:';
 /** 相手のワークスペースとの対応の行(`syncScope(cid)` の中): `pair:<相手の端末 id>`、値 = 相手の cid。設計 doc §12.1。 */
 export const SYNC_KEY_PAIR_PREFIX = 'pair:';
 
+/**
+ * 🔴 **選択同期(#2066 段 5-A)の設定の行**(`syncScope(cid)` の中。スキーマは変えない)。
+ *
+ * | キー | 値 | 未設定のとき |
+ * |---|---|---|
+ * | `scope:mode` | `'all'` / `'selective'` | `'all'`(段 4 までと同じ = 既存の端末と完全に同じ動き) |
+ * | `scope:related` | `'off'` / `'1hop'` / `'recursive'` | `'1hop'` |
+ * | `sel:<lid>` | `'1'` | (人が直接指定した同期の対象。1 件 1 行。主キーの範囲で読む) |
+ *
+ * ⚠ 同期が OFF の間は 1 行も書かない(書く op は worker が `requireSyncEnabled` で断る)。
+ * ⚠ 既定値と同じ値を書くときは行を消す(既定のままの端末に行を残さない)。
+ */
+export const SYNC_KEY_SCOPE_MODE = 'scope:mode';
+export const SYNC_KEY_SCOPE_RELATED = 'scope:related';
+export const SYNC_KEY_SEL_PREFIX = 'sel:';
+/** `sel:` の次の文字(`;`)── 主キー `(scope, k)` の範囲で `sel:` の行だけを読む上限。 */
+export const SYNC_KEY_SEL_END = 'sel;';
+
+export type SyncScopeMode = 'all' | 'selective';
+export type SyncRelatedMode = 'off' | '1hop' | 'recursive';
+export const SYNC_SCOPE_MODE_DEFAULT: SyncScopeMode = 'all';
+export const SYNC_RELATED_DEFAULT: SyncRelatedMode = '1hop';
+
+export function isSyncScopeMode(v: unknown): v is SyncScopeMode {
+  return v === 'all' || v === 'selective';
+}
+
+export function isSyncRelatedMode(v: unknown): v is SyncRelatedMode {
+  return v === 'off' || v === '1hop' || v === 'recursive';
+}
+
+/** 行の値 → モード。無い・読めない値は既定(`'all'`)。 */
+export function parseScopeMode(v: string | null | undefined): SyncScopeMode {
+  return isSyncScopeMode(v) ? v : SYNC_SCOPE_MODE_DEFAULT;
+}
+
+/** 行の値 → 関連の範囲。無い・読めない値は既定(`'1hop'`)。 */
+export function parseRelatedMode(v: string | null | undefined): SyncRelatedMode {
+  return isSyncRelatedMode(v) ? v : SYNC_RELATED_DEFAULT;
+}
+
 /** 墓標を残す上限(件数)と期間(日)。超えたら古い順に捨てる(ゴミ箱を空にしても残すが、無限には持たない)。 */
 export const TOMBSTONE_MAX = 5000;
 export const TOMBSTONE_KEEP_DAYS = 180;

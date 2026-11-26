@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { relationKey, type KeyedState } from '../../../src/features/sync/change-set';
 import { entryFp, labelFp, pinFp, placeFp, relationFp } from '../../../src/features/sync/sync-fp';
 import { DIFF_FORMAT, readDiffZip, writeDiffZip, type DiffNote } from '../../../src/features/sync/diff-file';
-import { fingerprintDigest, isStaleBase, planExport } from '../../../src/features/sync/sync-export';
+import { fingerprintDigest, isStaleBase, planExport, planFolderExport } from '../../../src/features/sync/sync-export';
 import { conflictCopyTitle, effectiveBaseline, planSyncImport, type PlanInput } from '../../../src/features/sync/sync-plan';
 import { TOMBSTONE_MAX } from '../../../src/features/sync/sync-state';
 
@@ -298,5 +298,277 @@ describe('差分ファイル(zip)の読み書き', () => {
       '2026-11-21T00:00:00Z',
     );
     await expect(readDiffZip(arch.blob)).rejects.toThrow('差分ファイルではありません');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔴 選択同期(#2066 段 5-A)── 送信の隔離 / 選択を外すのは削除ではない / バージョン / 受け手の保護
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('選択同期: 書き出しの隔離(planExport / planFolderExport)', () => {
+  const NOW = Date.parse('2026-11-21T00:00:00Z');
+  const a = st(note('a', '共有', 'A'));
+  const b = st(note('b', '共有2', 'B'));
+  const p = st(note('p', '私的なメモ', 'P'));
+  const q = st(note('q', '前に共有していた', 'Q'));
+  const relAB = { key: relationKey({ from: 'a', to: 'b', kind: 'semantic' }), ...relationFp() };
+  const relAP = { key: relationKey({ from: 'a', to: 'p', kind: 'semantic' }), ...relationFp() };
+  const labA = { key: 'lab:a', ...labelFp(2) };
+  const labP = { key: 'lab:p', ...labelFp(3) };
+  const pinP = { key: 'pin:p', ...pinFp() };
+  const states = [a, b, p, q, relAB, relAP, labA, labP, pinP];
+  const all = new Set(states.map((s) => s.key));
+  const S = new Set(['a', 'b']);
+  const fpOf = (s: KeyedState) => ({ content: s.content, ...(s.place === undefined ? {} : { place: s.place }) });
+  // 相手との記録: 前は全部を同期していた(q・p も相手に在る)。gone は本当に消した
+  const peerBase = { a: fpOf(a), p: fpOf(p), q: fpOf(q), gone: { content: 'g', place: 'x' }, [relAP.key]: fpOf(relAP) };
+  const tombPrivate = { key: 'never-shared', lastFp: { content: 'secret', place: 'x' }, device: DEV, seq: 3 };
+  const tombShared = { key: 'gone2', lastFp: { content: 'g2', place: 'x' }, device: DEV, seq: 4 };
+  const sel = { selectedLids: S, allLiveKeys: all };
+
+  it('🔴 不変条件 1: 指紋・ノート・削除の記録は選択の中だけ(選択の外のノート・つながり・印・私的な削除の記録は 1 件も出ない)', () => {
+    const plan = planExport({ device: DEV, seq: 9, states, tombstones: [tombPrivate, tombShared], nowMs: NOW, all: true, peer: null, selective: sel });
+    expect(plan.scope).toBe('selective');
+    expect(plan.fingerprints.map((f) => f.key)).toEqual(['a', 'b', 'lab:a', relAB.key]);
+    expect(plan.noteLids).toEqual(['a', 'b']);
+    // 相手が無い全件: 削除の記録は、相手との記録にも選択にも関わらない物を運ばない
+    expect(plan.tombstones).toEqual([]);
+    // 対照(空振りでない): 選択同期でなければ全部出る
+    const ctl = planExport({ device: DEV, seq: 9, states, tombstones: [tombPrivate, tombShared], nowMs: NOW, all: true, peer: null });
+    expect(ctl.scope).toBe('all');
+    expect(ctl.fingerprints.map((f) => f.key)).toContain('p');
+    expect(ctl.tombstones.map((t) => t.key).sort()).toEqual(['gone2', 'never-shared']);
+  });
+
+  it('🔴 不変条件 2: 前回同期したノートを選択から外しても削除の記録は 0 件。本当に消した物だけが運ばれる', () => {
+    const peer = { baseline: peerBase, at: '2026-11-20T00:00:00Z' };
+    const plan = planExport({ device: DEV, seq: 9, states, tombstones: [tombPrivate, tombShared], nowMs: NOW, all: false, peer, selective: sel });
+    expect(plan.complete).toBe(false);
+    const keys = plan.tombstones.map((t) => t.key).sort();
+    expect(keys, '選択から外しただけ(p・q はこちらで生きている)の物が削除の記録になった').not.toContain('p');
+    expect(keys).not.toContain('q');
+    expect(keys).not.toContain(relAP.key);
+    expect(keys, '私的なノートの削除の記録が漏れた').not.toContain('never-shared');
+    expect(keys, '相手も持っていた物を本当に消した記録は運ぶ').toEqual(['gone']);
+    expect(plan.noteLids).toEqual(['b']); // a は記録と同じ・b は追加
+    // 外したノートを本当に消したら(生きていない)、そのときは削除の記録が運ばれる
+    const after = planExport({
+      device: DEV,
+      seq: 10,
+      states: states.filter((s) => s.key !== 'q'),
+      tombstones: [],
+      nowMs: NOW,
+      all: false,
+      peer,
+      selective: { selectedLids: S, allLiveKeys: new Set([...all].filter((k) => k !== 'q')) },
+    });
+    expect(after.tombstones.map((t) => t.key).sort()).toEqual(['gone', 'q']);
+    // 直接指定していた物(sharedKeys)の削除の記録は、相手との記録が無くても運ぶ
+    const shared = planExport({ device: DEV, seq: 9, states, tombstones: [tombPrivate], nowMs: NOW, all: true, peer: null, selective: { ...sel, sharedKeys: new Set(['never-shared']) } });
+    expect(shared.tombstones.map((t) => t.key)).toEqual(['never-shared']);
+  });
+
+  it('🔴 相手との記録が無くても、選択のフォルダの中で本当に消したノートの削除の記録は運ぶ(外のフォルダで消した物は運ばない)', () => {
+    const inF = { key: 'deleted-in-F', lastFp: { content: 'c1', place: placeFp('F') }, device: DEV, seq: 5 };
+    const inOther = { key: 'deleted-in-G', lastFp: { content: 'c2', place: placeFp('G') }, device: DEV, seq: 6 };
+    const atRoot = { key: 'deleted-at-root', lastFp: { content: 'c3', place: placeFp(null) }, device: DEV, seq: 7 };
+    const plan = planExport({
+      device: DEV,
+      seq: 9,
+      states,
+      tombstones: [inF, inOther, atRoot],
+      nowMs: NOW,
+      all: true,
+      peer: null,
+      selective: { ...sel, scopeParents: new Set(['F', 'a']) },
+    });
+    expect(plan.tombstones.map((t) => t.key)).toEqual(['deleted-in-F']);
+    // 対照: 起点の集合が無ければ運ばない(この経路が効いている)
+    expect(planExport({ device: DEV, seq: 9, states, tombstones: [inF], nowMs: NOW, all: true, peer: null, selective: sel }).tombstones).toEqual([]);
+  });
+
+  it('同期フォルダ: 隔離・外しただけは削除でない・選択を変えたら書き直しの要約が変わる', () => {
+    const base = {
+      device: DEV,
+      seq: 9,
+      states,
+      tombstones: [tombPrivate],
+      bases: { fedcba9876543210: { baseline: peerBase, at: '2026-11-20T00:00:00Z' } },
+      others: ['fedcba9876543210'],
+      wantedBy: [],
+      ownFilePresent: true,
+      nowMs: NOW,
+    };
+    const f = planFolderExport({ ...base, selective: sel });
+    expect(f.scope).toBe('selective');
+    expect(f.fingerprints.map((x) => x.key)).toEqual(['a', 'b', 'lab:a', relAB.key]);
+    expect(f.tombstones.map((t) => t.key)).toEqual(['gone']);
+    expect(f.noteLids).toEqual(['b']);
+    // 指紋が同じでも、選択の集合が変われば書き直す(ghost = 生きていない lid を選択に足しただけ)
+    const g = planFolderExport({ ...base, selective: { selectedLids: new Set([...S, 'ghost']), allLiveKeys: all } });
+    expect(g.fingerprints).toEqual(f.fingerprints);
+    expect(g.writeKey).not.toBe(f.writeKey);
+    // 全部のとき・選択同期のときで要約は別
+    const allPlan = planFolderExport(base);
+    expect(allPlan.scope).toBe('all');
+    expect(allPlan.writeKey).not.toBe(f.writeKey);
+    expect(allPlan.tombstones.map((t) => t.key).sort()).toEqual(['gone', 'never-shared']);
+  });
+});
+
+describe('選択同期: 差分ファイルのバージョン(不変条件 3)', () => {
+  const n = note('a', '日本語', '本文');
+  async function zipOf(scope?: 'all' | 'selective'): Promise<Blob> {
+    const out = await writeDiffZip({
+      manifest: { exported_at: '2026-11-21T00:00:00Z', device: DEV, seq: 3, cid: 'c-x', title: 'T', complete: true, ...(scope === undefined ? {} : { scope }) },
+      notes: (async function* () {
+        yield n;
+      })(),
+      relations: [],
+      tombstones: [],
+      fingerprints: fpList([st(n)]),
+      peerBase: [],
+      labels: [],
+      pins: [],
+      assets: () => [],
+      getAssetBlob: async () => null,
+    });
+    return out.blob;
+  }
+  async function rawManifest(zip: Blob): Promise<Record<string, unknown>> {
+    const { readZipDirectory, readZipText, unwrapSingleTopDir } = await import('../../../src/features/import/zip-reader');
+    const dir = unwrapSingleTopDir(await readZipDirectory(zip)).entries;
+    return JSON.parse(await readZipText(zip, dir.find((e) => e.name === 'manifest.json')!)) as Record<string, unknown>;
+  }
+  /** manifest だけを差し替えた zip(読む側の門を見る)。 */
+  async function craft(manifest: Record<string, unknown>): Promise<Blob> {
+    const { ZipWriter } = await import('../../../src/features/export/zip-writer');
+    const w = new ZipWriter();
+    await w.add('manifest.json', [JSON.stringify(manifest)]);
+    await w.add('container.json', [JSON.stringify({ notes: [], relations: [], tombstones: [], fingerprints: [], peerBase: [], assets: [], labels: [], pins: [] })]);
+    return w.finish();
+  }
+  const head = { format: DIFF_FORMAT, exported_at: '', device: DEV, seq: 1, cid: 'c', title: 't', complete: true };
+
+  it("🔴 'selective' はバージョン 3 + scope / 'all'・省略はバージョン 2 で scope を書かない(v3.9.0 が読める形のまま)", async () => {
+    const s = await rawManifest(await zipOf('selective'));
+    expect(s.version).toBe(3);
+    expect(s.scope).toBe('selective');
+    for (const z of [await zipOf('all'), await zipOf()]) {
+      const m = await rawManifest(z);
+      expect(m.version).toBe(2);
+      expect('scope' in m, 'all のファイルに scope が書かれた').toBe(false);
+    }
+    // v3.9.0 が読めたバージョン(1・2)に 3 は無い = 古い PKC3 は選択同期のファイルを断る
+    expect([1, 2]).not.toContain(s.version);
+    expect((await readDiffZip(await zipOf('selective'))).manifest.scope).toBe('selective');
+    expect((await readDiffZip(await zipOf())).manifest.scope).toBe('all');
+  });
+
+  it('読む側: バージョン 3 の scope は all / selective だけ(無い・違う値は断る)。2 以下は scope を書いてあっても全件', async () => {
+    await expect(readDiffZip(await craft({ ...head, version: 3, scope: 'partial' }))).rejects.toThrow('運ぶ範囲');
+    await expect(readDiffZip(await craft({ ...head, version: 3 }))).rejects.toThrow('運ぶ範囲');
+    expect((await readDiffZip(await craft({ ...head, version: 3, scope: 'all' }))).manifest.scope).toBe('all');
+    expect((await readDiffZip(await craft({ ...head, version: 2, scope: 'selective' }))).manifest.scope).toBe('all');
+    await expect(readDiffZip(await craft({ ...head, version: 4, scope: 'selective' }))).rejects.toThrow('バージョン');
+  });
+});
+
+describe('選択同期: 受け手(planSyncImport)', () => {
+  const a0 = note('a', 'A', '初稿');
+  const p0 = note('p', 'P', '初稿');
+  const fpOf = (n: DiffNote) => ({ content: st(n).content, place: st(n).place });
+  const rel = (from: string, to: string) => relationKey({ from, to, kind: 'semantic' });
+  const remoteSel = (inp: PlanInput, scope: 'all' | 'selective' = 'selective'): PlanInput => ({ ...inp, remote: { ...inp.remote, manifest: { ...inp.remote.manifest, version: scope === 'selective' ? 3 : 2, scope } } });
+
+  it('🔴 不変条件 3: 相手が選択同期なら、相手の一覧に無いノートを消えたと見なさない(対照: 全部のファイルではゴミ箱へ)', () => {
+    const inp = input({ remoteNotes: [a0], localStates: [st(a0), st(p0)], baseline: { a: fpOf(a0), p: fpOf(p0) } });
+    const sel = planSyncImport(remoteSel(inp));
+    expect(sel.trash).toEqual([]);
+    expect(sel.baseline.p, '記録から p を落とした').toEqual(fpOf(p0));
+    const ctl = planSyncImport(remoteSel(inp, 'all'));
+    expect(ctl.trash).toEqual(['p']);
+  });
+
+  it('相手が選択同期でも、削除の記録で届いた物はゴミ箱へ・両端が載っているつながりの消失は外す(片端が載っていなければ触らない)', () => {
+    const base = { a: fpOf(a0), p: fpOf(p0), b: fpOf(note('b', 'B', 'b')), [rel('a', 'b')]: relationFp(), [rel('a', 'p')]: relationFp() };
+    const inp = remoteSel(
+      input({
+        remoteNotes: [a0, note('b', 'B', 'b')],
+        localStates: [st(a0), st(p0), st(note('b', 'B', 'b')), { key: rel('a', 'b'), ...relationFp() }, { key: rel('a', 'p'), ...relationFp() }],
+        localRelations: [
+          { from: 'a', to: 'b', kind: 'semantic' },
+          { from: 'a', to: 'p', kind: 'semantic' },
+        ],
+        baseline: base,
+      }),
+    );
+    inp.remote.container.tombstones.push({ key: 'p', lastFp: fpOf(p0), device: DEV, seq: 5 });
+    const plan = planSyncImport(inp);
+    expect(plan.trash).toEqual(['p']);
+    expect(plan.relationRemoves).toEqual([{ from: 'a', to: 'b', kind: 'semantic' }]);
+  });
+
+  it('相手が選択同期で、両端が載っているつながりが残っていれば何もしない(外した判定の空振りの対照)', () => {
+    const b0 = note('b', 'B', 'b');
+    const inp = remoteSel(
+      input({
+        remoteNotes: [a0, b0],
+        localStates: [st(a0), st(b0), { key: rel('a', 'b'), ...relationFp() }],
+        localRelations: [{ from: 'a', to: 'b', kind: 'semantic' }],
+        baseline: { a: fpOf(a0), b: fpOf(b0), [rel('a', 'b')]: relationFp() },
+      }),
+    );
+    inp.remote.container.relations.push({ from: 'a', to: 'b', kind: 'semantic' });
+    expect(planSyncImport(inp).relationRemoves).toEqual([]);
+  });
+
+  it('🔴 不変条件 4 ①: こちらが選択同期なら、こちらの選択の外のノートへの相手の変更・削除・印・つながりは反映しない(原本と記録を守る)', () => {
+    const remoteA = note('a', 'A', '相手の編集');
+    const remoteP = note('p', 'P', '相手が私的なメモを書き換えた');
+    const base = { a: fpOf(a0), p: fpOf(p0) };
+    const inp = input({
+      remoteNotes: [remoteA, remoteP],
+      localStates: [st(a0), st(p0)],
+      baseline: base,
+      localSelective: { selectedLids: new Set(['a']), directAndDescendantLids: new Set(['a']) },
+    });
+    inp.remote.container.labels = [{ lid: 'p', color: 3 }];
+    inp.remote.container.pins = ['p'];
+    inp.remote.container.relations.push({ from: 'a', to: 'p', kind: 'semantic' });
+    inp.remote.container.fingerprints.push({ key: rel('a', 'p'), c: relationFp().content });
+    const plan = planSyncImport(inp);
+    expect(plan.upserts.map((u) => u.lid)).toEqual(['a']);
+    expect(plan.labelSets).toEqual([]);
+    expect(plan.pinSets).toEqual([]);
+    expect(plan.relationAdds).toEqual([]);
+    expect(plan.summary.skippedUnselected).toBe(4); // p の本文・色ラベル・ピン留め・p へのつながり
+    expect(plan.baseline.p, 'p の記録が書き換わった').toEqual(base.p);
+    // 対照: 選択同期でなければ全部反映する
+    const ctl = planSyncImport({ ...inp, localSelective: undefined });
+    expect(ctl.upserts.map((u) => u.lid).sort()).toEqual(['a', 'p']);
+    expect(ctl.summary.skippedUnselected).toBe(0);
+    // 削除: 相手が p を消しても、こちらの選択の外ならゴミ箱へ移さない
+    const del = input({ remoteNotes: [a0], localStates: [st(a0), st(p0)], baseline: base, localSelective: { selectedLids: new Set(['a']), directAndDescendantLids: new Set(['a']) } });
+    del.remote.container.tombstones.push({ key: 'p', lastFp: base.p, device: DEV, seq: 2 });
+    const d = planSyncImport(del);
+    expect(d.trash).toEqual([]);
+    expect(d.summary.skippedUnselected).toBe(1);
+    expect(planSyncImport({ ...del, localSelective: undefined }).trash).toEqual(['p']);
+  });
+
+  it('🔴 不変条件 4 ②: 新しく入るノートを直接指定に足す(親がこちらの対象の下・今回入る新しいフォルダの下なら足さない)', () => {
+    const F = { lid: 'F', title: 'F', archetype: 'folder', body: '', parentLid: null };
+    const G = { lid: 'G', title: 'G', archetype: 'folder', body: '', parentLid: 'outsideFolder' };
+    const inp = input({
+      remoteNotes: [note('n1', 'ルート直下', 'x'), note('n2', '対象のフォルダの下', 'x', 'F'), G, note('g1', '新しいフォルダの下', 'x', 'G')],
+      localStates: [st(F as DiffNote), { key: 'outsideFolder', ...entryFp({ title: 'O', archetype: 'folder', parentLid: null, body: '' }) }],
+      localSelective: { selectedLids: new Set(['F']), directAndDescendantLids: new Set(['F']) },
+    });
+    const plan = planSyncImport(inp);
+    expect(plan.upserts.filter((u) => !u.existed).map((u) => u.lid).sort()).toEqual(['G', 'g1', 'n1', 'n2']);
+    expect(plan.selectiveSelectAdds).toEqual(['G', 'n1']);
+    // 対照: こちらが全部のときは足さない
+    expect(planSyncImport({ ...inp, localSelective: undefined }).selectiveSelectAdds).toEqual([]);
   });
 });

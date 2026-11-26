@@ -10,10 +10,69 @@
 import { extractChanges, type Baseline, type KeyedState, type Tombstone } from './change-set';
 import { sha256Hex } from './sha256';
 import { TOMBSTONE_KEEP_DAYS, TOMBSTONE_MAX } from './sync-state';
-import { isNoteKey } from './sync-attr';
-import type { DiffFingerprint } from './diff-file';
+import { attrLidOf, isAttrKey, isNoteKey, isRelKey } from './sync-attr';
+import type { DiffFingerprint, DiffScope } from './diff-file';
+import { selectionDigest } from './selective-sync';
+import { placeFp } from './sync-fp';
 
 const DAY_MS = 86_400_000;
+
+/**
+ * 🔴 **選択同期(#2066 段 5-A)の書き出しの入力**。
+ * - `selectedLids`: 運ぶノートの集合 S(`resolveSelectiveClosure` の `lids`)。
+ * - `allLiveKeys`: こちらで**いま生きている**全部のキー(ノート・つながり・印。S の外も含む)。
+ *   🔴 「前回の記録に在って、S で絞った一覧に無い」キーが、ここに在れば**選択から外れただけ**(削除ではない)── 削除の記録を作らない。
+ * - `sharedKeys`: 削除の記録を運んでよいキー(相手との記録に無くても、直接指定していた物など)。省略可。
+ * - `scopeParents`: `direct ∪ descendant`(子孫をたどる起点の集合)。🔴 消したノートは生きていないので S に居ない ──
+ *   **消した時点の親(墓標の `lastFp.place`)がこの中のフォルダ**なら、選択の中で消した物として削除の記録を運ぶ。省略可。
+ */
+export interface SelectiveExport {
+  readonly selectedLids: ReadonlySet<string>;
+  readonly allLiveKeys: ReadonlySet<string>;
+  readonly sharedKeys?: ReadonlySet<string>;
+  readonly scopeParents?: ReadonlySet<string>;
+}
+
+/** つながりのキー(`rel:<from>|<to>|<kind>`)の両端。 */
+function relEnds(key: string): [string, string] {
+  const [from, to] = key.slice(4).split('|');
+  return [from ?? '', to ?? ''];
+}
+
+/**
+ * 🔴 **キーが選択の中か(1 か所)**。ノート = S に在る / つながり = **両端とも** S に在る / 印 = 印の付いたノートが S に在る。
+ * 書き出す側(`planExport` / `planFolderExport`)と実行部(つながり・印の目録の絞り込み)が同じ関数を通る。
+ */
+export function keyInSelection(key: string, selected: ReadonlySet<string>): boolean {
+  if (isRelKey(key)) {
+    const [a, b] = relEnds(key);
+    return selected.has(a) && selected.has(b);
+  }
+  if (isAttrKey(key)) return selected.has(attrLidOf(key) ?? '');
+  return selected.has(key);
+}
+
+/** 指紋の一覧を選択の中だけに絞る(S の外のノートの存在を 1 つも出さない)。 */
+export function selectiveStates<T extends { key: string }>(states: readonly T[], selected: ReadonlySet<string>): T[] {
+  return states.filter((s) => keyInSelection(s.key, selected));
+}
+
+/**
+ * 運んでよい削除の記録(選択同期のとき)。🔴 S の外の私的なノートを消した記録は漏らさない ──
+ * 運ぶのは、相手との記録に在った物(= 相手も持っていた)・S / 直接指定に関わる物だけ。いま生きているキーの記録は運ばない。
+ */
+function selectiveTombstones(tombs: readonly Tombstone[], sel: SelectiveExport, peerKeys: ReadonlySet<string>): Tombstone[] {
+  const places = new Set<string>();
+  for (const lid of sel.scopeParents ?? []) places.add(placeFp(lid));
+  return tombs.filter(
+    (t) =>
+      !sel.allLiveKeys.has(t.key) &&
+      (peerKeys.has(t.key) ||
+        sel.selectedLids.has(t.key) ||
+        sel.sharedKeys?.has(t.key) === true ||
+        (t.lastFp.place !== undefined && places.has(t.lastFp.place))),
+  );
+}
 
 export interface ExportInput {
   device: string;
@@ -25,9 +84,13 @@ export interface ExportInput {
   /** 「全件」を選んだ。 */
   all: boolean;
   nowMs: number;
+  /** 選択同期(#2066 段 5-A)。省略 = 全部のノート(今までと同じ)。 */
+  selective?: SelectiveExport;
 }
 
 export interface ExportPlan {
+  /** 運ぶ範囲(`selective` のときだけ差分ファイルはバージョン 3)。 */
+  scope: DiffScope;
   complete: boolean;
   /** 本文を入れるノートの lid。 */
   noteLids: string[];
@@ -48,27 +111,35 @@ export function isStaleBase(at: string | null, nowMs: number): boolean {
 }
 
 export function planExport(input: ExportInput): ExportPlan {
+  const sel = input.selective;
   const complete = input.all || input.peer === null || isStaleBase(input.peer.at, input.nowMs) || input.tombstones.length >= TOMBSTONE_MAX;
-  const noteStates = input.states.filter((s) => isNoteKey(s.key));
+  // 🔴 選択同期: 指紋・ノート・削除の記録を S の中だけに隔離する
+  const states = sel === undefined ? input.states : selectiveStates(input.states, sel.selectedLids);
+  const peerKeys = new Set(input.peer === null ? [] : Object.keys(input.peer.baseline));
+  const baseTombs = sel === undefined ? input.tombstones : selectiveTombstones(input.tombstones, sel, peerKeys);
+  const noteStates = states.filter((s) => isNoteKey(s.key));
   let noteLids: string[];
-  const tombstones = [...input.tombstones];
+  const tombstones = [...baseTombs];
   if (complete || input.peer === null) {
     noteLids = noteStates.map((s) => s.key).sort();
   } else {
-    const ch = extractChanges(input.states, input.peer.baseline, input.tombstones);
+    const ch = extractChanges(states, input.peer.baseline, baseTombs);
     noteLids = [...ch.added, ...ch.changed].filter((s) => isNoteKey(s.key)).map((s) => s.key);
     // 記録に在って今は無い物(墓標が残っていなくても分かる削除)も、削除の記録として運ぶ(ノートだけ。つながり・印は全件の一覧が運ぶ)
     const have = new Set(tombstones.map((t) => t.key));
     for (const d of ch.deleted) {
       if (!isNoteKey(d.key) || have.has(d.key)) continue;
+      // 🔴 選択から外れただけ(こちらで生きている)物は削除ではない ── 削除の記録を作らない
+      if (sel !== undefined && sel.allLiveKeys.has(d.key)) continue;
       tombstones.push({ key: d.key, lastFp: d.lastFp, device: input.device, seq: input.seq });
     }
   }
   return {
+    scope: sel === undefined ? 'all' : 'selective',
     complete,
     noteLids,
     tombstones,
-    fingerprints: toFpList(input.states),
+    fingerprints: toFpList(states),
     peerBase: input.peer === null ? [] : toFpList(Object.entries(input.peer.baseline).map(([key, fp]) => ({ key, ...fp }))),
   };
 }
@@ -110,6 +181,8 @@ export interface FolderExportInput {
   /** 自分のファイルが同期フォルダに在るか。 */
   ownFilePresent: boolean;
   nowMs: number;
+  /** 選択同期(#2066 段 5-A)。省略 = 全部のノート(今までと同じ)。 */
+  selective?: SelectiveExport;
 }
 
 export interface FolderExportPlan extends Omit<ExportPlan, 'peerBase'> {
@@ -119,6 +192,8 @@ export interface FolderExportPlan extends Omit<ExportPlan, 'peerBase'> {
 }
 
 export function planFolderExport(input: FolderExportInput): FolderExportPlan {
+  const sel = input.selective;
+  const states = sel === undefined ? input.states : selectiveStates(input.states, sel.selectedLids);
   const others = [...new Set(input.others)].filter((d) => d !== input.device).sort();
   const unknownOrStale = others.some((d) => input.bases[d] === undefined || isStaleBase(input.bases[d]!.at, input.nowMs));
   const complete = !input.ownFilePresent || unknownOrStale || input.wantedBy.length > 0 || input.tombstones.length >= TOMBSTONE_MAX;
@@ -127,32 +202,38 @@ export function planFolderExport(input: FolderExportInput): FolderExportPlan {
     const b = input.bases[d];
     if (b !== undefined) peerBases[d] = toFpList(Object.entries(b.baseline).map(([key, fp]) => ({ key, ...fp })));
   }
-  const tombByKey = new Map(input.tombstones.map((t) => [t.key, t] as const));
+  const peerKeys = new Set<string>();
+  for (const b of Object.values(input.bases)) for (const k of Object.keys(b.baseline)) peerKeys.add(k);
+  const baseTombs = sel === undefined ? input.tombstones : selectiveTombstones(input.tombstones, sel, peerKeys);
+  const tombByKey = new Map(baseTombs.map((t) => [t.key, t] as const));
   let noteLids: string[];
   if (complete) {
-    noteLids = input.states.filter((s) => isNoteKey(s.key)).map((s) => s.key).sort();
+    noteLids = states.filter((s) => isNoteKey(s.key)).map((s) => s.key).sort();
   } else {
     const lids = new Set<string>();
     for (const d of others) {
-      const ch = extractChanges(input.states, input.bases[d]!.baseline, input.tombstones);
+      const ch = extractChanges(states, input.bases[d]!.baseline, baseTombs);
       for (const s of [...ch.added, ...ch.changed]) if (isNoteKey(s.key)) lids.add(s.key);
       for (const x of ch.deleted) {
         if (!isNoteKey(x.key) || tombByKey.has(x.key)) continue;
+        // 🔴 選択から外れただけ(こちらで生きている)物は削除ではない
+        if (sel !== undefined && sel.allLiveKeys.has(x.key)) continue;
         tombByKey.set(x.key, { key: x.key, lastFp: x.lastFp, device: input.device, seq: input.seq });
       }
     }
     noteLids = [...lids].sort();
   }
-  const fingerprints = toFpList(input.states);
+  const fingerprints = toFpList(states);
   const tombstones = [...tombByKey.values()];
-  const writeKey = sha256Hex(
-    JSON.stringify([
-      fingerprintDigest(fingerprints),
-      complete,
-      noteLids,
-      tombstones.map((t) => [t.key, t.lastFp.content, t.lastFp.place ?? null]).sort(),
-      Object.entries(peerBases).map(([d, l]) => [d, fingerprintDigest(l)]).sort(),
-    ]),
-  );
-  return { complete, noteLids, tombstones, fingerprints, peerBases, writeKey };
+  const parts: unknown[] = [
+    fingerprintDigest(fingerprints),
+    complete,
+    noteLids,
+    tombstones.map((t) => [t.key, t.lastFp.content, t.lastFp.place ?? null]).sort(),
+    Object.entries(peerBases).map(([d, l]) => [d, fingerprintDigest(l)]).sort(),
+  ];
+  // 🔴 選択同期: 範囲と選択の集合の要約も入れる(対象を変えたら必ず書き直す)。全部のときは今までと同じ要約のまま
+  if (sel !== undefined) parts.push(['selective', selectionDigest(sel.selectedLids)]);
+  const writeKey = sha256Hex(JSON.stringify(parts));
+  return { scope: sel === undefined ? 'all' : 'selective', complete, noteLids, tombstones, fingerprints, peerBases, writeKey };
 }

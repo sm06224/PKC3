@@ -15,8 +15,16 @@ import {
   encodeTombstone,
   isDeviceId,
   parseSeq,
+  parseRelatedMode,
+  parseScopeMode,
   pruneTombstones,
   SYNC_KEY_BASE_PREFIX,
+  SYNC_KEY_SCOPE_MODE,
+  SYNC_KEY_SCOPE_RELATED,
+  SYNC_KEY_SEL_END,
+  SYNC_KEY_SEL_PREFIX,
+  SYNC_RELATED_DEFAULT,
+  SYNC_SCOPE_MODE_DEFAULT,
   SYNC_KEY_DEVICE,
   SYNC_KEY_PAIR_PREFIX,
   SYNC_KEY_SEQ,
@@ -24,7 +32,12 @@ import {
   SYNC_SCOPE,
   syncScope,
   TOMBSTONE_MAX,
+  type SyncRelatedMode,
+  type SyncScopeMode,
 } from '@features/sync/sync-state';
+import { isReservedSyncLid } from '@features/sync/sync-guard';
+import { bodyLinkTargets } from '@features/entry-ref/body-links';
+import { placeEntryLids } from '@features/markdown/place-notation';
 import { relationKey, type Baseline, type KeyedState, type Tombstone } from '@features/sync/change-set';
 import { entryFp, labelFp, pinFp, relationFp } from '@features/sync/sync-fp';
 import { labelKey, pinKey } from '@features/sync/sync-attr';
@@ -177,6 +190,46 @@ export function discardPeerRecords(db: Database, rec?: RowRecorder): void {
   }
 }
 
+/** 選択同期の設定(#2066 段 5-A)。行が無ければ既定(`'all'` / `'1hop'` / 指定なし)。⚠ 読むだけ(行を作らない)。 */
+export interface SelectiveSetting {
+  mode: SyncScopeMode;
+  related: SyncRelatedMode;
+  /** 直接指定の lid(昇順)。 */
+  directLids: string[];
+}
+
+export function readSelective(db: Database, cid: string): SelectiveSetting {
+  const scope = syncScope(cid);
+  // 'sel:' の次の文字(';')までの範囲 = 主キー (scope, k) の索引で読む
+  const rows = db.selectObjects('SELECT k FROM settings WHERE scope = ? AND k >= ? AND k < ? ORDER BY k', [scope, SYNC_KEY_SEL_PREFIX, SYNC_KEY_SEL_END]) as Array<{ k: string }>;
+  return {
+    mode: parseScopeMode(getSetting(db, scope, SYNC_KEY_SCOPE_MODE)),
+    related: parseRelatedMode(getSetting(db, scope, SYNC_KEY_SCOPE_RELATED)),
+    directLids: rows.map((r) => r.k.slice(SYNC_KEY_SEL_PREFIX.length)).filter((lid) => lid !== ''),
+  };
+}
+
+/** 選択同期の設定を変える(呼び手が tx を張る)。⚠ 同期が入のときだけ呼ぶ。既定と同じ値の行は消す(既定の端末に行を残さない)。 */
+export function writeSelective(
+  db: Database,
+  cid: string,
+  change: { mode?: SyncScopeMode; related?: SyncRelatedMode; add?: readonly string[]; remove?: readonly string[] },
+  rec?: RowRecorder,
+): void {
+  const scope = syncScope(cid);
+  const put = (k: string, v: string | null): void => {
+    if (getSetting(db, scope, k) === v) return;
+    rec?.(scope, k);
+    if (v === null) deleteSetting(db, scope, k);
+    else putSetting(db, scope, k, v);
+  };
+  if (change.mode !== undefined) put(SYNC_KEY_SCOPE_MODE, change.mode === SYNC_SCOPE_MODE_DEFAULT ? null : change.mode);
+  if (change.related !== undefined) put(SYNC_KEY_SCOPE_RELATED, change.related === SYNC_RELATED_DEFAULT ? null : change.related);
+  for (const lid of change.remove ?? []) if (lid !== '') put(SYNC_KEY_SEL_PREFIX + lid, null);
+  // 🔴 system 領域のノートは指定にしない(同期で運ばない物)
+  for (const lid of change.add ?? []) if (lid !== '' && !isReservedSyncLid(lid)) put(SYNC_KEY_SEL_PREFIX + lid, '1');
+}
+
 export interface LiveNote {
   lid: string;
   title: string;
@@ -199,16 +252,33 @@ export interface SyncSnapshot {
   /** 生きているノートの色ラベル・ピン留め(段 3)。ゴミ箱のノートの印は運ばない(戻したときに一緒に戻る)。 */
   labels: Array<{ lid: string; color: number }>;
   pins: string[];
+  /**
+   * 本文の参照(`fromLid → toLids`。生きているノート宛てだけ・自分は除く)。🔴 `withBodyRefs` のときだけ
+   * 指紋を測る同じ 1 回の読みで抜き出す(本文を主スレッドへ出さない / 2 度読まない)。それ以外は空。
+   */
+  bodyRefs: Record<string, string[]>;
 }
 
-/** 現在の指紋(ノート + 非 structural のつながり)。⚠ 本文は 1 行ずつ読んで捨てる(全件を同時に持たない)。 */
-export function measureStates(db: Database, cid: string): SyncSnapshot {
+/** 本文が指すノートの lid(リンク + 板の `entry=`)。選択同期の関連の材料。 */
+export function bodyRefTargets(body: string, cid: string): string[] {
+  const out = new Set<string>(bodyLinkTargets(body, cid));
+  for (const lid of placeEntryLids(body)) out.add(lid);
+  return [...out];
+}
+
+/**
+ * 現在の指紋(ノート + 非 structural のつながり)。⚠ 本文は 1 行ずつ読んで捨てる(全件を同時に持たない)。
+ * `opts.withBodyRefs`(選択同期で関連をたどるときだけ): 同じ読みの中で本文の参照も抜き出す。⚠ 全部のノートのとき(既定)は抜き出さない(手間を増やさない)。
+ */
+export function measureStates(db: Database, cid: string, opts: { withBodyRefs?: boolean } = {}): SyncSnapshot {
   const metas = db.selectObjects(`SELECT lid, archetype FROM entries WHERE cid = ? AND ${USER_REALM_SQL}`, [cid]) as Array<{ lid: string; archetype: string }>;
   const live = new Set(metas.map((m) => m.lid));
   const folders = new Set(metas.filter((m) => m.archetype === 'folder').map((m) => m.lid));
   const parents = parentMap(db, cid, folders);
   const states: KeyedState[] = [];
   const notes: LiveNote[] = [];
+  const rawRefs: Array<[string, string[]]> = [];
+  const withRefs = opts.withBodyRefs === true;
   db.exec({
     sql: `SELECT lid, title, archetype, body FROM entries WHERE cid = ? AND ${USER_REALM_SQL}`,
     bind: [cid],
@@ -219,8 +289,17 @@ export function measureStates(db: Database, cid: string): SyncSnapshot {
       const fp = entryFp({ title: r[1] as string, archetype: r[2] as string, parentLid, body: r[3] as string });
       states.push({ key: lid, ...fp });
       notes.push({ lid, title: r[1] as string, archetype: r[2] as string, parentLid });
+      if (withRefs) {
+        const to = bodyRefTargets(r[3] as string, cid);
+        if (to.length > 0) rawRefs.push([lid, to]);
+      }
     },
   });
+  const bodyRefs = Object.create(null) as Record<string, string[]>;
+  for (const [from, to] of rawRefs) {
+    const kept = to.filter((x) => x !== from && live.has(x));
+    if (kept.length > 0) bodyRefs[from] = kept;
+  }
   const relations: DiffRelation[] = [];
   const seen = new Set<string>();
   const rrows = db.selectObjects("SELECT from_lid, to_lid, kind FROM relations WHERE cid = ? AND kind != 'structural' ORDER BY id", [cid]) as Array<{ from_lid: string; to_lid: string; kind: string }>;
@@ -246,7 +325,7 @@ export function measureStates(db: Database, cid: string): SyncSnapshot {
     pins.push(r.k);
     states.push({ key: pinKey(r.k), ...pinFp() });
   }
-  return { states, notes, relations, labels, pins };
+  return { states, notes, relations, labels, pins, bodyRefs };
 }
 
 /**

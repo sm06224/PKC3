@@ -862,7 +862,27 @@ export type StorageRequest =
    * ⚠ 同期が切のときも使える(切にするときに消したいことがある)。次にオンにして同期すると初回の同期からになる。
    */
   | { op: 'syncForget' }
+  /**
+   * 🔴 **選択同期の設定を変える**(#2066 段 5-A)。範囲(`mode`)・関連の範囲(`related`)・直接指定の追加 / 削除を **1 つの tx** で書く。
+   * ⚠ 同期が切のときは断る(行を 1 本も書かない)。省略した欄は触らない。戻り = 書いた後の設定。
+   */
+  | {
+      op: 'syncSetSelectiveScope';
+      cid: string;
+      mode?: 'all' | 'selective';
+      related?: 'off' | '1hop' | 'recursive';
+      add?: string[];
+      remove?: string[];
+    }
   | { op: 'close' };
+
+/** 選択同期の設定(#2066 段 5-A)。 */
+export interface SyncSelectiveSetting {
+  mode: 'all' | 'selective';
+  related: 'off' | '1hop' | 'recursive';
+  /** 直接指定の lid(昇順)。 */
+  directLids: string[];
+}
 
 /** `syncApply` の入力(`features/sync/sync-plan.ts` の計画 + 記録の書き込み)。 */
 export interface SyncApplyInput {
@@ -888,6 +908,11 @@ export interface SyncApplyInput {
   labelSets?: Array<{ lid: string; color: number | null }>;
   /** ピン留めを付ける / 外す(段 3)。 */
   pinSets?: Array<{ lid: string; on: boolean }>;
+  /**
+   * 🔴 選択同期(#2066 段 5-A): 取り込みで新しく入ったノートを、こちらの直接指定(`sel:<lid>`)へ足す。同じ tx で書き、
+   * 取り消しの控え(`rows`)にも入る。⚠ 省略 = 触らない。生きていない lid は足さない。
+   */
+  selectiveSelectAdds?: string[];
   baseline: Record<string, { content: string; place?: string }>;
   nowIso: string;
 }
@@ -961,6 +986,13 @@ export interface SyncSnapshotResult {
   bases: Record<string, { baseline: Record<string, { content: string; place?: string }>; at: string | null }>;
   /** 連番 → 書き出した指紋の要約。 */
   outs: Record<number, string>;
+  /** 選択同期の設定(#2066 段 5-A)。行が無ければ `'all'` / `'1hop'` / 指定なし。 */
+  selective: SyncSelectiveSetting;
+  /**
+   * 本文の参照(`fromLid → toLids`)。🔴 選択同期で関連をたどるとき(`selective` かつ `related !== 'off'`)だけ、
+   * 指紋を測る同じ 1 回の読みで worker が抜き出す。それ以外は空(全部のノートの同期の手間を増やさない)。
+   */
+  bodyRefs: Record<string, string[]>;
 }
 
 /** assets 表は meta のみ(bytes は AssetBlobStore ── §4.2)。hash は遅延計算可。 */
@@ -1602,5 +1634,6 @@ export interface ResultMap {
   syncUndo: { restored: number; skipped: number };
   syncMeasureNotes: Array<{ lid: string; content: string; place: string }>;
   syncForget: { removed: number };
+  syncSetSelectiveScope: SyncSelectiveSetting;
   close: null;
 }

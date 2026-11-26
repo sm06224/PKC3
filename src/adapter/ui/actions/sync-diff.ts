@@ -11,7 +11,8 @@
  */
 import { errorText } from '@features/error-text';
 import { readDiffZip, writeDiffZip, DIFF_SUFFIX, type DiffAssetMeta, type DiffFile, type DiffFingerprint, type DiffNote } from '@features/sync/diff-file';
-import { fingerprintDigest, planExport, planFolderExport } from '@features/sync/sync-export';
+import { fingerprintDigest, planExport, planFolderExport, type SelectiveExport } from '@features/sync/sync-export';
+import { resolveSelectiveClosure, type SelectiveClosure } from '@features/sync/selective-sync';
 import { planSyncImport, type SyncPlan } from '@features/sync/sync-plan';
 import { deviceIdFromBytes, isSameDevice } from '@features/sync/sync-state';
 import { deviceOfFileName, folderWriteKey } from '@features/sync/sync-folder';
@@ -75,6 +76,21 @@ export const SHOW_SYNC_CONFLICTS_ACTION: NoticeAction = {
 };
 
 const toBaseline = (list: Record<string, { content: string; place?: string }>): Baseline => list;
+
+/**
+ * 🔴 **選択同期(#2066 段 5-A)の閉包**。設定が `'selective'` のときだけ返す(`'all'` = `null` = 今までと同じ動き)。
+ * 書き出し・取り込みの両方がここを通る(同じ問いに 2 か所で答えない)。
+ */
+export function selectiveClosureOf(snap: ResultMap['syncSnapshot']): SelectiveClosure | null {
+  if (snap.selective.mode !== 'selective') return null;
+  return resolveSelectiveClosure({
+    notes: snap.notes,
+    relations: snap.relations,
+    bodyRefs: snap.bodyRefs,
+    directLids: snap.selective.directLids,
+    relatedMode: snap.selective.related,
+  });
+}
 
 /**
  * 🔴 **全体のバックアップに添える種の指紋**(設計 doc §12.1 の約束 2)。⚠ 設定がオンのときだけ。書き出す**時点**の指紋(復元後の編集を含めない)。
@@ -141,7 +157,17 @@ export async function buildSyncDiff(deps: SyncDeps, target: DiffTarget): Promise
   const snap = await deps.request({ op: 'syncSnapshot', cid: deps.cid, ensureDevice: true });
   if (snap.device === null) throw new Error('端末の記録を作れませんでした');
   const nowMs = (deps.now?.() ?? new Date()).getTime();
-  let plan: { complete: boolean; noteLids: string[]; tombstones: Tombstone[]; fingerprints: DiffFingerprint[]; peerBase: DiffFingerprint[]; peerBases?: Record<string, DiffFingerprint[]> };
+  // 🔴 選択同期: 運ぶ集合 S と、こちらで生きている全部のキー(選択から外れただけの物を削除と取り違えない)
+  const closure = selectiveClosureOf(snap);
+  const selected = closure === null ? null : new Set(closure.lids);
+  // 削除の記録を運んでよい物: 直接指定・どの相手との記録にも在った物・選択のフォルダの中で消した物(`scopeParents`)
+  const shared = new Set(snap.selective.directLids);
+  for (const b of Object.values(snap.bases)) for (const k of Object.keys(b.baseline)) shared.add(k);
+  const selective: SelectiveExport | undefined =
+    closure === null || selected === null
+      ? undefined
+      : { selectedLids: selected, allLiveKeys: new Set(snap.states.map((x) => x.key)), sharedKeys: shared, scopeParents: closure.directAndDescendant };
+  let plan: { scope: 'all' | 'selective'; complete: boolean; noteLids: string[]; tombstones: Tombstone[]; fingerprints: DiffFingerprint[]; peerBase: DiffFingerprint[]; peerBases?: Record<string, DiffFingerprint[]> };
   let key: string;
   if (target.kind === 'folder') {
     // 🔴 フォルダに自分しか居ない間は、置いたファイル(最初の回の全件)をそのままにする ── 読む相手が居ないのに書き直さない。
@@ -157,6 +183,7 @@ export async function buildSyncDiff(deps: SyncDeps, target: DiffTarget): Promise
       wantedBy: target.wantedBy,
       ownFilePresent: target.ownFilePresent,
       nowMs,
+      ...(selective === undefined ? {} : { selective }),
     });
     key = folderWriteKey(fp.writeKey, target.want, snap.pairs);
     if (target.ownFilePresent && target.lastKey === key) return { skipped: true, key };
@@ -173,6 +200,7 @@ export async function buildSyncDiff(deps: SyncDeps, target: DiffTarget): Promise
       peer: peer === null ? null : { baseline: toBaseline(peer.baseline), at: peer.at },
       all: target.all,
       nowMs,
+      ...(selective === undefined ? {} : { selective }),
     });
     key = '';
   }
@@ -202,16 +230,21 @@ export async function buildSyncDiff(deps: SyncDeps, target: DiffTarget): Promise
   const want = target.kind === 'folder' && target.want.length > 0 ? { want: [...target.want].sort() } : {};
   // 同期フォルダでは、確認済みの対応も添える(相手が自分の id を見つけたら、初回の確認を省ける)
   const pairs = target.kind === 'folder' && Object.keys(snap.pairs).length > 0 ? { pairs: { ...snap.pairs } } : {};
+  // 🔴 選択同期: つながり(両端が S)・色ラベル・ピン留めも S の中だけ(S の外のノートの存在を 1 つも出さない)。範囲を書くとバージョン 3
+  const relations = selected === null ? snap.relations : snap.relations.filter((r) => selected.has(r.from) && selected.has(r.to));
+  const labels = selected === null ? snap.labels : snap.labels.filter((l) => selected.has(l.lid));
+  const pins = selected === null ? snap.pins : snap.pins.filter((lid) => selected.has(lid));
+  const scope = plan.scope === 'selective' ? { scope: 'selective' as const } : {};
   const out = await writeDiffZip({
-    manifest: { exported_at: (deps.now?.() ?? new Date()).toISOString(), device: committed.device, seq: committed.seq, cid: deps.cid, title: deps.title(), complete: plan.complete, ...want, ...pairs },
+    manifest: { exported_at: (deps.now?.() ?? new Date()).toISOString(), device: committed.device, seq: committed.seq, cid: deps.cid, title: deps.title(), complete: plan.complete, ...want, ...pairs, ...scope },
     notes: notes(),
-    relations: snap.relations,
+    relations,
     tombstones: plan.tombstones,
     fingerprints: plan.fingerprints,
     peerBase: plan.peerBase,
     ...(plan.peerBases === undefined ? {} : { peerBases: plan.peerBases }),
-    labels: snap.labels,
-    pins: snap.pins,
+    labels,
+    pins,
     assets: () => [...carried.values()],
     getAssetBlob: (k) => deps.getAssetBlob(k),
   });
@@ -312,6 +345,10 @@ export function summaryLines(
   add(s.labelsChanged, '相手に合わせた色ラベル: {n} 件');
   add(s.pinsChanged, '相手に合わせたピン留め: {n} 件');
   add(s.attrConflicts, '両方で違う色ラベル・ピン留めにしていた物: {n} 件(こちらの色ラベル・ピン留めを残しました。次の同期で相手へ送ります)');
+  add(
+    s.skippedUnselected,
+    'この端末で同期の対象に選んでいないため、相手からの変更を反映しなかった物: {n} 件(対象外のノートと、その色ラベル・ピン留め・つながり。こちらのノートはそのままです)',
+  );
   for (const c of plan.conflicts) {
     const what =
       c.kind === 'first-sync'
@@ -492,6 +529,8 @@ export async function applySyncDiff(
     // 🔴 1 つのファイルを複数の相手が読む形(同期フォルダ)では、自分宛ての記録を使う(競合の連鎖を止める `peerBase`)
     const mineBase = diff.container.peerBases?.[snap.device];
     const remote = mineBase === undefined ? diff : { ...diff, container: { ...diff.container, peerBase: mineBase } };
+    // 🔴 こちらが選択同期: 対象の外のノートへの相手の変更・削除を反映しない / 新しく入るノートを直接指定へ足す
+    const localClosure = selectiveClosureOf(snap);
     const plan = planSyncImport({
       remote,
       remoteNoteFps,
@@ -502,6 +541,7 @@ export async function applySyncDiff(
       baseline,
       date: dateOf(now),
       genLid: deps.genLid,
+      ...(localClosure === null ? {} : { localSelective: { selectedLids: new Set(localClosure.lids), directAndDescendantLids: localClosure.directAndDescendant } }),
     });
 
     // ── 反映(1 つの tx)。⚠ 添付の実体は**反映のあとに**書く(失敗したら何も書かれていない = 言葉どおり)
@@ -526,6 +566,7 @@ export async function applySyncDiff(
         relationRemoves: plan.relationRemoves,
         labelSets: plan.labelSets,
         pinSets: plan.pinSets,
+        ...(plan.selectiveSelectAdds.length === 0 ? {} : { selectiveSelectAdds: plan.selectiveSelectAdds }),
         baseline: plan.baseline,
         nowIso: now.toISOString(),
       },

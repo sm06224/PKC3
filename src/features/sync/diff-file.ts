@@ -44,8 +44,22 @@ export const DIFF_FORMAT = 'pkc3-diff';
  * 1 を読む古い PKC3 は 2 を断る(印のキーをノートと取り違えて「本文が無い」と言わないため、版を上げた)。
  */
 export const DIFF_VERSION = 2;
-/** 読めるバージョン(1 = 段 2 の形。印を運ばない ── 取り込み側は印を判定に入れない)。 */
-export const DIFF_READABLE_VERSIONS: readonly number[] = [1, 2];
+/**
+ * 🔴 **選択同期のファイルだけが書くバージョン**(#2066 段 5-A)。`manifest.scope = 'selective'`(一部のノートだけを運ぶ)。
+ * 2 しか読めない v3.9.0 はこのファイルを断る ── 読めてしまうと、載っていないノートを「相手で消えた」と読んで
+ * ゴミ箱へ移す(部分の一覧を全件と取り違える)。`'all'` のファイルは今までどおり 2 で書く(v3.9.0 と行き来できる)。
+ */
+export const DIFF_VERSION_SELECTIVE = 3;
+/** 読めるバージョン(1 = 段 2 の形。印を運ばない ── 取り込み側は印を判定に入れない / 3 = 選択同期の範囲 `scope` を持つ)。 */
+export const DIFF_READABLE_VERSIONS: readonly number[] = [1, 2, 3];
+
+/** 書くバージョン(範囲で決める 1 か所)。 */
+export function diffVersionFor(scope: DiffScope | undefined): number {
+  return scope === 'selective' ? DIFF_VERSION_SELECTIVE : DIFF_VERSION;
+}
+
+/** 差分ファイルが運ぶ範囲。`all` = 全部のノート / `selective` = 選んだノートだけ(載っていない物は「消えた」ではない)。 */
+export type DiffScope = 'all' | 'selective';
 /** 差分ファイルの名前の末尾(二重拡張子。中身の型を名前で言う)。 */
 export const DIFF_SUFFIX = DIFF_ARCHIVE_SUFFIX;
 const MANIFEST = 'manifest.json';
@@ -77,6 +91,11 @@ export interface DiffManifest {
    * 受け手は、自分の id と今のワークスペースの cid が載っていれば、相手の側で人が確認済みとして初回の確認を省く。⚠ 省略可。
    */
   pairs?: Record<string, string>;
+  /**
+   * 運ぶ範囲(#2066 段 5-A)。⚠ 省略 = `'all'`。`'selective'` はバージョン 3 のファイルだけが持つ
+   * (受け手は相手の一覧に無いノートを消えたと見なさない)。
+   */
+  scope?: DiffScope;
 }
 
 export interface DiffNote {
@@ -189,7 +208,10 @@ export async function writeDiffZip(input: DiffWriteInput): Promise<{ blob: Blob;
     total: input.fingerprints.length,
   };
   const w = new ZipWriter();
-  await w.add(MANIFEST, [j({ format: DIFF_FORMAT, version: DIFF_VERSION, ...input.manifest, counts })]);
+  // 🔴 `'all'` は今までどおりバージョン 2・`scope` を書かない(v3.9.0 が読める形のまま)。`'selective'` だけがバージョン 3
+  const { scope, ...rest } = input.manifest;
+  const head = scope === 'selective' ? { format: DIFF_FORMAT, version: DIFF_VERSION_SELECTIVE, ...rest, scope, counts } : { format: DIFF_FORMAT, version: DIFF_VERSION, ...rest, counts };
+  await w.add(MANIFEST, [j(head)]);
   await w.add(CONTAINER, parts);
   for (const b of blobs) await w.add(`${ASSET_PREFIX}${b.key}`, [b.blob]); // Blob をそのまま(コピーしない)
   return { blob: w.finish(), counts, missingAssets };
@@ -253,6 +275,12 @@ export async function readDiffZip(zip: Blob): Promise<DiffFile> {
     throw new ZipReadError(`この PKC3 が読める差分ファイルのバージョンは ${DIFF_READABLE_VERSIONS.join(' / ')} です(このファイルは ${String(m.version)}。PKC3 を新しくしてください)`);
   }
   const version = m.version;
+  // 🔴 バージョン 3 から範囲を持つ。読めない値は断る(部分の一覧を全件と取り違えない)。2 以下は常に全件
+  let scope: DiffScope = 'all';
+  if (version >= 3) {
+    if (m.scope !== 'all' && m.scope !== 'selective') throw new ZipReadError('差分ファイルの概要の形が違います(運ぶ範囲が読み取れません)');
+    scope = m.scope;
+  }
   if (!isDeviceId(m.device) || typeof m.seq !== 'number' || !Number.isInteger(m.seq) || m.seq < 0 || !isStr(m.cid) || m.cid === '' || !isStr(m.title) || typeof m.complete !== 'boolean') {
     throw new ZipReadError('差分ファイルの概要の形が違います(書き出した端末の情報が読み取れません)');
   }
@@ -268,6 +296,7 @@ export async function readDiffZip(zip: Blob): Promise<DiffFile> {
     ...(Array.isArray(m.want) && m.want.every((x) => isDeviceId(x)) ? { want: m.want as string[] } : {}),
     ...(isObj(m.pairs) ? { pairs: Object.fromEntries(Object.entries(m.pairs).filter((e): e is [string, string] => isDeviceId(e[0]) && isStr(e[1]) && e[1] !== '')) } : {}),
     counts: isObj(m.counts) ? (m.counts as unknown as DiffManifest['counts']) : { notes: 0, relations: 0, deletions: 0, assets: 0, total: 0 },
+    scope,
   };
   const c = await parse(CONTAINER, '差分ファイルの本体');
   if (!isObj(c) || !Array.isArray(c.notes)) throw new ZipReadError('差分ファイルの本体に、ノートの記載がありません');
