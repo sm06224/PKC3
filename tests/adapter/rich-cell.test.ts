@@ -1,10 +1,10 @@
 /** @vitest-environment happy-dom */
 /**
- * 🔴 **リッチ編集のセル**(v4.0 Phase 1 / PR-05。フラグ `editor.rich`)── `RowSwap` への組み込みの検査。
+ * 🔴 **リッチ編集のセル**(v4.0 Phase 1 / PR-05。PR-06 で設定「編集の仕方」= リッチ編集へ昇格)── `RowSwap` への組み込みの検査。
  *
  * 守ること:
- * ① フラグ OFF(既定)では今までどおり原文の `<textarea>` が開く(既存無破壊)
- * ② フラグ ON で安全なブロックは `contenteditable` のセル、表せないブロックは原文の `<textarea>` へ自動で落ちる
+ * ① 既定(live)では今までどおり原文の `<textarea>` が開く(既存無破壊)
+ * ② リッチ編集で安全なブロックは `contenteditable` のセル、表せないブロックは原文の `<textarea>` へ自動で落ちる
  * ③ 何も変えずに閉じたら `commit` は 0 回(原文を 1 バイトも書き換えない)
  * ④ 書式の帯(太字・ハイライト・文字色・見出し)がセルに効き、確定で正しい PKC-Markdown が行の範囲だけ書き戻される
  * ⑤ 日本語入力: 変換中の `input` / `blur` で DOM を壊さず同期確定しない。`compositionend` の後に確定する
@@ -13,7 +13,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RowSwap } from '../../src/adapter/ui/render/row-swap';
-import { activeRichCell, RICH_CELL_FIELD, RICH_SOURCE_BUTTON_ATTR, richCellOf } from '../../src/adapter/ui/render/rich-cell';
+import { activeRichCell, RICH_CELL_FIELD, RICH_INSERT_BUTTON_ATTR, RICH_SOURCE_BUTTON_ATTR, richCellOf } from '../../src/adapter/ui/render/rich-cell';
+import { RICH_BACK_BUTTON_ATTR } from '../../src/adapter/ui/render/row-swap';
 import { renderMarkdownWithRanges } from '../../src/features/markdown/source-ranges';
 import { applyFormat } from '../../src/features/markdown/text-ops';
 import { applyTextColor } from '../../src/features/markdown/word-format';
@@ -23,8 +24,8 @@ import { Dispatcher } from '../../src/adapter/state/dispatcher';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { DetailRenderer } from '../../src/adapter/ui/render/detail';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
-import { appFlags } from '../../src/adapter/platform/flag-store';
-import { FLAG_EDITOR_RICH } from '../../src/features/flags';
+import { DEFAULT_EDITOR_MODE, EDITOR_MODES } from '../../src/features/editor-mode';
+import { findFlag } from '../../src/features/flags';
 
 const DOC = [
   '# 題', //                         0
@@ -53,6 +54,8 @@ interface Rig {
 }
 
 let richOn = true;
+/** 可視の知らせ(rig の `notify`)。 */
+const notes: string[] = [];
 
 function rig(initial = DOC): Rig {
   const host = document.createElement('div');
@@ -69,7 +72,7 @@ function rig(initial = DOC): Rig {
         body = [...lines.slice(0, start), ...text.split('\n'), ...lines.slice(end + 1)].join('\n');
         render(body);
       },
-      notify: () => undefined,
+      notify: (m) => notes.push(m),
       onInserted: () => undefined,
       richEnabled: () => richOn,
     },
@@ -146,13 +149,15 @@ function key(cell: HTMLElement, k: string, init: KeyboardEventInit = {}): Keyboa
 
 beforeEach(() => {
   richOn = true;
+  notes.length = 0;
   document.body.textContent = '';
 });
 
-describe('① フラグ OFF(既定)では今までどおり', () => {
-  it('フラグは既定でオフ(入れた瞬間に何も変わらない)', () => {
-    expect(FLAG_EDITOR_RICH.default).toBe(false);
-    expect(FLAG_EDITOR_RICH.needsRestart).toBeUndefined();
+describe('① 既定(live)では今までどおり', () => {
+  it('既定の編集の仕方は live のまま(入れた瞬間に何も変わらない)。リッチ編集は設定の 3 択の 1 つで、flag は退役', () => {
+    expect(DEFAULT_EDITOR_MODE).toBe('live');
+    expect(EDITOR_MODES.map((m) => m.id)).toEqual(['live', 'rich', 'split']);
+    expect(findFlag('editor.rich')).toBeNull();
   });
 
   it('段落を押すと原文の <textarea> が開き、セルは作られない', () => {
@@ -523,12 +528,287 @@ describe('貼り付けは素の字だけ', () => {
   });
 });
 
+/** 描き直しの着弾を待つ(予約した開き直しが走るまで)。 */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) await new Promise((r) => setTimeout(r, 0));
+}
+
+describe('⑧ リッチ ⇔ 原文の双方向切替(PR-06。片道を作らない)', () => {
+  it('Alt+M でリッチ → 原文 → リッチへ往復でき、打った字と位置を持って行く', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    let cell = cellOf(r.host)!;
+    caretAtEnd(cell);
+    typeText(cell, 'A');
+    key(cell, 'm', { altKey: true, code: 'KeyM' });
+    const ta = rowOf(r.host)!;
+    expect(ta.value).toBe('最初の段落。A');
+    expect(cellOf(r.host)).toBeNull();
+    // 原文の欄の隣に「リッチ」ボタン(戻り道)が出ている
+    expect(r.host.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)).not.toBeNull();
+    ta.value = '最初の段落。A**B**';
+    ta.setSelectionRange(3, 3);
+    key(ta, 'm', { altKey: true, code: 'KeyM' });
+    cell = cellOf(r.host)!;
+    expect(cell, 'Alt+M でリッチへ戻らない').not.toBeNull();
+    expect(rowOf(r.host)).toBeNull();
+    expect(cell.querySelector('strong')?.textContent).toBe('B');
+    expect(r.host.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)).toBeNull();
+    // 往復しても確定は 1 回で、行の範囲だけ
+    key(cell, 'Escape');
+    expect(r.commits).toEqual([{ start: 2, end: 2, text: '最初の段落。A**B**' }]);
+  });
+
+  it('「リッチ」ボタンでも戻せる。往復しても欄の聞き手は二重にならない(Escape 1 回で 1 段)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'h1', '題'));
+    r.host.querySelector<HTMLButtonElement>(`[${RICH_SOURCE_BUTTON_ATTR}]`)!.click();
+    r.host.querySelector<HTMLButtonElement>(`[${RICH_BACK_BUTTON_ATTR}]`)!.click();
+    expect(cellOf(r.host)?.tagName).toBe('H1');
+    r.host.querySelector<HTMLButtonElement>(`[${RICH_SOURCE_BUTTON_ATTR}]`)!.click();
+    const ta = rowOf(r.host)!;
+    expect(ta.value).toBe('# 題');
+    key(ta, 'Escape');
+    expect(rowOf(r.host)).toBeNull();
+    expect(r.commits).toEqual([]);
+  });
+
+  it('表せない記法を含むブロックは、理由を出して原文のまま(壊さない)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'pre', 'const'));
+    const ta = rowOf(r.host)!;
+    expect(r.host.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)).not.toBeNull();
+    key(ta, 'm', { altKey: true, code: 'KeyM' });
+    expect(cellOf(r.host)).toBeNull();
+    expect(rowOf(r.host)).toBe(ta);
+    expect(notes.at(-1)).toContain('原文のまま編集します');
+  });
+
+  it('既定(live)では原文の欄に「リッチ」ボタンは出ず、Alt+M も何もしない', () => {
+    richOn = false;
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    const ta = rowOf(r.host)!;
+    expect(r.host.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)).toBeNull();
+    key(ta, 'm', { altKey: true, code: 'KeyM' });
+    expect(cellOf(r.host)).toBeNull();
+    expect(notes).toEqual([]);
+  });
+});
+
+describe('⑨ セルの中の取り消し / やり直し(PR-06)', () => {
+  it('太字・文字色を当てた直後の Ctrl+Z で当てる前へ戻り、Ctrl+Y / Ctrl+Shift+Z で当て直せる', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    const rich = activeRichCell(r.host.parentElement!)!;
+    selectText(cellOf(r.host)!, '最初');
+    rich.applyEdit((sel) => applyFormat(sel, 'bold'));
+    selectText(cellOf(r.host)!, '段落');
+    rich.applyEdit((sel) => applyTextColor(sel, 'red'));
+    expect(rich.currentSource()).toBe('**最初**の:段落:red:。');
+    const z = key(cellOf(r.host)!, 'z', { ctrlKey: true, code: 'KeyZ' });
+    expect(z.defaultPrevented).toBe(true);
+    expect(rich.currentSource()).toBe('**最初**の段落。');
+    expect(cellOf(r.host)!.querySelector('strong')?.textContent).toBe('最初');
+    key(cellOf(r.host)!, 'z', { ctrlKey: true, code: 'KeyZ' });
+    expect(rich.currentSource()).toBe('最初の段落。');
+    expect(cellOf(r.host)!.querySelector('strong')).toBeNull();
+    key(cellOf(r.host)!, 'y', { ctrlKey: true, code: 'KeyY' });
+    expect(rich.currentSource()).toBe('**最初**の段落。');
+    key(cellOf(r.host)!, 'z', { ctrlKey: true, shiftKey: true, code: 'KeyZ' });
+    expect(rich.currentSource()).toBe('**最初**の:段落:red:。');
+    // 戻し切って閉じれば何も書かない(原本不変)
+    key(cellOf(r.host)!, 'z', { ctrlKey: true, code: 'KeyZ' });
+    key(cellOf(r.host)!, 'z', { ctrlKey: true, code: 'KeyZ' });
+    key(cellOf(r.host)!, 'Escape');
+    expect(r.commits).toEqual([]);
+  });
+
+  it('打った字も区切りで 1 手になる(書式の前に打った字は書式の取り消しで消えない)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    const rich = activeRichCell(r.host.parentElement!)!;
+    caretAtEnd(cellOf(r.host)!);
+    typeText(cellOf(r.host)!, '追記');
+    selectText(cellOf(r.host)!, '追記');
+    rich.applyEdit((sel) => applyFormat(sel, 'bold'));
+    key(cellOf(r.host)!, 'z', { ctrlKey: true, code: 'KeyZ' });
+    expect(rich.currentSource()).toBe('最初の段落。追記');
+    key(cellOf(r.host)!, 'z', { ctrlKey: true, code: 'KeyZ' });
+    expect(rich.currentSource()).toBe('最初の段落。');
+  });
+
+  it('🔴 変換中は記録も組み直しもしない(Ctrl+Z も IME のもの)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    const rich = activeRichCell(r.host.parentElement!)!;
+    const cell = cellOf(r.host)!;
+    cell.dispatchEvent(new Event('compositionstart'));
+    caretAtEnd(cell);
+    const sel = document.getSelection()!.getRangeAt(0);
+    const t = document.createTextNode('へんかん');
+    sel.insertNode(t);
+    cell.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }));
+    expect(rich.historyDepth()).toEqual({ past: 0, future: 0 });
+    const z = key(cell, 'z', { ctrlKey: true, code: 'KeyZ', isComposing: true });
+    expect(z.defaultPrevented).toBe(false);
+    expect(cellOf(r.host)).toBe(cell);
+    expect(cell.contains(t), '変換中に DOM を組み直した').toBe(true);
+    cell.dispatchEvent(new Event('compositionend'));
+    expect(rich.historyDepth().past).toBe(1);
+  });
+
+  it('セルの履歴の先頭では素通しする(ブロックを跨ぐ取り消しへ譲る)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    const z = key(cellOf(r.host)!, 'z', { ctrlKey: true, code: 'KeyZ' });
+    expect(z.defaultPrevented).toBe(false);
+  });
+});
+
+describe('⑩ 空の段落の / でブロックを挿入(PR-06)', () => {
+  function inRoot(r: Rig): HTMLElement {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-slot', 'root');
+    document.body.append(root);
+    root.append(r.host);
+    return root;
+  }
+  const menuOf = (root: HTMLElement): HTMLElement | null => root.querySelector<HTMLElement>('[data-pkc-rich-insert-menu]');
+
+  async function emptyParagraph(): Promise<{ r: Rig; root: HTMLElement; cell: HTMLElement }> {
+    const r = rig('前の段落\n\n後の段落');
+    const root = inRoot(r);
+    openClick(findByText(r.host, 'p', '前の段落'));
+    caretAtEnd(cellOf(r.host)!);
+    key(cellOf(r.host)!, 'Enter');
+    await settle();
+    const cell = cellOf(r.host)!;
+    expect(cell.textContent).toBe('');
+    return { r, root, cell };
+  }
+
+  it('/ を打つと一覧が開き、打った字で絞り込み、Escape で一覧だけ閉じて / は残る', async () => {
+    const { r, root, cell } = await emptyParagraph();
+    typeText(cell, '/');
+    const menu = menuOf(root)!;
+    expect(menu, '/ で一覧が開かない').not.toBeNull();
+    expect([...menu.querySelectorAll('button')].map((b) => b.textContent)).toContain('見出し 2');
+    typeText(cell, '見出し');
+    expect([...menuOf(root)!.querySelectorAll('button[role="menuitem"]')].map((b) => b.textContent)).toEqual(['見出し 1', '見出し 2', '見出し 3']);
+    // Esc は binder の受け手が閉じる(ここでは一覧が開いているのでセルは閉じない)
+    key(cell, 'Escape');
+    expect(cellOf(r.host)).toBe(cell);
+    activeRichCell(root)!.closeInsertMenu();
+    expect(menuOf(root)).toBeNull();
+    expect(cell.textContent).toBe('/見出し');
+  });
+
+  it('🔴 変換中の / では開かない(確定してから)', async () => {
+    const { root, cell } = await emptyParagraph();
+    cell.dispatchEvent(new Event('compositionstart'));
+    const t = document.createTextNode('／');
+    document.getSelection()!.getRangeAt(0).insertNode(t);
+    cell.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }));
+    expect(menuOf(root)).toBeNull();
+    const ev = key(cell, '/', { isComposing: true });
+    expect(ev.defaultPrevented).toBe(false);
+    expect(menuOf(root)).toBeNull();
+    cell.dispatchEvent(new Event('compositionend'));
+    expect(menuOf(root), '確定した ／ で開かない').not.toBeNull();
+  });
+
+  it('↓ で選んで Enter → 見出し 2 になってリッチ編集を続け、確定で「## 」の原文になる', async () => {
+    const { r, root, cell } = await emptyParagraph();
+    typeText(cell, '/');
+    expect(menuOf(root)).not.toBeNull();
+    key(cell, 'ArrowDown');
+    key(cell, 'ArrowDown');
+    const active = menuOf(root)!.querySelector<HTMLElement>('[data-pkc-active]')!;
+    expect(active.textContent).toBe('見出し 2');
+    expect(active.getAttribute('data-pkc-rich-insert')).toBe('h2');
+    expect(cellOf(r.host), '↓ で別のブロックへ移った').toBe(cell);
+    // Enter は強調した項目を押して一覧を閉じる。押した項目は binder の受け手を通る ── ここでは binder が無いので、
+    // 受け手と同じ口で当てる(binder の配線は下の「書式の帯の配線」で通す)
+    key(cell, 'Enter');
+    expect(menuOf(root)).toBeNull();
+    activeRichCell(root)!.insertBlock('h2', true);
+    const h = cellOf(r.host)!;
+    expect(h.tagName).toBe('H2');
+    expect(h.textContent).toBe('');
+    typeText(h, '章');
+    key(h, 'Escape');
+    expect(r.body()).toBe('前の段落\n\n## 章\n\n後の段落');
+  });
+
+  it('コードブロックを選ぶとテンプレートを入れて原文の編集へ移る(caret は中)', async () => {
+    const { r, root, cell } = await emptyParagraph();
+    typeText(cell, '/code');
+    activeRichCell(root)!.insertBlock('codeblock', true);
+    const ta = rowOf(r.host)!;
+    expect(ta.value).toBe('```\n\n```');
+    expect(ta.selectionStart).toBe(4);
+    key(ta, 'Escape');
+    // 打っていた(/code)ので捨てるかを聞く ── ここは確定で閉じる
+  });
+
+  it('「+」ボタンでも同じ一覧が開く(中身のあるブロックでは、表をブロックの後ろに足す)', () => {
+    const r = rig('本文');
+    const root = inRoot(r);
+    openClick(findByText(r.host, 'p', '本文'));
+    r.host.querySelector<HTMLButtonElement>(`[${RICH_INSERT_BUTTON_ATTR}]`)!.click();
+    expect(menuOf(root)?.getAttribute('data-pkc-rich-insert-menu')).toBe('button');
+    activeRichCell(root)!.insertBlock('table', false);
+    const ta = rowOf(r.host)!;
+    expect(ta.value.startsWith('本文\n\n| 項目 | 値 |')).toBe(true);
+    ta.dispatchEvent(new Event('blur'));
+    expect(r.body().startsWith('本文\n\n| 項目 | 値 |\n|---|---|')).toBe(true);
+  });
+});
+
+describe('⑪ ブロックの上下移動(Alt+↑ / Alt+↓。PR-06)', () => {
+  it('段落を下のブロックと入れ替え、確定は 1 回、動かした先をリッチのまま開き直す', async () => {
+    const r = rig('一の段落\n\n二の段落\n\n三の段落');
+    openClick(findByText(r.host, 'p', '一の段落'));
+    key(cellOf(r.host)!, 'ArrowDown', { altKey: true });
+    expect(r.commits).toHaveLength(1);
+    expect(r.body()).toBe('二の段落\n\n一の段落\n\n三の段落');
+    await settle();
+    expect(cellOf(r.host)?.textContent, '動かした先を開き直していない').toBe('一の段落');
+    key(cellOf(r.host)!, 'ArrowUp', { altKey: true });
+    expect(r.body()).toBe('一の段落\n\n二の段落\n\n三の段落');
+  });
+
+  it('打っていた字も一緒に動く。いちばん上では動かず理由を出す', async () => {
+    const r = rig('# 題\n\n本文');
+    openClick(findByText(r.host, 'h1', '題'));
+    key(cellOf(r.host)!, 'ArrowUp', { altKey: true });
+    expect(r.commits).toEqual([]);
+    expect(notes.at(-1)).toContain('上へは動かせません');
+    caretAtEnd(cellOf(r.host)!);
+    typeText(cellOf(r.host)!, 'X');
+    key(cellOf(r.host)!, 'ArrowDown', { altKey: true });
+    expect(r.body()).toBe('本文\n\n# 題X');
+  });
+
+  it('リストの項目は隣の項目と入れ替え、リストの端では動かない', async () => {
+    const r = rig('- 一\n- 二\n\n後');
+    openClick(findByText(r.host, 'li', '一'));
+    key(cellOf(r.host)!, 'ArrowDown', { altKey: true });
+    expect(r.body()).toBe('- 二\n- 一\n\n後');
+    await settle();
+    expect(cellOf(r.host)?.textContent).toBe('一');
+    key(cellOf(r.host)!, 'ArrowDown', { altKey: true });
+    expect(r.body()).toBe('- 二\n- 一\n\n後');
+    expect(notes.at(-1)).toContain('下へは動かせません');
+  });
+});
+
 /** 書式の帯(binder)からセルへ ── 実際の画面の組み立てで、帯のボタンを押す。 */
 describe('書式の帯の配線(DetailRenderer + binder)', () => {
   const unbinds: (() => void)[] = [];
   afterEach(() => {
     for (const u of unbinds.splice(0)) u();
-    appFlags.set(FLAG_EDITOR_RICH.name, false);
     localStorage.removeItem('pkc3.editor-mode');
   });
 
@@ -537,8 +817,7 @@ describe('書式の帯の配線(DetailRenderer + binder)', () => {
   }
 
   function editing(body: string) {
-    appFlags.set(FLAG_EDITOR_RICH.name, true);
-    localStorage.setItem('pkc3.editor-mode', 'live');
+    localStorage.setItem('pkc3.editor-mode', 'rich');
     const root = document.createElement('div');
     root.setAttribute('data-pkc-slot', 'root');
     document.body.append(root);
@@ -587,5 +866,47 @@ describe('書式の帯の配線(DetailRenderer + binder)', () => {
     expect(live.querySelector(`[data-pkc-field="${RICH_CELL_FIELD}"]`)).not.toBeNull();
     activeRichCell(root)!.toSource();
     expect(live.querySelector<HTMLTextAreaElement>('[data-pkc-field="row-source"]')?.value).toBe('段落');
+  });
+
+  it('/ の一覧で Enter を押すと binder の受け手(rich-insert-block)が当て、見出しになる', async () => {
+    const { root, d } = editing('段落');
+    const live = root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    for (let i = 0; i < 20 && live.querySelector('p') === null; i += 1) await new Promise((r) => setTimeout(r, 0));
+    openClick(live.querySelector('p')!);
+    const cell = live.querySelector<HTMLElement>(`[data-pkc-field="${RICH_CELL_FIELD}"]`)!;
+    caretAtEnd(cell);
+    key(cell, 'Enter');
+    for (let i = 0; i < 20 && live.querySelector<HTMLElement>(`[data-pkc-field="${RICH_CELL_FIELD}"]`)?.textContent !== ''; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const empty = live.querySelector<HTMLElement>(`[data-pkc-field="${RICH_CELL_FIELD}"]`)!;
+    caretAtEnd(empty);
+    typeText(empty, '/');
+    typeText(empty, '見出し');
+    expect(root.querySelector('[data-pkc-rich-insert-menu="slash"]')).not.toBeNull();
+    // 強調が無いときの Enter は先頭の項目(見出し 1)
+    key(empty, 'Enter');
+    const h = live.querySelector<HTMLElement>(`[data-pkc-field="${RICH_CELL_FIELD}"]`)!;
+    expect(h.tagName).toBe('H1');
+    expect(root.querySelector('[data-pkc-rich-insert-menu]')).toBeNull();
+    typeText(h, '見出し');
+    key(h, 'Escape');
+    expect(d.getState().openBody?.body).toBe('段落\n\n# 見出し');
+  });
+
+  it('セルの履歴を戻し切った Ctrl+Z は、ブロックを跨ぐ取り消し(確定 1 件ずつ)へ譲る', async () => {
+    const { root, d } = editing('一\n\n二');
+    const live = root.querySelector<HTMLElement>('[data-pkc-region="editor-live"]')!;
+    for (let i = 0; i < 20 && live.querySelector('p') === null; i += 1) await new Promise((r) => setTimeout(r, 0));
+    openClick(findByText(live, 'p', '一'));
+    let cell = live.querySelector<HTMLElement>(`[data-pkc-field="${RICH_CELL_FIELD}"]`)!;
+    caretAtEnd(cell);
+    typeText(cell, 'A');
+    key(cell, 'Escape');
+    expect(d.getState().openBody?.body).toBe('一A\n\n二');
+    for (let i = 0; i < 20 && live.querySelector('p') === null; i += 1) await new Promise((r) => setTimeout(r, 0));
+    openClick(findByText(live, 'p', '二'));
+    cell = live.querySelector<HTMLElement>(`[data-pkc-field="${RICH_CELL_FIELD}"]`)!;
+    expect(cell.textContent).toBe('二');
+    key(cell, 'z', { ctrlKey: true, code: 'KeyZ' });
+    expect(d.getState().openBody?.body).toBe('一\n\n二');
   });
 });

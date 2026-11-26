@@ -91,6 +91,9 @@ describe('値の解決(URL > 保存 > 既定)', () => {
     //   環境の残骸は黙殺され、新既定(live)= 本人が使っていた挙動と同値になる
     const v = resolveFlags({ 'editor.live': true });
     expect(Object.keys(v)).not.toContain('editor.live');
+    // 🔴 `editor.rich` も 2026-11-26 に設定 `pkc3.editor-mode` の `rich` へ昇格して退役した(PR-06)
+    const r = resolveFlags({ 'editor.rich': true });
+    expect(Object.keys(r)).not.toContain('editor.rich');
   });
 });
 
@@ -370,6 +373,8 @@ describe('🔴 クエリパラメータの抜け穴を作らない', () => {
     // 🔴 `editor.live` は設定 `pkc3.editor-mode` へ**昇格済み**(#104 第 2 弾、
     //    foldWhen「既定 ON にできたら」の成就)── flag に戻さない(等値 pin)
     expect(findFlag('editor.live'), '設定へ昇格済み ── flag に戻さない').toBeNull();
+    // 🔴 `editor.rich` も設定の `rich` へ昇格済み(v4.0 Phase 1 / PR-06)── flag に戻さない
+    expect(findFlag('editor.rich'), '設定へ昇格済み ── flag に戻さない').toBeNull();
   });
 
   /**

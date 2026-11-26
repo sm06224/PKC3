@@ -328,7 +328,7 @@ describe('マニュアルと実装の突合', () => {
    * マニュアルだけが嘘になる ── 紙面と同じ型の pin。
    */
   it('🔴 編集の仕方の選択肢がマニュアルと一致する', () => {
-    expect(EDITOR_MODES.length, '編集の仕方が 1 つも無い(この検査は空振り)').toBe(2);
+    expect(EDITOR_MODES.length, '編集の仕方が 1 つも無い(この検査は空振り)').toBe(3);
     for (const m of EDITOR_MODES) {
       expect(MANUAL, `マニュアルに編集の仕方「${m.label}」が無い`).toContain(`**${m.label}**`);
     }
@@ -2410,6 +2410,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-11-26(2086)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-11-21 の節に原本
+     */
+    '色ラベルの検索・取り消しと、書式の「その他 ▾」の矢印キー',
     /**
      * ⚠ **2026-11-26(#2085)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-11-21 の節に原本

@@ -78,6 +78,9 @@ const UNRESOLVED: readonly string[] = [
    */
   // ⚠ 2026-11-22(#2000 段 3 レビュー)── 同期フォルダを保存するように戻す(下の `pick-sync-folder` と同じ組み方)
   'allow-sync-folder-persist',
+  // ⚠ 2026-11-26(v4.0 Phase 1 / PR-06)── リッチ編集のブロックの挿入の一覧の項目。一覧の項目は `openContextMenu` が
+  //   `MenuItem.action`(定数 `RICH_INSERT_ACTION`)から組むので、静的な `data-pkc-action="rich-insert-block"` が source に無い
+  'rich-insert-block',
   'cancel-asr-install',
   // ⚠ 2026-11-22(#2000 段 4a-4)で 4 件増えた ── S3 互換の保管先の接続の確認 / 接続する / 接続を外す / CORS の設定をコピー。設定の節(`settings/sync-s3.ts`)が `button(action, …)` の変数で組む(`pick-sync-folder` と同じ)
   // ⚠ 2026-11-24(#2000 段 4b-B)で 7 件増えた ── 端末間の同期の暗号化の欄(`settings/sync-e2e.ts` が `button(action, …)` の変数 / `checkRow(…, action, …)` の変数で組む)。

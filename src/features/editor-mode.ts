@@ -10,9 +10,17 @@
  *   `adapter/ui/render/editor-mode.ts`(`page-format.ts` と同じ分け方)。
  */
 
-/** 設定画面に出る一覧。⚠ label を変えたらマニュアルも直す(`docs-parity`)。 */
+/**
+ * 設定画面に出る一覧。⚠ label を変えたらマニュアルも直す(`docs-parity`)。
+ *
+ * 🔴 **`rich`(リッチ編集)は 2026-11-26 に flag `editor.rich` から昇格した**(v4.0 Phase 1 / PR-06。ビジョン 4-B)。
+ *   1 画面編集の一種で、押したブロックが単純な段落・見出し・引用・リスト項目なら記号を隠して直接編集する
+ *   (保存の正本はプレーンな PKC-Markdown のまま。表せない記法のブロックは自動で原文の編集になる)。
+ *   flag は退役して 15 枠のうち 1 を返した(`editor.live` と同じ作法)。
+ */
 export const EDITOR_MODES = [
   { id: 'live', label: '1 画面で編集(ライブ)' },
+  { id: 'rich', label: 'リッチ編集(記号を隠して編集)' },
   { id: 'split', label: '2 ペイン(原文とプレビュー)' },
 ] as const;
 
@@ -27,4 +35,14 @@ export const DEFAULT_EDITOR_MODE: EditorMode = 'live';
 /** ⚠ 引き当てられない値では**既定へ落ちる**(壊れた設定で編集不能にしない)。 */
 export function isEditorMode(v: string): v is EditorMode {
   return EDITOR_MODES.some((m) => m.id === v);
+}
+
+/** 1 画面の編集(押したブロックをその場で開く)か。`live` と `rich` が当たる(`rich` は 1 画面編集の一種)。 */
+export function isOnePaneEditorMode(mode: EditorMode): boolean {
+  return mode === 'live' || mode === 'rich';
+}
+
+/** 押したブロックをリッチ編集のセルで開くか(`rich` だけ)。 */
+export function isRichEditorMode(mode: EditorMode): boolean {
+  return mode === 'rich';
 }

@@ -259,20 +259,11 @@ export const FLAG_WEBMCP = defineFlag('agent.webmcp', {
   needsRestart: true,
 });
 
-/**
- * 🔴 **ブロック単位のリッチ編集**(v4.0 Phase 1 / PR-05。ビジョン 4-A)。
- *
- * 1 画面編集で押したブロックが単純な段落・見出し・引用・リスト項目なら、Markdown の記号を隠した
- * `contenteditable` で直接編集する(`adapter/ui/render/rich-cell.ts`)。保存の正本は**プレーンな
- * PKC-Markdown のまま**で、表せない記法を含むブロックは自動で原文の編集になる。
- * ⚠ **既定はオフ**(入れた瞬間に何も変わらない)。⚠ **開くたびに読む**ので再起動は要らない
- *   (切り替えた次に押したブロックから効く)。
- */
-export const FLAG_EDITOR_RICH = defineFlag('editor.rich', {
-  default: false,
-  foldWhen: 'リッチ編集のブロック挿入・並べ替え・Undo 統合(PR-06)が完了し、editor-mode の正規設定へ昇格したら',
-  summary: '1 画面編集で、選んだブロックを Markdown の記号を隠して直接編集できるようにする(既定はオフ)',
-});
+// 🔴 `editor.rich` は 2026-11-26 に**退役**した(v4.0 Phase 1 / PR-06。ビジョン 4-B)。foldWhen
+//    「ブロック挿入・並べ替え・Undo 統合が完了し、editor-mode の正規設定へ昇格したら」が成就し、
+//    設定 `pkc3.editor-mode` の 3 つ目の選択肢 `rich`(リッチ編集)へ昇格(既定は live のまま)。
+//    保存に残る残骸は `resolveFlags` が捨てる(上の「知らない名前は黙って捨てる」)。
+//    ⚠ flag として再宣言しない ── `tests/features/flags.test.ts` が落とす。
 
 // 🔴 `editor.live` は 2026-08-14 に**退役**した(user 裁定 2026-08-08
 //    「既定でONかつ設定で2ペイン編集はできるようにする」)。foldWhen
