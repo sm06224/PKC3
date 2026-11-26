@@ -13,7 +13,7 @@
  * 届いていない」実装が緑で通り、**保存すると書式が消える**。
  */
 import { readFileSync } from 'node:fs';
-import { visibleBarItems, moreBarItems } from '../../src/features/markdown/format-bar-layout';
+import { visibleBarItems, menuBarItems, moreBarItems } from '../../src/features/markdown/format-bar-layout';
 import { stubStamps } from '../helpers/store-stamps';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
@@ -225,7 +225,7 @@ describe('書式パネル(P8 段⑥)', () => {
     const placed = buttons.map((b) => b.getAttribute('data-pkc-format'));
     expect([...placed].sort()).toEqual(BAR_FORMAT_OPS.map((o) => o.op).sort());
     expect(placed).toEqual(
-      [...visibleBarItems(), ...moreBarItems()].flatMap((i) => ('op' in i ? [i.op] : [])),
+      [...visibleBarItems(), ...moreBarItems(), ...menuBarItems()].flatMap((i) => ('op' in i ? [i.op] : [])),
     );
     const labelOf = (op: string): string | undefined =>
       BAR_FORMAT_OPS.find((o) => o.op === op)?.label;

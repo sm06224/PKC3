@@ -4,7 +4,8 @@
  *
  * - 選択欄の値はノートの前書きから読む。先頭は常に「アプリの設定に従う」
  * - 「すべてアプリの設定に戻す」は指定があるときだけ押せる(片道を作らない)
- * - 編集中・本文が届いていない間は選べない / フォルダ・system 領域では行ごと畳む
+ * - 本文が届いていない間・ほかの書けない状態は選べない / フォルダ・system 領域では行ごと畳む
+ * - 🔴 PR-04: 編集中のそのノートは選べる(下書きの前書きを書き換える ── 書式の帯の「ページ設定 ▾」と同じ 1 本)
  * - `SET_NOTE_LAYOUT` は既存の前書き書換 1 本の event を出し、`null` はキーを消す
  */
 import { describe, expect, it } from 'vitest';
@@ -87,13 +88,24 @@ describe('情報ペインの「ページ設定」', () => {
     expect(reset(root).disabled).toBe(true);
   });
 
-  it('🔴 編集中は選べない(断りの字を添える)', () => {
+  it('🔴 編集中のそのノートは選べる(PR-04。下書きの前書きを書き換える)', () => {
     const { root, inspector } = mount();
     let s = boot([meta('n1')], 'n1', '---\npage_font: mono\n---\n本文');
     s = { ...s, phase: 'editing' };
     inspector.render(s);
+    expect(select(root, 'pageFont').disabled).toBe(false);
+    expect(select(root, 'pageFont').value).toBe('mono');
+    expect(reset(root).disabled).toBe(false);
+  });
+
+  it('🔴 書けない状態(読み込みに失敗した後など、編集中以外の断り)では選べない(断りの字を添える)', () => {
+    const { root, inspector } = mount();
+    let s = boot([meta('n1')], 'n1', '---\npage_font: mono\n---\n本文');
+    s = { ...s, phase: 'error' };
+    inspector.render(s);
     expect(select(root, 'pageFont').disabled).toBe(true);
     expect(reset(root).disabled).toBe(true);
+    expect(select(root, 'pageFont').title.split('\n').length, '断りの字が無い').toBe(2);
   });
 
   it('🔴 フォルダ・system 領域では行ごと畳む', () => {
@@ -136,15 +148,34 @@ describe('SET_NOTE_LAYOUT', () => {
     expect(applyBodyRewrite(written, clear as never)).toBe(body);
   });
 
-  it('🔴 編集中は声に出して断る / フォルダ・system 領域・知らない lid・空の指示は何もしない', () => {
+  it('🔴 編集中のそのノートは、保存せずに下書きの前書きだけを書き換える(PR-04)', () => {
+    const s = boot([meta('n1')], 'n1', '本文\n');
+    const editing = { ...s, phase: 'editing', editingLid: 'n1' } as AppState;
+    const r = reduce(editing, { type: 'SET_NOTE_LAYOUT', lid: 'n1', patch: { pageFont: 'mono', pageMargin: 'wide' } });
+    expect(r.events, '編集中に保存の event を出した').toEqual([]);
+    expect(r.state.error ?? null).toBeNull();
+    expect(readNoteLayout(r.state.openBody!.body)).toEqual({ pageFormat: null, pageMargin: 'wide', pageColumns: null, pageFont: 'mono' });
+    expect(r.state.openBody!.body.endsWith('本文\n'), '本文が変わった').toBe(true);
+    // 戻すと下書きは元の 1 バイトまで戻る(片道にしない)
+    const back = reduce(r.state, {
+      type: 'SET_NOTE_LAYOUT',
+      lid: 'n1',
+      patch: { pageFormat: null, pageMargin: null, pageColumns: null, pageFont: null },
+    });
+    expect(back.state.openBody!.body).toBe('本文\n');
+    // 変わらない指示では state を変えない
+    expect(reduce(back.state, { type: 'SET_NOTE_LAYOUT', lid: 'n1', patch: { pageFont: null } }).state).toBe(back.state);
+  });
+
+  it('🔴 書けない状態は声に出して断る / フォルダ・system 領域・知らない lid・空の指示は何もしない', () => {
     const s = boot([meta('n1'), meta('f1', { archetype: 'folder' }), meta('sys-jobs')], 'n1', '本文');
-    const editing = reduce({ ...s, phase: 'editing', editingLid: 'n1' } as AppState, {
+    const failed = reduce({ ...s, phase: 'error' } as AppState, {
       type: 'SET_NOTE_LAYOUT',
       lid: 'n1',
       patch: { pageFont: 'mono' },
     });
-    expect(editing.events).toEqual([]);
-    expect(editing.state.error, '黙って捨てている').toMatch(/ページ設定を変えてください/);
+    expect(failed.events).toEqual([]);
+    expect(failed.state.error, '黙って捨てている').toMatch(/ページ設定を変えてください/);
     expect(reduce(s, { type: 'SET_NOTE_LAYOUT', lid: 'f1', patch: { pageFont: 'mono' } }).events).toEqual([]);
     expect(reduce(s, { type: 'SET_NOTE_LAYOUT', lid: 'sys-jobs', patch: { pageFont: 'mono' } }).events).toEqual([]);
     expect(reduce(s, { type: 'SET_NOTE_LAYOUT', lid: 'zz', patch: { pageFont: 'mono' } }).events).toEqual([]);

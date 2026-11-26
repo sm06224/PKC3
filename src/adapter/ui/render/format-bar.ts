@@ -13,7 +13,14 @@
  * ちらつく ── 選択位置そのものは focus を失っても残るので、壊れはしない。
  */
 import { BAR_FORMAT_OPS, WRAPS_SELECTION_OPS, type FormatOp } from '@features/markdown/text-ops';
-import { FORMAT_BAR_GROUPS, FORMAT_BAR_MORE_GROUPS, type BarItem } from '@features/markdown/format-bar-layout';
+import {
+  FORMAT_BAR_GROUPS,
+  FORMAT_BAR_MENUS,
+  FORMAT_BAR_MORE_GROUPS,
+  type BarItem,
+  type FormatMenuId,
+} from '@features/markdown/format-bar-layout';
+import { TEXT_COLORS, type TextColorId } from '@features/markdown/word-format';
 import { findCommand } from '@features/keymap';
 import { WRAPS_SELECTION_ATTR } from './format-wrap-hint';
 import { HINT_BASE, HINT_COMMAND, hintTitle } from './shortcut-hint';
@@ -46,6 +53,40 @@ const FORMAT_MORE_TITLE = '書式のボタンを、残りも含めてすべて�
 const RENUMBER_TITLE = '番号付きリストの番号を、上から順に振り直します';
 const SORT_TASKS_TITLE =
   'カーソルのあるチェックリストで、完了した項目をリストの末尾へ移動して整理します。リストの外にカーソルがあるときは、すべてのリストを整理します';
+
+/** 「ページ設定 ▾」の `data-pkc-action`(パネルの開閉。binder と `page-setup-panel.ts` が同じ綴りを引く)。 */
+export const PAGE_SETUP_ACTION = 'open-page-setup';
+
+/** 「文字色 ▾」「配置 ▾」の `data-pkc-action`。どの一覧かは `FORMAT_MENU_ATTR` が言う。 */
+export const FORMAT_MENU_ACTION = 'open-format-menu';
+export const FORMAT_MENU_ATTR = 'data-pkc-format-menu';
+/** ▾ の一覧の隠した元(`hidden`)。⚠ 一覧の項目・並びはここが正本(`exportMenuItemsFrom` が読む)。 */
+export const FORMAT_MENU_SOURCE_FIELD = 'format-menu-source';
+/** 文字色の見本のボタンの `data-pkc-action` と、見本の id を持つ属性(`''` = 色を解除)。 */
+export const TEXT_COLOR_ACTION = 'apply-text-color';
+export const TEXT_COLOR_ATTR = 'data-pkc-color';
+
+/** ▾ のボタンの字と説明。 */
+const FORMAT_MENU_SPECS: Readonly<Record<FormatMenuId, { readonly label: string; readonly hint: string }>> = {
+  color: {
+    label: '文字色 ▾',
+    hint: '選んだ範囲の文字の色を選びます(赤・橙・緑・青・紫・灰。「色を解除」で元の色に戻ります)',
+  },
+  align: {
+    label: '配置 ▾',
+    hint: 'カーソルのある段落の揃え(左・中央・右・解除)と字下げ(増やす・減らす)を選びます',
+  },
+};
+
+/** ▾ のボタンの字(マニュアルの突合も読む)。 */
+export function formatMenuLabel(id: FormatMenuId): string {
+  return FORMAT_MENU_SPECS[id].label;
+}
+
+/** 文字色の見本の字(`null` = 色を解除)。⚠ 色の値は `TEXT_COLORS` が正本(ここに書き写さない)。 */
+export function colorLabel(id: TextColorId | null): string {
+  return id === null ? '色を解除' : TEXT_COLORS.find((c) => c.id === id)!.label;
+}
 
 /** 「その他 ▾」(帯の最後の直接ボタン)の `data-pkc-action`。押すと binder が隠した元(`FORMAT_MORE_SOURCE_FIELD`)を読んで一覧にする。 */
 export const FORMAT_MORE_MENU_ACTION = 'open-format-more';
@@ -81,6 +122,16 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     action: 'insert-attachment',
     label: '添付を挿入',
     hint: '添付を題名で探して、カーソルの位置に入れます。画像は画像として、ほかのファイルはリンクとして入ります',
+  },
+  /**
+   * 🔴 **ページ設定 ▾**(v4.0 Phase 1 / PR-04)── 情報ペインの「ページ設定」と同じ部品の小さなパネルを開く
+   *   (印刷レイアウト表示・用紙・余白・段組み・字体・すべてアプリの設定に戻す)。
+   */
+  {
+    action: 'open-page-setup', // = PAGE_SETUP_ACTION(字のまま書く ── 出口の全数検査が綴りで追う)
+    label: 'ページ設定 ▾',
+    hint: 'このノートの用紙・余白・段組み・字体と、印刷レイアウト表示を切り替えるポップオーバーを開きます(情報ペインの「ページ設定」と同じ設定です)',
+    expanded: false,
   },
   {
     action: 'insert-diagram',
@@ -218,8 +269,43 @@ function toolButton(action: string): HTMLButtonElement {
   return btn;
 }
 
+/** ▾ のボタン(押すと一覧が出る)。 */
+function menuButton(id: FormatMenuId): HTMLButtonElement {
+  const spec = FORMAT_MENU_SPECS[id];
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', 'open-format-menu'); // = FORMAT_MENU_ACTION(字のまま書く ── 出口の全数検査が綴りで追う)
+  btn.setAttribute(FORMAT_MENU_ATTR, id);
+  btn.setAttribute('aria-haspopup', 'menu');
+  btn.title = spec.hint;
+  btn.append(labelSpan(spec.label));
+  return btn;
+}
+
+/**
+ * 文字色の見本のボタン(「文字色 ▾」の一覧の項目の元)。
+ * 🔑 見本の色は `--pkc-swatch` で渡す(一覧の項目の頭に小さな四角で描く ── `app.css`)。字は色の名前のまま。
+ */
+function colorButton(id: TextColorId | null): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-pkc-action', 'apply-text-color'); // = TEXT_COLOR_ACTION(字のまま書く ── 出口の全数検査が綴りで追う)
+  btn.setAttribute(TEXT_COLOR_ATTR, id ?? '');
+  const value = id === null ? null : TEXT_COLORS.find((c) => c.id === id)!.value;
+  if (value !== null) btn.style.setProperty('--pkc-swatch', value);
+  btn.title =
+    id === null
+      ? '選んだ範囲(またはカーソルのある所)の文字色を外して、元の色に戻します'
+      : `選んだ範囲の文字を${colorLabel(id)}にします(もう色が付いていれば、色だけ差し替えます)`;
+  btn.append(labelSpan(colorLabel(id)));
+  return btn;
+}
+
 function buttonFor(item: BarItem): HTMLButtonElement {
-  return 'op' in item ? formatButton(item.op) : toolButton(item.action);
+  if ('op' in item) return formatButton(item.op);
+  if ('action' in item) return toolButton(item.action);
+  if ('menu' in item) return menuButton(item.menu);
+  return colorButton(item.color);
 }
 
 /**
@@ -255,6 +341,15 @@ export function buildFormatBar(): HTMLElement {
     source.append(box);
   }
   bar.append(source);
+  // 🔴 ▾ の一覧の元(文字色 / 配置)── 「その他 ▾」と同じく、隠したボタンを binder が読んで一覧にする
+  for (const id of Object.keys(FORMAT_BAR_MENUS) as FormatMenuId[]) {
+    const box = document.createElement('div');
+    box.setAttribute('data-pkc-field', FORMAT_MENU_SOURCE_FIELD);
+    box.setAttribute(FORMAT_MENU_ATTR, id);
+    box.hidden = true;
+    for (const item of FORMAT_BAR_MENUS[id]) box.append(buttonFor(item));
+    bar.append(box);
+  }
   addMoreToggle(bar);
   return bar;
 }
@@ -268,7 +363,8 @@ export function buildFormatBar(): HTMLElement {
 function addMoreToggle(bar: HTMLElement): void {
   // ⚠ 隠した元(`format-more-source`)の中のボタンには付けない(一覧の項目であって、帯に並ばない)
   for (const btn of Array.from(bar.querySelectorAll<HTMLElement>('button'))) {
-    if (btn.closest(`[data-pkc-field="${FORMAT_MORE_SOURCE_FIELD}"]`) !== null) continue;
+    if (btn.closest(`[data-pkc-field="${FORMAT_MORE_SOURCE_FIELD}"], [data-pkc-field="${FORMAT_MENU_SOURCE_FIELD}"]`) !== null)
+      continue;
     const op = btn.getAttribute('data-pkc-format');
     if (op !== null && COMPACT_BAR_OPS.has(op)) continue;
     btn.setAttribute(FORMAT_MORE_ITEM_ATTR, '');

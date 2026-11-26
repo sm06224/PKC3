@@ -24,6 +24,12 @@ import { lineStart } from './line-start';
 import { TASK_LINE } from './task-line';
 import { LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
 import { tableToMarkdown } from './table-copy';
+import {
+  applyParagraphAlign,
+  changeParagraphIndent,
+  insertPageBreak,
+  toggleUnderline,
+} from './word-format';
 
 /** 改行コードの判定は leaf の `line-eol.ts` が正本(#1384)。ここからも使える。 */
 export { detectEol } from './line-eol';
@@ -1013,6 +1019,19 @@ export type FormatOp =
   | 'ruby'
   | 'emdot'
   | 'strike'
+  /**
+   * 🔴 **Word のような書式**(v4.0 Phase 1 / PR-04)── 規則の本体は `word-format.ts`。
+   * 下線(`:字:underline:`)・段落の揃え(`:::format{align=…}`)・字下げ(リストは行頭の空白、段落は `indent=1..4`)・改ページ(`+++`)。
+   * ⚠ 文字色は選ぶ色が要るので op にしない(`applyTextColor`。帯の「文字色 ▾」から呼ぶ)。
+   */
+  | 'underline'
+  | 'align-left'
+  | 'align-center'
+  | 'align-right'
+  | 'align-clear'
+  | 'indent-more'
+  | 'indent-less'
+  | 'pagebreak'
   /** 🔴 注意書きのブロック(`:::note` など。#425 の「囲い」)。8 種は {@link CALLOUT_CHOICES}。 */
   | CalloutOp;
 
@@ -1036,6 +1055,18 @@ export const FORMAT_OPS: readonly {
   { op: 'h3', label: '見出し3', hint: 'この行を見出し3にします(もう一度押すと外れます)' },
   { op: 'bold', label: '太字', hint: '選んだ範囲を太字にします(もう一度押すと外れます)' },
   { op: 'italic', label: '斜体', hint: '選んだ範囲を斜体にします(もう一度押すと外れます)' },
+  /**
+   * 🔴 **取り消し線・下線・ハイライト**(v4.0 Phase 1 / PR-04)── 帯の文字装飾の塊に出す。
+   * ⚠ 取り消し線とハイライトは #425 段②-a で「帯に出さない」としていた 2 つ。Word のように押して付け外しできるよう帯へ出した
+   *   (記法は前と同じ `~~` / `==`)。
+   */
+  { op: 'strike', label: '取り消し線', hint: '選んだ範囲に取り消し線を引きます(もう一度押すと外れます)' },
+  {
+    op: 'underline',
+    label: '下線',
+    hint: '選んだ範囲に下線を引きます(もう一度押すと外れます。文字色と一緒に付けられます)',
+  },
+  { op: 'highlight', label: 'ハイライト', hint: '選んだ範囲をハイライトします(もう一度押すと外れます)' },
   { op: 'code', label: 'コード', hint: '選んだ範囲をコードにします(もう一度押すと外れます)' },
   { op: 'ul', label: '箇条書き', hint: 'この行を箇条書きにします(もう一度押すと外れます)' },
   { op: 'ol', label: '番号', hint: 'この行を番号付きリストにします(もう一度押すと外れます)' },
@@ -1087,10 +1118,43 @@ export const FORMAT_OPS: readonly {
    * 片方だけ増えて食い違う(CLAUDE.md §7)。帯を描く側がこの印で絞る。
    * 🔑 名前はパレットとショートカット画面に出るので、**知る口はある**。
    */
-  { op: 'highlight', label: 'ハイライト', hint: '選んだ範囲をハイライトします', onBar: false },
   { op: 'ruby', label: 'ルビ', hint: '選んだ字にルビを付けます', onBar: false },
   { op: 'emdot', label: '圏点', hint: '選んだ字に圏点を打ちます', onBar: false },
-  { op: 'strike', label: '打ち消し', hint: '選んだ範囲に打ち消し線を引きます', onBar: false },
+  /**
+   * 🔴 **段落の揃え・字下げ・改ページ**(v4.0 Phase 1 / PR-04)。揃えと字下げは帯の「配置 ▾」の一覧、改ページは「その他 ▾」の一覧に出る
+   *   (並びは `format-bar-layout.ts`)。
+   */
+  {
+    op: 'align-left',
+    label: '左揃え',
+    hint: 'カーソルのある段落を左に揃えます(もう一度選ぶと揃えを外します)',
+  },
+  {
+    op: 'align-center',
+    label: '中央揃え',
+    hint: 'カーソルのある段落を中央に揃えます(もう一度選ぶと揃えを外します)',
+  },
+  {
+    op: 'align-right',
+    label: '右揃え',
+    hint: 'カーソルのある段落を右に揃えます(もう一度選ぶと揃えを外します)',
+  },
+  { op: 'align-clear', label: '揃えを解除', hint: 'カーソルのある段落の揃えを外して、元の段落に戻します' },
+  {
+    op: 'indent-more',
+    label: '字下げを増やす',
+    hint: 'カーソルのある段落を 1 段字下げします(段落は 4 段まで。リストの行は 1 段深くします)',
+  },
+  {
+    op: 'indent-less',
+    label: '字下げを減らす',
+    hint: 'カーソルのある段落の字下げを 1 段戻します(0 段になると字下げが外れます)',
+  },
+  {
+    op: 'pagebreak',
+    label: '改ページ',
+    hint: 'カーソルの位置に改ページを入れます(印刷・PDF ではここで次のページに移ります)',
+  },
   /**
    * 🔴 **注意書きのブロック 8 種**(#425)。帯には出さない(帯の「注意書き」が種類を先に聞く)。
    * 選んでいれば選んだ範囲を、選んでいなければ空のブロックを入れる(もう一度押すと外れる)。
@@ -1230,6 +1294,23 @@ export function applyFormat(sel: TextSelection, op: FormatOp): TextSelection {
       return toggleWrap(sel, '^^');
     case 'strike':
       return toggleWrap(sel, '~~');
+    // 🔴 Word のような書式(v4.0 Phase 1 / PR-04)── 規則の本体は `word-format.ts`
+    case 'underline':
+      return toggleUnderline(sel);
+    case 'align-left':
+      return applyParagraphAlign(sel, 'left');
+    case 'align-center':
+      return applyParagraphAlign(sel, 'center');
+    case 'align-right':
+      return applyParagraphAlign(sel, 'right');
+    case 'align-clear':
+      return applyParagraphAlign(sel, null);
+    case 'indent-more':
+      return changeParagraphIndent(sel, 1);
+    case 'indent-less':
+      return changeParagraphIndent(sel, -1);
+    case 'pagebreak':
+      return insertPageBreak(sel);
     /**
      * 🔴 **ルビだけは対称ではない**(`[[ruby:base|reading]]`)ので、
      *   囲むのではなく**組み立てて、読みの位置に caret を置く**。

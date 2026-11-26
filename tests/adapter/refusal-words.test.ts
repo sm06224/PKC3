@@ -121,9 +121,15 @@ describe('🔴 断り文の出口は、描いた画面のボタンの字で言�
     const line = root.querySelector<HTMLElement>('[data-pkc-field="inspector-editing-note"]');
     expect(line?.hidden, '列の上の 1 行が出ていない(前提が崩れた)').toBe(false);
     const said = line!.textContent ?? '';
+    /**
+     * ⚠ v4.0 Phase 1 / PR-04: 「すべてアプリの設定に戻す」は**編集中も押せる**(下書きの前書きを書き換える)。
+     *   押せないのは「このノートだけのページ設定が無い」からで、理由はそのとおり言う ── 編集中の断りではないので数えない。
+     */
     const locked = [
       ...root.querySelectorAll<HTMLButtonElement>('[data-pkc-region="inspector"] button:disabled'),
-    ].filter((b) => b.title !== '');
+    ].filter((b) => b.title !== '' && b.getAttribute('data-pkc-action') !== 'reset-note-layout');
+    const reset = root.querySelector<HTMLButtonElement>('[data-pkc-region="inspector"] [data-pkc-action="reset-note-layout"]');
+    expect(reset?.title, '戻すものが無いのに理由を言っていない').toBe('このノートだけのページ設定はありません');
     // ⚠ 空振り防止 ── 押せないボタンが 1 つも無ければ、下の loop は何も見ていない
     expect(locked.length, '押せないボタンが見つからない(前提が崩れた)').toBeGreaterThanOrEqual(5);
     for (const b of locked) {

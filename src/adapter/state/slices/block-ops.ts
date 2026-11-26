@@ -14,6 +14,7 @@ import {
   blockedWithSuffix,
   bodyRewriteGate,
   bodyWriteBlockReason,
+  noteLayoutBlockReason,
   bodyWriteBlockResult,
   nextLastAppend,
   phaseBlockReason,
@@ -23,7 +24,7 @@ import {
   syncShownBodies,
 } from '../app-state';
 import { isAppendable } from '@features/flavor/append-spec';
-import { noteLayoutApplies, noteLayoutKeys } from '@features/page-layout';
+import { noteLayoutApplies, noteLayoutKeys, writeNoteLayout } from '@features/page-layout';
 import { applyBodyRewrite } from '@features/markdown/body-rewrite';
 import { BLOCK_MOVED_NOTICE, moveLinesWithInverse } from '@features/markdown/line-move';
 
@@ -287,11 +288,21 @@ export function reduceBlockOps(state: AppState, action: BlockOpsAction): ReduceR
      * ⚠ フォルダ・system 領域のノートには書かない(画面にも出していない ── 撃たれても no-op)。
      */
     case 'SET_NOTE_LAYOUT': {
-      const blocked = bodyWriteBlockReason(state, action.lid);
+      const blocked = noteLayoutBlockReason(state, action.lid);
       if (blocked !== null)
         return { state: { ...state, error: blockedWithSuffix(blocked, 'ページ設定を変えてください') }, events: [] };
       const meta = state.entryMetas.get(action.lid);
       if (!meta || !noteLayoutApplies(meta.lid, meta.archetype)) return { state, events: [] };
+      /**
+       * 🔴 **編集中のそのノートは、下書きの前書きを書き換える**(v4.0 Phase 1 / PR-04。書式の帯の「ページ設定 ▾」)。
+       * ⚠ 保存しない ── 「すべて置換」と同じく下書き(`openBody.body`)だけを変え、編集の面が欄へ映す(1 画面編集・2 ペイン編集とも、
+       *   Ctrl+Z で戻せる)。保存は「編集を保存する」のとき。書換の規則は同じ `writeNoteLayout` の 1 本。
+       */
+      if (state.phase === 'editing' && state.openBody?.lid === action.lid) {
+        const body = writeNoteLayout(state.openBody.body, action.patch);
+        if (body === state.openBody.body) return { state, events: [] };
+        return { state: { ...state, openBody: { ...state.openBody, body } }, events: [] };
+      }
       const keys = noteLayoutKeys(action.patch);
       if (Object.keys(keys).length === 0) return { state, events: [] };
       return {

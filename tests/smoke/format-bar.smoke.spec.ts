@@ -45,7 +45,7 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
 
   /**
    * 🔴 #1982 段 3: 直接出すのは普段使いの 4 塊だけ(見出し | 太字・斜体・コード・リンク | 箇条書き・番号・チェック・引用 | 表・ノートリンク・添付)+「その他 ▾」。
-   * ⚠ 1440px で 1 行に収まる(折り返して 2 段にならない)/ 塊の間は余白で切れている(塊の中より広い)/ 副次の操作は「その他 ▾」の一覧にある。
+   * ⚠ 塊の間は余白で切れている(塊の中より広い)/ 副次の操作は「その他 ▾」の一覧にある(1440px で 1 行に収まる、は PR-04 で 2 段までに改めた ── 下の注記)。
    */
   const shown = await bar.locator('button').evaluateAll((els) =>
     els
@@ -60,17 +60,38 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
         };
       }),
   );
+  /**
+   * 🔴 v4.0 Phase 1 / PR-04: 文字装飾(取り消し線・下線・ハイライト・文字色 ▾)・配置 ▾・ページ設定 ▾ を足した。
+   *   1440px(2 ペイン編集で帯は約 900px)では **2 段まで**。⚠ 折り返すのは**塊の間だけ**(塊の途中で切れない)。
+   */
   expect(shown.map((b) => b.label)).toEqual([
     '見出し1', '見出し2', '見出し3',
-    '太字', '斜体', 'コード', 'リンク',
-    '箇条書き', '番号', 'チェック', '引用',
-    '表', 'ノートリンクを挿入', '添付を挿入',
+    '太字', '斜体', '取り消し線', '下線', 'ハイライト', '文字色 ▾', 'コード', 'リンク',
+    '箇条書き', '番号', 'チェック', '引用', '配置 ▾',
+    '表', 'ノートリンクを挿入', '添付を挿入', 'ページ設定 ▾',
     'その他 ▾',
   ]);
-  expect(new Set(shown.map((b) => b.top)).size, `1440px で帯が複数段に折り返している: ${shown.map((b) => b.top).join(',')}`).toBe(1);
-  const gaps = shown.slice(1).map((b, i) => Math.round(b.left - shown[i]!.right));
-  const inner = [0, 1, 3, 4, 5, 7, 8, 9, 11, 12].map((i) => gaps[i]!); // 塊の中の隙間
-  const between = [2, 6, 10, 13].map((i) => gaps[i]!); // 塊の間の隙間(見出し|太字 / リンク|箇条書き / 引用|表 / 添付|その他)
+  const rowsOf = new Set(shown.map((b) => b.top));
+  expect(rowsOf.size, `1440px で帯が 3 段以上に折り返している: ${shown.map((b) => b.top).join(',')}`).toBeLessThanOrEqual(2);
+  const groupSizes = [3, 8, 5, 4, 1]; // 見出し | 文字 | 段落・リスト | 挿入・ページ | その他 ▾
+  let at = 0;
+  const groupTops: number[] = [];
+  for (const n of groupSizes) {
+    const g = shown.slice(at, at + n);
+    expect(new Set(g.map((b) => b.top)).size, `塊(${g.map((b) => b.label).join('・')})の途中で折り返している`).toBe(1);
+    groupTops.push(g[0]!.top);
+    at += n;
+  }
+  // 塊の中の隙間より、同じ段で隣り合う塊の間の隙間が広い(区切り線ではなく余白で切る)
+  const inner: number[] = [];
+  const between: number[] = [];
+  at = 0;
+  for (const [gi, n] of groupSizes.entries()) {
+    for (let i = at + 1; i < at + n; i += 1) inner.push(Math.round(shown[i]!.left - shown[i - 1]!.right));
+    if (gi + 1 < groupSizes.length && groupTops[gi + 1] === groupTops[gi]) between.push(Math.round(shown[at + n]!.left - shown[at + n - 1]!.right));
+    at += n;
+  }
+  expect(between.length, '同じ段に並ぶ塊が無い(空振り)').toBeGreaterThan(0);
   expect(Math.min(...between), `塊の間が塊の中より広くない(inner=${inner.join(',')} between=${between.join(',')})`).toBeGreaterThan(
     Math.max(...inner) + 4,
   );
@@ -79,7 +100,7 @@ test('🔴 書式パネルが押せて、寸法が揃っていて、プレビュ
   await expect(moreMenu, '「その他 ▾」を押しても一覧が出ない').toBeVisible();
   const moreLabels = await moreMenu.locator('button').allTextContents();
   expect(moreLabels, '「その他 ▾」の一覧の顔ぶれと並び').toEqual([
-    '図を挿入', 'コードブロック', '数式', '注意書き', '日付を挿入', 'テンプレートを挿入', 'アイコンを挿入',
+    '図を挿入', 'コードブロック', '数式', '注意書き', '日付を挿入', 'テンプレートを挿入', 'アイコンを挿入', '改ページ',
     '番号を振り直す', '完了項目を末尾へ', 'この行を計算する',
     'ノート内を探す', '置換の欄を開く / 閉じる',
   ]);
