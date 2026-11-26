@@ -610,7 +610,8 @@ import {
 import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock, MENU_FROM_ATTR } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
-import { formatTarget } from './format-target';
+import { editorBody, formatTarget } from './format-target';
+import { nextWidgetId, widgetTemplateBlock, WIDGET_TEMPLATES } from '@features/markdown/widget-templates';
 import {
   activeRichCell,
   RICH_CELL_FIELD,
@@ -1104,6 +1105,7 @@ import {
   pickSnippetInApp,
   pickTemplateNoteInApp,
   pickDiagramInApp,
+  pickWidgetTemplateInApp,
   pickCalloutInApp,
   pickBodyIconInApp,
   pickArchiveInApp,
@@ -13484,6 +13486,39 @@ const ACTIONS: Record<string, ActionHandler> = {
     });
   },
   /**
+   * 🔴 **HTML ツール ── 押すとテンプレートの一覧から選んで入れる**(v4.0 Phase 2 / PR-08)。
+   *
+   * ⚠ 作りは `insert-diagram` と同じ ── **caret を先に控え**、器(`pickWidgetTemplateInApp`)が返ってから欄を引き直し、
+   *   挿すのは既にある `insertBlock`(ここで組み立てない)。何が並ぶかは `WIDGET_TEMPLATES`(表が正本)。
+   * 🔴 **id は同じノートで使われていない物を採る**(`nextWidgetId`)── 2 つ目は `tracker-2`。保存が混ざらない。
+   *   ライブ編集・リッチ編集の欄は**本文の一部**しか持たないので、欄・原文の欄・開いている本文の 3 つを合わせて見る。
+   */
+  'insert-widget-template': (dispatcher, _target, services, root) => {
+    const opened = formatTarget(root);
+    if (opened === null) {
+      sayNoFormatTarget(services);
+      return;
+    }
+    const at = { start: opened.selectionStart, end: opened.selectionEnd };
+    void pickWidgetTemplateInApp(
+      root,
+      WIDGET_TEMPLATES.map((t) => ({ id: t.baseId, label: `${t.label}(${t.hint})` })),
+    ).then((id) => {
+      if (id === null) return;
+      const tpl = WIDGET_TEMPLATES.find((t) => t.baseId === id);
+      if (tpl === undefined) return;
+      // ⚠ 欄は引き直す(開いている間に面が組み直されると、最初の節点は繋がっていない)
+      const ta = formatTarget(root);
+      if (ta === null) return;
+      ta.focus();
+      ta.setSelectionRange(at.start, at.end);
+      const whole = [ta.value, editorBody(root)?.value ?? '', dispatcher.getState().openBody?.body ?? ''].join('\n\n');
+      const wid = nextWidgetId(whole, tpl.baseId);
+      const sel = { text: ta.value, start: ta.selectionStart, end: ta.selectionEnd };
+      writeBack(ta, insertBlock(sel, { text: widgetTemplateBlock(tpl, wid), caret: -1 }));
+    });
+  },
+  /**
    * 🔴 **注意書き ── 押すと 8 種から選んでブロックを入れる**(#425 の「囲い(`:::`)の挿入口」)。
    *
    * ⚠ 作りは `insert-diagram` と同じ ── caret を先に控え、器(`pickCalloutInApp`)が返ってから欄を引き直す。
@@ -20996,6 +21031,7 @@ export const SHORTCUT_BUTTON: Readonly<Record<string, string>> = {
    *   ⚠ 受け手は画面のボタンそのもの(`insert-date` などと同じ)。選んだ範囲があれば図は囲み、無ければ種類を聞く(ボタンの作り)。
    */
   'insert-diagram': '[data-pkc-action="insert-diagram"]',
+  'insert-widget-template': '[data-pkc-action="insert-widget-template"]',
   'insert-callout': '[data-pkc-action="insert-callout"]',
   'insert-icon': '[data-pkc-action="insert-icon"]',
   /**
@@ -21532,6 +21568,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'insert-snippet',
   // ⚠ 2026-09-04(#528 案 B): 図の一覧 ── 同じく編集中の本文へ挿す
   'insert-diagram',
+  // ⚠ v4.0 Phase 2 / PR-08: HTML ツールのテンプレートの一覧 ── 同じく編集中の本文へ挿す
+  'insert-widget-template',
   // ⚠ #425: 注意書きの種類の一覧 ── 同じく編集中の本文へ挿す
   'insert-callout',
   // ⚠ 2026-09-13(#853 段①): 図案の表 ── 同じく編集中の本文へ挿す

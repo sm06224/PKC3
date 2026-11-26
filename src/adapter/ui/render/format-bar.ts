@@ -143,6 +143,15 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     // ⚠ 押すと囲む側は `mermaid`(op は別)
     wraps: 'mermaid',
   },
+  /**
+   * 🔴 **HTML ツール**(v4.0 Phase 2 / PR-08)── 押すとテンプレートの一覧(`WIDGET_TEMPLATES`)から選んで、カーソルの位置に入れる。
+   *   作りは「図を挿入」と同じ 2 段(一覧を開く → 選んだ物を入れる)。
+   */
+  {
+    action: 'insert-widget-template',
+    label: 'HTML ツール',
+    hint: 'HTML ツールのテンプレート(カウンター・進捗トラッカー / チェック集計リスト / 簡易計算・試算ツール / ノート内テーブル集計)を選んで、カーソルの位置に入れます',
+  },
   {
     action: 'insert-callout',
     label: '注意書き',

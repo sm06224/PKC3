@@ -1614,6 +1614,14 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     alias: '図 ダイアグラム フローチャート シーケンス mermaid 図を入れる 入れる',
   },
   {
+    id: 'insert-widget-template',
+    label: 'HTML ツール',
+    contexts: ['global'],
+    defaults: [],
+    note: 'HTML ツールのテンプレート(カウンター・チェックリスト・試算・ノート内の表の集計)を選んで、カーソルの位置に入れます(ノートを編集していて、本文の書式バーが出ているときだけ効きます)',
+    alias: 'HTML ツール ウィジェット テンプレート カウンター 進捗 チェックリスト 計算 試算 割り勘 集計 入れる',
+  },
+  {
     id: 'insert-callout',
     label: '注意書き',
     contexts: ['global'],

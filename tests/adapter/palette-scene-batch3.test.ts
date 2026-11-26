@@ -157,7 +157,8 @@ describe('④ 登記:2 件が一覧に居る(押しボタン = 命令 id、鍵�
     // ⚠ 2026-10-26(#766 D-3): 書式バーの「この行を計算する」(`calc-line`)も caret を読むので +1(同じく登記は無い)
     // ⚠ 2026-10-29(#425): 書式バーの「注意書きを入れる」(`insert-callout`)は登記済み(操作を探すから呼べる)で caret を読むので +1
     expect([...CARET_INSERT_TOOLS].sort()).toEqual(
-      [...ALL5, 'insert-attachment', 'calc-line', 'insert-callout'].sort(),
+      // ⚠ 2026-11-26(v4.0 Phase 2 / PR-08): 書式バーの「HTML ツール」(`insert-widget-template`)も登記済みで caret を読むので +1
+      [...ALL5, 'insert-attachment', 'calc-line', 'insert-callout', 'insert-widget-template'].sort(),
     );
     for (const id of ['renumber-lists', 'sort-tasks', 'format-text']) {
       expect(CARET_TOOLS.has(id), `前提:${id} は CARET_TOOLS に居る`).toBe(true);

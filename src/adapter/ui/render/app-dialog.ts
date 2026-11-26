@@ -919,6 +919,25 @@ export function pickDiagramInApp(
 }
 
 /**
+ * 🔴 **HTML ツールのテンプレートを選ぶ**(v4.0 Phase 2 / PR-08)。器は図の種類と同じ 1 本(`pickRowInApp`)。
+ * ⚠ 何が並ぶかは `features/markdown/widget-templates.ts` の `WIDGET_TEMPLATES` が正本。
+ *
+ * @returns 選んだテンプレートの `baseId`。`Escape` / 「やめる」/ 外なら `null`
+ */
+export function pickWidgetTemplateInApp(
+  host: HTMLElement,
+  choices: readonly { readonly id: string; readonly label: string }[],
+): Promise<string | null> {
+  return pickRowInApp(host, {
+    title: 'HTML ツール',
+    field: 'pick-widget-template',
+    indexAttr: 'data-pkc-widget-template-index',
+    note: '選んだツールをカーソルの位置に入れます。ツールの状態は「ノートへ保存」でノートに書き残せます',
+    rows: choices.map((c) => ({ label: c.label, value: c.id })),
+  });
+}
+
+/**
  * 🔴 **注意書きのブロックの種類を選ぶ**(#425)。器は図の種類と同じ 1 本(`pickRowInApp`)。
  * ⚠ 何が並ぶかは `features/markdown/text-ops.ts` の `CALLOUT_CHOICES` が正本。
  *

@@ -7,11 +7,19 @@
  * 3. 同じノートの無関係な段落を編集しても 2 のまま / 配色を暗くしても箱を読み直さずに `--pkc-fg` と `data-pkc-tone` が変わる
  * 4. 「状態を初期化」→ 確認 → 0 に戻る
  * 5. `id=` の無い ` ```html ` は今までどおり描かれ、`localStorage` にウィジェットの鍵を書かない
+ *
+ * PR-08(ビジョン 5-B)── 同じ起動の道中の続きに載せる(起動を増やさない):
+ * 6. 書式バー「その他 ▾ → HTML ツール」から「カウンター・進捗トラッカー」を入れ、値を変えて「ノートへ保存」
+ *    → 本文に ` ```json widget-state="tracker" ` が書かれる
+ * 7. 端末のウィジェットの保存を空にして再読み込み → 本文の状態ブロックから値が戻る
+ * 8. 「状態を初期化」→ 端末の保存も本文のブロックも消え、再読み込みしても戻らない
+ * 9. 表のあるノートに「ノート内テーブル集計」を入れる → `readTables()` で読んだ行数と合計が出る
  */
 import { test, expect, type Frame, type Page } from '@playwright/test';
 import {
   answerAppDialog,
   bootedHere,
+  clickBarMoreItem,
   clickReal,
   collectPageErrors,
   createEntry,
@@ -152,5 +160,112 @@ test('id= の在る html のウィジェットは状態を保ち、配色に追�
   expect(await widgetKeys(page), '初期化しても鍵が残った').toEqual([]);
   await expect(reset).toBeDisabled();
 
+  // ── PR-08 ── 6〜9 は同じ起動の続き(起動を増やさない)
+  await prOEight(page);
+
   expect(errors).toEqual([]);
 });
+
+/** 本文(読む面で開いているノート)の原文を、編集の欄から読む。 */
+async function sourceOf(page: Page): Promise<string> {
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await expect(ta).toBeVisible();
+  const v = await ta.inputValue();
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+  await expect(ta).toBeHidden();
+  return v;
+}
+
+/** 書式バー「その他 ▾ → HTML ツール」から 1 つ選んで入れる(欄の末尾に)。 */
+async function insertTool(page: Page, label: string): Promise<void> {
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.focus();
+  await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
+  await clickBarMoreItem(page, '[data-pkc-action="insert-widget-template"]');
+  const rows = page.locator('[data-pkc-field="pick-widget-template"]');
+  await expect(rows, 'HTML ツールの一覧が 4 行出ていない').toHaveCount(4);
+  await clickReal(page, rows.filter({ hasText: label }).first());
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
+}
+
+const trackerFrame = (page: Page): ReturnType<Page['locator']> =>
+  page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-id="tracker"] iframe.pkc-widget-frame');
+
+async function trackerValue(page: Page): Promise<string | null> {
+  const el = await trackerFrame(page).elementHandle();
+  if (el === null) return null;
+  const f = await el.contentFrame();
+  return f === null ? null : f.locator('#val').textContent().catch(() => null);
+}
+
+async function reopen(page: Page): Promise<void> {
+  await page.reload();
+  await bootedHere(page);
+  if ((await page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-id]').count()) === 0) {
+    await clickReal(page, page.locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"]').first());
+  }
+}
+
+async function prOEight(page: Page): Promise<void> {
+  // 6. 「HTML ツール」から「カウンター・進捗トラッカー」を入れる
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await insertTool(page, 'カウンター・進捗トラッカー');
+  const inserted = await page.locator('[data-pkc-field="editor-body"]').inputValue();
+  expect(inserted, '本文に ```html id="tracker" が入っていない').toContain('```html id="tracker"');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+  await expect(trackerFrame(page)).toHaveCount(1);
+  await expect.poll(() => trackerValue(page), { timeout: 10_000 }).toBe('0');
+  const tf = await (await trackerFrame(page).elementHandle())!.contentFrame();
+  await tf!.locator('#inc').click();
+  await tf!.locator('#inc').click();
+  await tf!.locator('#inc').click();
+  await expect.poll(() => trackerValue(page)).toBe('3');
+  const toolBar = page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-id="tracker"]');
+  const save = toolBar.locator('[data-pkc-field="widget-save"]');
+  await expect(save).toHaveText('ノートへ保存');
+  await expect(save, '保存したのに「ノートへ保存」が押せない').toBeEnabled();
+  await clickReal(page, save);
+  await expect(page.locator('body')).toContainText('ウィジェットの状態をノートに保存しました');
+  await writesLanded(page);
+  const saved = await sourceOf(page);
+  expect(saved, '本文に状態ブロックが書かれていない').toMatch(/```json widget-state="tracker"\n\{[^`]*"value": "3"[^`]*\}\n```/);
+  // 🔴 本体の囲みの直後に入る(本体より上・別の場所に生えない)
+  expect(saved.indexOf('```json widget-state="tracker"')).toBeGreaterThan(saved.indexOf('```html id="tracker"'));
+
+  // 7. 端末の保存を空にして再読み込み → 本文のブロックから 3 に戻る
+  await page.evaluate(() => {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('pkc3.widget.')) localStorage.removeItem(k);
+  });
+  await reopen(page);
+  await expect.poll(() => trackerValue(page), { timeout: 10_000 }).toBe('3');
+
+  // 8. 「状態を初期化」→ 端末の保存も本文のブロックも消える。再読み込みしても戻らない
+  const resetT = page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-id="tracker"] [data-pkc-field="widget-reset"]');
+  await expect(resetT).toBeEnabled();
+  await clickReal(page, resetT);
+  await expect(page.locator('[data-pkc-region="app-dialog"]')).toContainText('ノートに保存済みの状態ブロックも削除します');
+  await answerAppDialog(page, 'ok');
+  await expect.poll(() => trackerValue(page), { timeout: 10_000 }).toBe('0');
+  await writesLanded(page);
+  expect(await widgetKeys(page), '初期化しても端末の保存が残った').toEqual([]);
+  await expect.poll(async () => (await sourceOf(page)).includes('widget-state="tracker"'), { timeout: 10_000 }).toBe(false);
+  await reopen(page);
+  await expect.poll(() => trackerValue(page), { timeout: 10_000 }).toBe('0');
+
+  // 9. 表のあるノートに「ノート内テーブル集計」── 行数と合計が出る
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  const ta = page.locator('[data-pkc-field="editor-body"]');
+  await ta.fill('| 品目 | 金額 |\n|---|---|\n| 米 | 2000 |\n| 卵 | 300 |\n| 水 | 100 |\n\n```csv\nname,qty\na,1\nb,2\n```\n');
+  await insertTool(page, 'ノート内テーブル集計');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+  const sumFrame = page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-id="table-summary"] iframe.pkc-widget-frame');
+  await expect(sumFrame).toHaveCount(1);
+  const sf = await (await sumFrame.elementHandle())!.contentFrame();
+  await expect(sf!.locator('[data-table-index="0"]')).toContainText('表 1(markdown):3 行', { timeout: 10_000 });
+  await expect(sf!.locator('[data-table-index="0"] [data-sum]')).toHaveAttribute('data-sum', '2400');
+  await expect(sf!.locator('[data-table-index="1"]')).toContainText('表 2(csv):2 行');
+  await expect(sf!.locator('[data-table-index="1"] [data-sum]')).toHaveAttribute('data-sum', '3');
+}

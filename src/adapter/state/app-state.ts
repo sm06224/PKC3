@@ -3378,6 +3378,12 @@ export type UserAction =
    * 🔴 **本文の画像の大きさ・寄せを書く**(#1640 ③)。`SET_TABLE_FORMAT` と同じ形 ── 書換は 1 本
    * (`REQUEST_BODY_REWRITE`)を通る。渡さなかった札は保つ、`null` は外す。
    */
+  /**
+   * 🔴 **ウィジェットの状態をノートの本文に書く / 消す**(v4.0 Phase 2 / PR-08)。`SET_IMAGE_ATTRS` と同じ形 ──
+   * 書換は 1 本(`REQUEST_BODY_REWRITE` の `kind: 'widget-state'`)を通る。`state: null` は消す。
+   * ⚠ 撃つのは親の UI のボタン(「ノートへ保存」/「状態を初期化」)だけ ── 箱(ウィジェット)の合図からは撃たない。
+   */
+  | { type: 'SET_WIDGET_STATE'; lid: string; widgetId: string; state: Readonly<Record<string, string>> | null }
   | {
       type: 'SET_IMAGE_ATTRS';
       lid: string;
@@ -5674,6 +5680,7 @@ export function reduceCore(
     case 'SET_CSV_SHAPE':
     case 'SET_TABLE_FORMAT':
     case 'SET_IMAGE_ATTRS':
+    case 'SET_WIDGET_STATE':
     case 'TOGGLE_TASK':
     case 'SET_COLOR_CODE':
     case 'SET_ATTACHMENT_NAME':
