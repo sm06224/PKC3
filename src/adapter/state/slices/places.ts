@@ -162,8 +162,17 @@ export function reducePlaces(state: AppState, action: PlacesAction): ReduceResul
         isPlacePosition(action.y) &&
         (action.template === undefined || isPlaceTemplateId(action.template)) &&
         // 🔴 ほかのノートを置く回(#1662 2)── 置く先が台帳に在るノートのときだけ(居ないノートの付箋は「(見つかりません)」になる)
-        (action.entry === undefined || (action.template === undefined && state.entryMetas.has(action.entry)))
-          ? action.entry !== undefined
+        (action.entry === undefined || (action.template === undefined && state.entryMetas.has(action.entry))) &&
+        // 🔴 焼いた絵(手書き。v4.0 Phase 2 / PR-10)── ほかの置き方と一緒に渡さない。大きさは付箋の大きさの門
+        (action.image === undefined ||
+          (action.template === undefined &&
+            action.entry === undefined &&
+            /^[A-Za-z0-9_-]+$/.test(action.image.asset) &&
+            isPlaceRectNumber('w', action.image.w) &&
+            isPlaceRectNumber('h', action.image.h)))
+          ? action.image !== undefined
+            ? { kind: 'place-add', x: action.x, y: action.y, image: { ...action.image } }
+            : action.entry !== undefined
             ? { kind: 'place-add', x: action.x, y: action.y, entry: action.entry }
             : action.template === undefined
               ? { kind: 'place-add', x: action.x, y: action.y }

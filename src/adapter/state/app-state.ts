@@ -3145,7 +3145,16 @@ export type UserAction =
    * `template` = テンプレートから置く(#529 W4)/ `entry` = ほかのノートを置く(#1662 2。置くノートの lid)。
    * 渡すのはどちらか一方まで。
    */
-  | { type: 'ADD_PLACE'; lid: string; x: number; y: number; template?: PlaceTemplateId; entry?: string }
+  | {
+      type: 'ADD_PLACE';
+      lid: string;
+      x: number;
+      y: number;
+      template?: PlaceTemplateId;
+      entry?: string;
+      /** 🔴 焼いた絵(手書き)の付箋(v4.0 Phase 2 / PR-10)── 添付の key と大きさ。`template` / `entry` とは一緒に渡さない。 */
+      image?: { asset: string; w: number; h: number };
+    }
   /**
    * 🔴 **位置と大きさを数で入れる**(#529 W2)── 開き行の x= y= w= h= のうち渡した札だけを一度に書く。
    * 同じ門。値は reducer でも検める(窓の検めと同じ規則 ── 型は境界で効かない)。

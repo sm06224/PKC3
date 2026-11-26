@@ -4830,7 +4830,7 @@ export function connectStoreEffects(
                 ev.rewrite.kind === 'place-text' ||
                 // 🔴 動かす・大きさ・色・形・回転・前後・グループ(依頼 118-2 / 236)── 「元に戻す」の行き先になる版を残す
                 placeUndo !== null ||
-                (ev.rewrite.kind === 'place-add' && ev.rewrite.template !== undefined)
+                (ev.rewrite.kind === 'place-add' && (ev.rewrite.template !== undefined || ev.rewrite.image !== undefined))
                   ? { checkpoint: true }
                   : {}),
               },

@@ -1790,17 +1790,82 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * 🔴 **ボードの無限キャンバスのバー**(v4.0 Phase 2 / PR-09)── 見え方・倍率は画面だけで済ませ、
    * 「いつもキャンバスで開く」だけを本文へ書く(`SET_CANVAS_LAYOUT`)。⚠ 外さない(アプリと同寿命)。
    */
-  installCanvasViewport(root, (lid, on) => {
-    const fire = (): void => dispatcher.dispatch({ type: 'SET_CANVAS_LAYOUT', lid, on });
-    // 🔑 別のタブが編集中のノートには書かない(付箋をつなぐ `place-connect.ts` と同じ形)
+  /**
+   * 🔑 別のタブが編集中のノートには書かない(付箋をつなぐ `place-connect.ts` と同じ形)── キャンバスの書く口の共通の門。
+   * @returns 書いたか(断ったら理由を出して `false`)
+   */
+  const canvasWrite = (lid: string, fire: () => void, suffix: string): Promise<boolean> => {
     if (elsewhereCheckNotNeeded(dispatcher, editLockPort, lid)) {
       fire();
-      return;
+      return Promise.resolve(true);
     }
-    void editedElsewhereReason(dispatcher, editLockPort, lid).then((why) => {
-      if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: `${why}(表示の既定は変えていません)` });
-      else fire();
+    return editedElsewhereReason(dispatcher, editLockPort, lid).then((why) => {
+      if (why !== null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: `${why}(${suffix})` });
+        return false;
+      }
+      fire();
+      return true;
     });
+  };
+  installCanvasViewport(root, {
+    setDefault: (lid, on) => {
+      void canvasWrite(lid, () => dispatcher.dispatch({ type: 'SET_CANVAS_LAYOUT', lid, on }), '表示の既定は変えていません');
+    },
+    // 🔴 複数選択の整列(v4.0 Phase 2 / PR-10)── 1 回の書込 = 1 手の「元に戻す」
+    movePlaces: (lid, moves) => {
+      void canvasWrite(lid, () => dispatcher.dispatch({ type: 'MOVE_PLACES', lid, moves }), '付箋は動かしていません');
+    },
+    groupPlaces: (lid, lines) => {
+      void canvasWrite(lid, () => dispatcher.dispatch({ type: 'GROUP_PLACES', lid, lines }), 'グループにしていません');
+    },
+    writeBlocked: (lid) => bodyWriteBlockReason(dispatcher.getState(), lid),
+    /**
+     * 🔴 **手書きを置く**(v4.0 Phase 2 / PR-10)── 焼いた PNG を既存の添付の経路(`attachOne`。2 つ目の添付口を作らない)で
+     * 保存し、描いた場所へ付箋 1 枚を書く(`ADD_PLACE` の `image` = 1 回の本文書込)。
+     * ⚠ 添付はボードと同じフォルダへ、開いているボードを動かさずに作る(`keepSelection`)。
+     * ⚠ 書く前に門を確かめる ── 書けないのに添付だけ残さない。
+     */
+    placeDrawing: async (lid, png, rect) => {
+      const blocked = bodyWriteBlockReason(dispatcher.getState(), lid);
+      if (blocked !== null) {
+        dispatcher.dispatch({ type: 'OP_FAILED', error: blocked });
+        return false;
+      }
+      let ok = false;
+      await canvasWrite(
+        lid,
+        () => {
+          ok = true;
+        },
+        '手書きは置いていません',
+      );
+      if (!ok) return false;
+      let out: Awaited<ReturnType<typeof attachOne>> = null;
+      await withAssetGate.queued(async () => {
+        const st = dispatcher.getState();
+        const parentLid = resolveCanonicalParents(st.entryMetas, st.relations).get(lid) ?? null;
+        out = await attachOne(
+          dispatcher,
+          attachDeps,
+          { name: '手書き.png', type: 'image/png', size: png.size, blob: png },
+          undefined,
+          { parentLid, keepSelection: true },
+        );
+      });
+      const attached = out as Awaited<ReturnType<typeof attachOne>>;
+      if (attached === null) return false;
+      const before = dispatcher.getState().error;
+      dispatcher.dispatch({
+        type: 'ADD_PLACE',
+        lid,
+        x: rect.x,
+        y: rect.y,
+        image: { asset: attached.assetKey, w: rect.w, h: rect.h },
+      });
+      const after = dispatcher.getState().error;
+      return after === null || after === before;
+    },
   });
   /**
    * 🔴 **予定の札を、指でも掴んで動かせるようにする配線**(#855 決1)。

@@ -31,6 +31,7 @@
  * `parseTier1FormatOpen`(= 描画が使う当のもの)へ寄せる。
  * ⚠ `::::format{…}`(4 コロン)は描画されない ── ここでも受理しない。
  */
+import { freehandPlaceBlock } from '@features/canvas/freehand';
 import type { BlockDirectiveAttrs } from './block-directive-attrs';
 import { parseBlockDirectiveOpen, parseTier1FormatOpen } from './block-directive-attrs';
 import { frontmatterLineCount } from './frontmatter';
@@ -998,6 +999,25 @@ export function addPlaceEntry(body: string, x: number, y: number, lid: string): 
   if (!/^[A-Za-z0-9_-]+$/.test(lid)) return null;
   if (endsInsideOpenBlock(body)) return null;
   const block = `:::format{.pkc-place entry=${lid} x=${x} y=${y}}\n:::\n`;
+  if (body === '') return block;
+  return body + (body.endsWith('\n') ? '\n' : '\n\n') + block;
+}
+
+/**
+ * 🔴 **焼いた絵(手書き)の付箋を足す**(v4.0 Phase 2 / PR-10)── 本文の末尾に、透過の地・枠なしの付箋 1 枚
+ * (`fill=transparent stroke=none`)と、その中の `![手書き](asset:…)` を書く。字の形は `freehandPlaceBlock` の 1 本。
+ * 門・末尾の書き方は `addPlace` と同じ(閉じていない囲いの中へは書かない)。
+ */
+export function addPlaceImage(
+  body: string,
+  x: number,
+  y: number,
+  image: { readonly asset: string; readonly w: number; readonly h: number },
+): string | null {
+  if (!isPos(x) || !isPos(y)) return null;
+  if (endsInsideOpenBlock(body)) return null;
+  const block = freehandPlaceBlock({ x, y, w: image.w, h: image.h }, image.asset);
+  if (block === null) return null;
   if (body === '') return block;
   return body + (body.endsWith('\n') ? '\n' : '\n\n') + block;
 }

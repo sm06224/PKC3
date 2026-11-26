@@ -44,7 +44,7 @@ import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
 import { clampGroupDelta, parsePlaceGroup } from '@features/markdown/place-notation';
 import { placeRotateOf, resizeRotated } from '@features/markdown/place-rotate';
 import { clearConnectLayer, PLACE_FOCUS_ATTR } from './place-board';
-import { canvasZoomOf, isCanvasHost } from './canvas-viewport';
+import { canvasZoomOf, isCanvasHost, SELECTED_ATTR } from './canvas-viewport';
 
 /** 押すと掴むの境目(px)。 */
 const DRAG_SLOP = 4;
@@ -132,10 +132,16 @@ interface Drag {
 function groupMates(block: HTMLElement, pending: boolean): Member[] {
   const name = parsePlaceGroup(block.getAttribute('data-pkc-group'));
   const host = block.parentElement;
-  if (name === null || host === null) return [];
+  // 🔴 無限キャンバスで選んでいる付箋(v4.0 Phase 2 / PR-10)── 掴んだ 1 枚が選択の中なら、選んだ全員も一緒に動く
+  const selected = block.getAttribute(SELECTED_ATTR) === '1';
+  if ((name === null && !selected) || host === null) return [];
   const out: Member[] = [];
   for (const el of host.querySelectorAll<HTMLElement>('.pkc-format-block.pkc-place')) {
-    if (el === block || parsePlaceGroup(el.getAttribute('data-pkc-group')) !== name) continue;
+    if (el === block) continue;
+    const mate =
+      (name !== null && parsePlaceGroup(el.getAttribute('data-pkc-group')) === name) ||
+      (selected && el.getAttribute(SELECTED_ATTR) === '1');
+    if (!mate) continue;
     const seen = (v: string, attr: string): number =>
       (pending ? Number.parseFloat(v) : Number.NaN) || Number(el.getAttribute(attr)) || 0;
     out.push({

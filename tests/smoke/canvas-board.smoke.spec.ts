@@ -32,7 +32,7 @@ const BOARD = [
   ':::',
 ].join('\n');
 
-test('🔴 無限キャンバス: 切替・ズーム・パン・倍率を割り戻した掴み・負の位置・通常表示へ戻す (PR-09)', async ({ page }) => {
+test('🔴 無限キャンバス: 切替・ズーム・パン・倍率を割り戻した掴み・負の位置・通常表示へ戻す (PR-09) + 複数選択・整列・手書き・関係グラフ (PR-10)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
@@ -158,5 +158,206 @@ test('🔴 無限キャンバス: 切替・ズーム・パン・倍率を割り�
   await expect(detail.locator('[data-pkc-field="canvas-bar"]')).toHaveCount(0);
   await expect(detail.locator('[data-pkc-field="canvas-viewport"]')).toHaveCount(0);
 
+  /**
+   * ── 5. v4.0 Phase 2 / PR-10(ビジョン 2-B)── 複数選択と整列・手書き・関係グラフのズームとボードで開く。
+   * 🔑 smoke の予算(`scripts/smoke-budget.mjs`)── 新しい起動を増やさず、この道中に積む。
+   * ⚠ 選択・カメラはノートごとの記憶なので、3 つはそれぞれ新しいノートで始める(前の段の状態を持ち込まない)。
+   */
+  await multiSelectAndAlign(page);
+  await freehandPlace(page);
+  await graphToBoard(page);
+
   expect(errors).toEqual([]);
 });
+
+/* ───────────────── v4.0 Phase 2 / PR-10(ビジョン 2-B) ───────────────── */
+
+/** 板を作って無限キャンバスで開き、100% にする。 */
+async function openBoard(page: import('@playwright/test').Page, title: string, body: string) {
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', title);
+  await page.fill('[data-pkc-field="editor-body"]', body);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const detail = page.locator('[data-pkc-region="detail"]');
+  const bar = detail.locator('[data-pkc-field="canvas-bar"]');
+  await clickReal(page, bar.locator('[data-pkc-canvas-cmd="mode"]'));
+  await expect(bar.locator('[data-pkc-canvas-cmd="mode"]')).toHaveAttribute('aria-pressed', 'true');
+  await clickReal(page, bar.locator('[data-pkc-canvas-cmd="zoom-reset"]'));
+  return { detail, bar, vp: detail.locator('[data-pkc-field="canvas-viewport"]') };
+}
+
+/** 🔴 複数選択: Shift + クリックで 2 枚選び、「整列 ▾ → 左揃え」で x= が揃う(1 回の書込)。 */
+async function multiSelectAndAlign(page: import('@playwright/test').Page): Promise<void> {
+  const { detail, bar } = await openBoard(page, '整列の板', BOARD);
+  const c1 = detail.locator('#c1');
+  const c2 = detail.locator('#c2');
+  await expect(bar.locator('[data-pkc-canvas-cmd="align"]'), '選ぶ前から整列が出ている').toBeHidden();
+
+  // 🔑 付箋の中の字(⠿ でない所)を Shift + クリック
+  await c1.getByText('ひとつめ').click({ modifiers: ['Shift'] });
+  await c2.getByText('ふたつめ').click({ modifiers: ['Shift'] });
+  await expect(c1).toHaveAttribute('data-pkc-canvas-selected', '1');
+  await expect(c2).toHaveAttribute('data-pkc-canvas-selected', '1');
+  // 選んだ付箋は輪郭(アクセント)で見える
+  const outline = await c1.evaluate((el) => getComputedStyle(el).outlineStyle);
+  expect(outline, '選んだ付箋に輪郭が出ていない').toBe('solid');
+
+  const align = bar.locator('[data-pkc-canvas-cmd="align"]');
+  await expect(align).toBeVisible();
+  await clickReal(page, align);
+  const menu = bar.locator('[data-pkc-field="canvas-align-menu"]');
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('[data-pkc-canvas-align="distribute-x"]'), '2 枚なのに等間隔が押せる').toBeDisabled();
+  await clickReal(page, menu.locator('[data-pkc-canvas-align="left"]'));
+  await expect(menu).toHaveCount(0);
+  // 🔴 本文から描き直された値で揃っている
+  await expect(c2, '左揃えが本文に書かれていない').toHaveAttribute('data-pkc-x', '120', { timeout: 5000 });
+  await expect(c1).toHaveAttribute('data-pkc-x', '120');
+  await expect(c2).toHaveAttribute('data-pkc-y', '200');
+  // 見た目も揃う
+  const b1 = (await c1.boundingBox())!;
+  const b2 = (await c2.boundingBox())!;
+  expect(Math.round(b1.x), '見た目の左端が揃っていない').toBe(Math.round(b2.x));
+  // 選択は描き直しの後も残る / Esc で外れる
+  await expect(c2).toHaveAttribute('data-pkc-canvas-selected', '1');
+  await detail.locator('[data-pkc-field="canvas-viewport"]').focus();
+  await page.keyboard.press('Escape');
+  await expect(detail.locator('[data-pkc-canvas-selected]')).toHaveCount(0);
+}
+
+/** 🔴 手書き: 描いて「ボードに置く」と透過 PNG の付箋が描いた所に置かれ、描く面は DOM から消える。 */
+async function freehandPlace(page: import('@playwright/test').Page): Promise<void> {
+  const { detail, bar, vp } = await openBoard(page, '手書きの板', BOARD);
+  const places = detail.locator('.pkc-format-block.pkc-place');
+  await expect(places).toHaveCount(2);
+  // 🔑 押すまで描く面は無い(定常コスト 0)
+  await expect(page.locator('canvas[data-pkc-field="canvas-draw-surface"]')).toHaveCount(0);
+
+  await clickReal(page, bar.locator('[data-pkc-canvas-cmd="draw"]'));
+  const surface = vp.locator('[data-pkc-field="canvas-draw-surface"]');
+  await expect(surface).toBeVisible();
+  const s = (await surface.boundingBox())!;
+  // 付箋の無い所(枠の下の方)に「く」の字
+  const x0 = s.x + s.width * 0.35;
+  const y0 = s.y + s.height * 0.6;
+  await page.mouse.move(x0, y0);
+  await page.mouse.down();
+  await page.mouse.move(x0 + 80, y0 + 30, { steps: 6 });
+  await page.mouse.move(x0 + 10, y0 + 70, { steps: 6 });
+  await page.mouse.up();
+  const place = vp.locator('[data-pkc-draw-cmd="place"]');
+  await expect(place).toBeEnabled();
+  await clickReal(page, place);
+
+  // 🔴 3 枚目の付箋 = 透過・枠なしで、中に添付の画像
+  await expect(places, '手書きの付箋が置かれていない').toHaveCount(3, { timeout: 10000 });
+  const drawn = places.nth(2);
+  await expect(drawn).toHaveAttribute('data-pkc-place-bare', '');
+  await expect(drawn).toHaveAttribute('data-pkc-fill', 'transparent');
+  await expect(drawn.locator('img')).toHaveCount(1);
+  // 描いた場所に重なる(倍率 100% なので、付箋の左上は描き始めの点より左上・12px 前後の余白)
+  // ⚠ 枠からの相対で比べる ── 本文が伸びると枠の上に「読了時間」の行(16px)が出て、枠ごと下へずれる(置く前後で画面の座標が変わる)
+  const d = (await drawn.boundingBox())!;
+  const s2 = (await vp.boundingBox())!;
+  const rx = x0 - s.x;
+  const ry = y0 - s.y;
+  const cx = d.x - s2.x;
+  const cy = d.y - s2.y;
+  expect(cx, '付箋が描いた所より右にある').toBeLessThan(rx);
+  expect(cx, '付箋が描いた所から離れすぎている').toBeGreaterThan(rx - 40);
+  expect(cy, '付箋が描いた所より下にある').toBeLessThan(ry);
+  expect(cy, '付箋が描いた所から離れすぎている').toBeGreaterThan(ry - 40);
+  // 🔴 描く面は DOM から消える(画素も手放す)
+  await expect(page.locator('canvas[data-pkc-field="canvas-draw-surface"]')).toHaveCount(0);
+  await expect(page.locator('[data-pkc-field="canvas-draw"]')).toHaveCount(0);
+  await expect(bar.locator('[data-pkc-canvas-cmd="draw"]')).toHaveAttribute('aria-pressed', 'false');
+  // 開いているボードは動かない(添付を作っても選択を奪わない)
+  await expect(detail.locator('#c1')).toBeVisible();
+
+  // 本文: 付箋 1 枚の書込(既存の 2 枚はそのまま)
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const text = await page.inputValue('[data-pkc-field="editor-body"]');
+  expect(text.startsWith(BOARD), '既存の本文が変わった').toBe(true);
+  expect(text).toMatch(/:::format\{\.pkc-place x=-?\d+ y=-?\d+ w=\d+ h=\d+ fill=transparent stroke=none\}\n!\[手書き\]\(asset:[A-Za-z0-9_-]+\)\n:::/);
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+
+  // やめる: 何も置かずに消える
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await clickReal(page, bar.locator('[data-pkc-canvas-cmd="draw"]'));
+  await expect(surface).toBeVisible();
+  await clickReal(page, vp.locator('[data-pkc-draw-cmd="cancel"]'));
+  await expect(page.locator('canvas[data-pkc-field="canvas-draw-surface"]')).toHaveCount(0);
+  await expect(places).toHaveCount(3);
+}
+
+/** 🔴 関係グラフ: ズームしても節点を押せ、「ボードで開く」で layout: canvas のボードができる。 */
+async function graphToBoard(page: import('@playwright/test').Page): Promise<void> {
+  // B を作り、A から B へリンクする(関係グラフの smoke と同じ組み方)
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '行き先B');
+  await page.fill('[data-pkc-field="editor-body"]', '# 行き先B');
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  const lidB = await page.locator('[data-pkc-region="filer-table"] [data-pkc-entry]').first().getAttribute('data-pkc-entry');
+  expect(lidB).toBeTruthy();
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '起点A');
+  await page.fill('[data-pkc-field="editor-body"]', `# 起点A\n\n[行き先B](entry:${lidB})`);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+
+  const tab = page.locator('[data-pkc-region="browse-tabs"] [data-pkc-browse="graph"]');
+  if (await tab.evaluate((el) => el.hasAttribute('data-pkc-overflow'))) {
+    await clickReal(page, '[data-pkc-region="browse-tabs"] [data-pkc-field="bar-more"]');
+    await clickReal(page, '[data-pkc-region="context-menu"] [data-pkc-action="set-browse"][data-pkc-browse="graph"]');
+  } else {
+    await clickReal(page, tab);
+  }
+  const pane = page.locator('[data-pkc-browse-pane="graph"]');
+  const nodes = pane.locator('[data-pkc-action="select-entry"]');
+  await expect(nodes).toHaveCount(2);
+
+  // ズーム(+ で 125%)── 図が大きくなる
+  const before = (await nodes.first().boundingBox())!;
+  await clickReal(page, pane.locator('[data-pkc-graph-zoom="in"]'));
+  await expect(pane.locator('[data-pkc-graph-zoom="reset"]')).toHaveText('125%');
+  const after = (await nodes.first().boundingBox())!;
+  expect(after.width / before.width, 'ズームが図に効いていない').toBeGreaterThan(1.2);
+  // Ctrl + ホイールでも変わる
+  const map = pane.locator('[data-pkc-field="graph-viewport"]');
+  const mb = (await map.boundingBox())!;
+  await page.mouse.move(mb.x + mb.width / 2, mb.y + mb.height / 2);
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, 200);
+  await page.keyboard.up('Control');
+  await expect(pane.locator('[data-pkc-graph-zoom="reset"]')).not.toHaveText('125%');
+
+  // 🔴 ズームした後も節点は押せる所に在り、押すとそのノートへ移る
+  const other = pane.locator('[data-pkc-field="graph-node"]');
+  await expect(other).toHaveCount(1);
+  const hit = await other.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return at === el || el.contains(at);
+  });
+  expect(hit, 'ズームした節点が押せる所に無い').toBe(true);
+  const target = await other.getAttribute('data-pkc-entry');
+  await clickReal(page, other);
+  await expect.poll(() => pane.locator('[aria-current="true"]').getAttribute('data-pkc-entry')).toBe(target);
+
+  // 🔴 ボードで開く
+  const open = pane.locator('[data-pkc-action="graph-open-board"]');
+  await expect(open).toBeEnabled();
+  await clickReal(page, open);
+  const detail = page.locator('[data-pkc-region="detail"]');
+  await expect(detail.locator('[data-pkc-field="canvas-viewport"]'), 'ボードが無限キャンバスで開かない').toBeVisible({ timeout: 10000 });
+  await expect(detail.locator('.pkc-format-block.pkc-place')).toHaveCount(2);
+  await expect(detail.locator('[data-pkc-field="place-lines"] path[data-pkc-line-from]')).toHaveCount(1);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="start-edit"]');
+  const text = await page.inputValue('[data-pkc-field="editor-body"]');
+  expect(text.startsWith('---\nlayout: canvas\n---\n'), 'layout: canvas が無い').toBe(true);
+  expect(text).toContain(`entry=${lidB}`);
+  expect(await page.inputValue('[data-pkc-field="editor-title"]')).toBe('関係グラフのボード');
+  await clickReal(page, '[data-pkc-action="cancel-edit"]');
+}

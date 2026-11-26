@@ -32,6 +32,7 @@ import { transcriptLinesOf } from '../capture/contact-sheet-layout';
 import { replaceColorSpan } from './color-code';
 import {
   addPlace,
+  addPlaceImage,
   addPlaceEntry,
   addPlaceTemplate,
   setPlaceRect,
@@ -391,6 +392,11 @@ export type BodyRewrite =
        * `template` と一緒には渡さない(どちらか)。
        */
       entry?: string;
+      /**
+       * 🔴 **焼いた絵(手書き)を置く**(v4.0 Phase 2 / PR-10)── 添付の key と付箋の大きさ。
+       * `template` / `entry` と一緒には渡さない。
+       */
+      image?: { asset: string; w: number; h: number };
     }
   | {
       /**
@@ -1229,6 +1235,7 @@ export function applyBodyRewrite(body: string, rewrite: BodyRewrite): string | n
   if (rewrite.kind === 'place-shape') return setPlaceShape(body, rewrite, rewrite.shape);
   if (rewrite.kind === 'place-style') return setPlaceStyle(body, rewrite, rewrite.style);
   if (rewrite.kind === 'place-add') {
+    if (rewrite.image !== undefined) return addPlaceImage(body, rewrite.x, rewrite.y, rewrite.image);
     if (rewrite.entry !== undefined) return addPlaceEntry(body, rewrite.x, rewrite.y, rewrite.entry);
     return rewrite.template === undefined
       ? addPlace(body, rewrite.x, rewrite.y)

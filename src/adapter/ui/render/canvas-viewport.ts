@@ -27,6 +27,16 @@
  *
  * 位置・倍率はノートごとにこのタブの中だけで覚える(`cameraMemory`)。本文に書くのは、押して選んだときの
  * `layout: canvas`(いつもキャンバスで開く)だけ。
+ *
+ * ## 複数選択・整列・手書き(v4.0 Phase 2 / PR-10、ビジョン 2-B)
+ *
+ * - 選ぶ: `Shift` + 背景のドラッグ(またはバーの「選択」を押してから背景のドラッグ)で範囲選択、
+ *   `Shift` + クリックで 1 枚ずつ足す・外す。背景のクリック・`Esc` で外す。選んだ付箋は `data-pkc-canvas-selected="1"`。
+ *   🔑 選択は**表示の状態**(本文に書かない)。付箋は id(無ければ開き行)で覚え、描き直しの後も保つ。
+ * - 動かす: 選んだ付箋のどれか 1 枚の ⠿ を掴むと全員が動く(`place-drag.ts` のグループと同じ道 = `MOVE_PLACES` 1 回)。
+ * - 整列: 2 枚以上選ぶと「整列 ▾」が出る。数は `features/canvas/selection.ts`、書くのは `MOVE_PLACES` 1 回。
+ * - グループにする: 既存の `GROUP_PLACES`(片道にしない ── 解くのは右クリックの「グループを解除」)。
+ * - 手書き: `canvas-draw.ts`。押すまで描く面は DOM に無い。
  */
 import {
   boundsOfRects,
@@ -46,9 +56,20 @@ import {
   type CanvasRect,
   type MinimapGeometry,
 } from '@features/canvas/viewport';
+import {
+  ALIGN_KINDS,
+  ALIGN_LABELS,
+  alignCanvasRects,
+  alignMinCount,
+  isAlignKind,
+  selectRectsInBox,
+  type AlignKind,
+  type IndexedRect,
+} from '@features/canvas/selection';
 import { isCanvasLayout } from '@features/markdown/document-globals';
 import { rotatedBounds } from '@features/markdown/place-rotate';
 import { rectOf } from './place-board';
+import { openFreehand, type FreehandSession } from './canvas-draw';
 
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
 
@@ -64,7 +85,43 @@ export const BAR_FIELD = 'canvas-bar';
 export const MINIMAP_FIELD = 'canvas-minimap';
 /** バーのボタンの役目(`data-pkc-canvas-cmd`)。 */
 export const CMD_ATTR = 'data-pkc-canvas-cmd';
-export type CanvasCommand = 'mode' | 'zoom-out' | 'zoom-reset' | 'zoom-in' | 'fit' | 'minimap' | 'default';
+export type CanvasCommand =
+  | 'mode'
+  | 'zoom-out'
+  | 'zoom-reset'
+  | 'zoom-in'
+  | 'fit'
+  | 'minimap'
+  | 'default'
+  | 'select'
+  | 'align'
+  | 'group'
+  | 'draw';
+/** 選んでいる付箋の印(`"1"`)。⚠ `place-drag.ts` が読む(選んだ全員を一緒に動かす)。 */
+export const SELECTED_ATTR = 'data-pkc-canvas-selected';
+export const MARQUEE_FIELD = 'canvas-marquee';
+export const ALIGN_MENU_FIELD = 'canvas-align-menu';
+/** 整列のメニューの項目(`data-pkc-canvas-align="left"` など)。 */
+export const ALIGN_ATTR = 'data-pkc-canvas-align';
+
+/**
+ * 🔴 **本文を書く口**(`main.ts` が渡す)。別のタブの編集の確かめは呼び側が持つ。
+ * ⚠ 省略した口のボタンは押しても何もしない(test・口の無い環境)。
+ */
+export interface CanvasPorts {
+  /** 「いつもキャンバスで開く」(`SET_CANVAS_LAYOUT`)。 */
+  readonly setDefault: (lid: string, on: boolean) => void;
+  /** 選んだ付箋を一度に動かす(`MOVE_PLACES` 1 回)。 */
+  readonly movePlaces?: (lid: string, moves: ReadonlyArray<{ line: number; x: number; y: number }>) => void;
+  /** 選んだ付箋をグループにする(`GROUP_PLACES`)。 */
+  readonly groupPlaces?: (lid: string, lines: readonly number[]) => void;
+  /** そのノートへ書けない理由(書けるなら `null`)── 手書きのボタンを押せるか。 */
+  readonly writeBlocked?: (lid: string) => string | null;
+  /** 焼いた手書きを添付して、四角(ワールド座標)へ付箋を置く。置けたら `true`。 */
+  readonly placeDrawing?: (lid: string, png: Blob, rect: CanvasRect) => Promise<boolean>;
+}
+
+let ports: CanvasPorts | null = null;
 
 const MINIMAP_W = 200;
 const MINIMAP_H = 140;
@@ -92,6 +149,12 @@ interface Canvas {
   rects: Array<{ el: HTMLElement; rect: CanvasRect }>;
   frame: number | null;
   geometry: MinimapGeometry | null;
+  /** 🔴 選んでいる付箋(id か開き行の字。`placeKeyOf`)。表示の状態で、本文には書かない。 */
+  selected: Set<string>;
+  /** バーの「選択」を押しているか(背景のドラッグが範囲選択になる)。 */
+  selectMode: boolean;
+  /** 開いている手書きの面(無ければ `null` ── 定常コスト 0)。 */
+  draw: FreehandSession | null;
   dispose: () => void;
 }
 
@@ -150,6 +213,28 @@ export function resetCanvasMemory(): void {
   minimapOpen = true;
 }
 
+/**
+ * 🔴 **付箋を覚える字**(選択)── id があれば id、無ければ開き行。
+ * ⚠ 動かす・揃える・グループにするは開き行を変えない(書くのは開き行の中の札だけ)ので、描き直しの後も同じ付箋を指す。
+ */
+export function placeKeyOf(el: Element): string | null {
+  if (el.id !== '') return `#${el.id}`;
+  const line = el.getAttribute('data-pkc-place-line');
+  return line === null ? null : `@${line}`;
+}
+
+/** 器で選んでいる付箋の数(キャンバスでなければ 0)。 */
+export function canvasSelectionCount(host: Element | null): number {
+  if (!(host instanceof HTMLElement)) return 0;
+  return views.get(host)?.canvas?.selected.size ?? 0;
+}
+
+/** 器の手書きの面(test 用。開いていなければ `null`)。 */
+export function canvasDrawSession(host: Element | null): FreehandSession | null {
+  if (!(host instanceof HTMLElement)) return null;
+  return views.get(host)?.canvas?.draw ?? null;
+}
+
 function button(doc: Document, cmd: CanvasCommand, text: string, title: string): HTMLButtonElement {
   const b = doc.createElement('button');
   b.type = 'button';
@@ -166,6 +251,14 @@ function makeBar(doc: Document): HTMLElement {
   bar.setAttribute('data-pkc-field', BAR_FIELD);
   bar.setAttribute('role', 'toolbar');
   bar.setAttribute('aria-label', 'ボードの表示');
+  // 🔑 整列のメニューを Esc で閉じる(開いているノートの Esc へは渡さない)
+  bar.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || bar.querySelector(`[data-pkc-field="${ALIGN_MENU_FIELD}"]`) === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeAlignMenu(bar);
+    cmdButton(bar, 'align')?.focus();
+  });
   bar.append(
     button(doc, 'mode', '無限キャンバス', '付箋のボードを無限キャンバスで表示します。もう一度押すと通常表示に戻ります'),
     button(doc, 'zoom-out', '−', '縮小します(Ctrl + ホイールでも変えられます)'),
@@ -174,6 +267,10 @@ function makeBar(doc: Document): HTMLElement {
     button(doc, 'fit', '全体を表示', 'すべての付箋が収まるように表示します'),
     button(doc, 'minimap', 'ミニマップ', '右下にミニマップを表示します。押した位置へ移動できます'),
     button(doc, 'default', 'いつもキャンバスで開く', 'このノートを開いたとき、最初から無限キャンバスで表示します(前書きに layout: canvas と書きます)'),
+    button(doc, 'select', '選択', '背景のドラッグで範囲を選びます(Shift を押しながらのドラッグでも選べます。Shift + クリックで 1 枚ずつ選べます)'),
+    button(doc, 'align', '整列 ▾', '選んだ付箋を揃えます'),
+    button(doc, 'group', 'グループにする', '選んだ付箋をグループにします(どれか 1 枚を動かすと全員が動きます)'),
+    button(doc, 'draw', '手書き', 'ボードに直接手書きします。描いた線は画像にして付箋として置きます'),
   );
   return bar;
 }
@@ -188,13 +285,32 @@ function syncBar(view: BoardView): void {
   const bar = view.bar;
   bar.toggleAttribute('data-pkc-canvas-on', on);
   cmdButton(bar, 'mode')?.setAttribute('aria-pressed', String(on));
-  for (const cmd of ['zoom-out', 'zoom-reset', 'zoom-in', 'fit', 'minimap', 'default'] as const) {
+  for (const cmd of ['zoom-out', 'zoom-reset', 'zoom-in', 'fit', 'minimap', 'default', 'select', 'draw'] as const) {
     const b = cmdButton(bar, cmd);
     if (b !== null) b.hidden = !on;
   }
   cmdButton(bar, 'minimap')?.setAttribute('aria-pressed', String(minimapOpen));
   cmdButton(bar, 'default')?.setAttribute('aria-pressed', String(isCanvasLayout(view.body)));
-  if (view.canvas !== null) syncZoomLabel(view.canvas, bar);
+  const c = view.canvas;
+  // 🔑 整列・グループにするは 2 枚以上選んでいるときだけ出す(常用ではない ── 1 段奥)
+  const many = c !== null && c.selected.size >= 2;
+  for (const cmd of ['align', 'group'] as const) {
+    const b = cmdButton(bar, cmd);
+    if (b !== null) b.hidden = !many;
+  }
+  if (!many) closeAlignMenu(bar);
+  cmdButton(bar, 'select')?.setAttribute('aria-pressed', String(c?.selectMode === true));
+  const draw = cmdButton(bar, 'draw');
+  if (draw !== null) {
+    draw.setAttribute('aria-pressed', String(c?.draw != null));
+    // 🔴 編集中・書けないノートでは押せない(理由は題に出す)
+    const why = c === null ? null : (ports?.writeBlocked?.(view.lid) ?? (ports?.placeDrawing === undefined ? '' : null));
+    draw.disabled = why !== null && c?.draw == null;
+    draw.title = why !== null && why !== '' && c?.draw == null
+      ? `手書きできません: ${why}`
+      : 'ボードに直接手書きします。描いた線は画像にして付箋として置きます';
+  }
+  if (c !== null) syncZoomLabel(c, bar);
 }
 
 function syncZoomLabel(c: Canvas, bar: HTMLElement): void {
@@ -381,6 +497,131 @@ function fitAll(c: Canvas, view: BoardView): void {
 }
 
 /**
+ * 🔴 **選択の印を付箋へ当てる**(描き直しのたび・選択が変わるたび。冪等)。
+ * ⚠ 器に居なくなった付箋(消した・本文で書き換えた)は選択から外す。
+ */
+function applySelection(c: Canvas): void {
+  const present = new Set<string>();
+  for (const { el } of c.rects) {
+    const k = placeKeyOf(el);
+    const on = k !== null && c.selected.has(k);
+    if (k !== null) present.add(k);
+    if (on) {
+      if (el.getAttribute(SELECTED_ATTR) !== '1') el.setAttribute(SELECTED_ATTR, '1');
+    } else if (el.hasAttribute(SELECTED_ATTR)) {
+      el.removeAttribute(SELECTED_ATTR);
+    }
+  }
+  for (const k of [...c.selected]) if (!present.has(k)) c.selected.delete(k);
+}
+
+/** 選択を変えて、印とバーを当て直す。 */
+function setSelection(c: Canvas, keys: Iterable<string>): void {
+  c.selected = new Set(keys);
+  applySelection(c);
+  const view = views.get(c.host);
+  if (view !== undefined) syncBar(view);
+}
+
+/** 選んでいる付箋(測った四角つき)。 */
+function selectedRects(c: Canvas): Array<{ el: HTMLElement; rect: CanvasRect; key: string }> {
+  const out: Array<{ el: HTMLElement; rect: CanvasRect; key: string }> = [];
+  for (const { el, rect } of c.rects) {
+    const k = placeKeyOf(el);
+    if (k !== null && c.selected.has(k)) out.push({ el, rect, key: k });
+  }
+  return out;
+}
+
+/**
+ * 🔴 **整列する**(`MOVE_PLACES` 1 回)。数は `alignCanvasRects` の 1 本。
+ * 🔑 回した付箋は回した外接四角で揃え、本文の `x=` / `y=` には同じだけずらした値を書く。
+ * ⚠ 動かない付箋は書かない。1 枚も動かなければ何も書かない。
+ */
+function runAlign(c: Canvas, lid: string, kind: AlignKind): boolean {
+  const sel = selectedRects(c);
+  if (sel.length < alignMinCount(kind)) return false;
+  const indexed: IndexedRect[] = sel.map((s) => ({ key: s.key, ...s.rect }));
+  const to = alignCanvasRects(indexed, kind);
+  const moves: Array<{ line: number; x: number; y: number }> = [];
+  for (const s of sel) {
+    const t = to.get(s.key);
+    const line = Number(s.el.getAttribute('data-pkc-place-line'));
+    if (t === undefined || !Number.isInteger(line)) return false;
+    const raw = rectOf(s.el);
+    const x = Math.round(raw.x + (t.x - s.rect.x));
+    const y = Math.round(raw.y + (t.y - s.rect.y));
+    if (x === raw.x && y === raw.y) continue;
+    moves.push({ line, x, y });
+  }
+  if (moves.length === 0) return false;
+  ports?.movePlaces?.(lid, moves);
+  return true;
+}
+
+function closeAlignMenu(bar: Element): void {
+  bar.querySelector(`[data-pkc-field="${ALIGN_MENU_FIELD}"]`)?.remove();
+  cmdButton(bar as HTMLElement, 'align')?.setAttribute('aria-expanded', 'false');
+}
+
+/** 「整列 ▾」のメニュー(押すたびに開く / 閉じる)。⚠ 等間隔は 3 枚以上のときだけ押せる。 */
+function toggleAlignMenu(view: BoardView): void {
+  const bar = view.bar;
+  if (bar.querySelector(`[data-pkc-field="${ALIGN_MENU_FIELD}"]`) !== null) {
+    closeAlignMenu(bar);
+    return;
+  }
+  const c = view.canvas;
+  if (c === null) return;
+  const doc = bar.ownerDocument;
+  const menu = doc.createElement('div');
+  menu.setAttribute('data-pkc-field', ALIGN_MENU_FIELD);
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', '整列');
+  for (const kind of ALIGN_KINDS) {
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.setAttribute(ALIGN_ATTR, kind);
+    b.textContent = ALIGN_LABELS[kind];
+    b.disabled = c.selected.size < alignMinCount(kind);
+    if (b.disabled) b.title = '3 枚以上選ぶと使えます';
+    menu.append(b);
+  }
+  cmdButton(bar, 'align')?.after(menu);
+  cmdButton(bar, 'align')?.setAttribute('aria-expanded', 'true');
+  (menu.querySelector('button:not([disabled])') as HTMLButtonElement | null)?.focus();
+}
+
+/** 手書きを始める / 閉じる。⚠ 書けないノートでは始めない。 */
+function toggleDraw(c: Canvas, view: BoardView): void {
+  if (c.draw !== null) {
+    c.draw.close();
+    return;
+  }
+  const place = ports?.placeDrawing;
+  if (place === undefined || (ports?.writeBlocked?.(view.lid) ?? null) !== null) return;
+  const lid = view.lid;
+  c.draw = openFreehand({
+    vp: c.vp,
+    camera: () => c.cam,
+    toWorld: (x, y) => boardPointOf(c.host, x, y),
+    toClient: (p) => {
+      const r = c.host.getBoundingClientRect();
+      const z = c.cam.zoom;
+      return { x: r.left + (p.x + c.host.clientLeft - c.host.scrollLeft) * z, y: r.top + (p.y + c.host.clientTop - c.host.scrollTop) * z };
+    },
+    onPlace: (png, rect) => place(lid, png, rect),
+    onClose: () => {
+      c.draw = null;
+      const v = views.get(c.host);
+      if (v !== undefined) syncBar(v);
+    },
+  });
+  syncBar(view);
+}
+
+/**
  * 🔴 **枠の中の手の配線**(キャンバスのときだけ。枠そのものに付けるので、通常のノートは 1 つも払わない)。
  *
  * - パン: 中ボタンのドラッグ / Space を押しながら左ドラッグ / **背景(付箋の外)の**左ドラッグ。
@@ -393,6 +634,8 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
   const { vp, host, minimap } = c;
   const doc = vp.ownerDocument;
   let pan: { id: number; x: number; y: number; moved: boolean; sx: number; sy: number } | null = null;
+  /** 範囲選択(ラバーバンド)。座標は枠の中の px。 */
+  let band: { id: number; sx: number; sy: number; cx: number; cy: number; add: boolean; el: HTMLElement | null } | null = null;
   let mini: number | null = null;
   let space = false;
   let swallow = false;
@@ -419,7 +662,7 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
     doc.addEventListener('keyup', onKey, true);
   };
   const onLeave = (): void => {
-    if (pan !== null) return;
+    if (pan !== null || band !== null) return;
     doc.removeEventListener('keydown', onKey, true);
     doc.removeEventListener('keyup', onKey, true);
     space = false;
@@ -454,6 +697,35 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
       return;
     }
     const background = t === host || t === vp;
+    // 🔴 Shift + クリックで付箋を 1 枚ずつ足す / 外す(⠿・角・リンク・入力欄は奪わない)
+    if (e.button === 0 && e.shiftKey && !space && t !== null && !background) {
+      const block = t.closest<HTMLElement>(PLACE_SELECTOR);
+      const k = block !== null && block.parentElement === host ? placeKeyOf(block) : null;
+      if (
+        k !== null &&
+        t.closest('[data-pkc-field="place-grip"], [data-pkc-field="place-size"], a, input, textarea, select, [contenteditable=""], [contenteditable="true"]') === null
+      ) {
+        const next = new Set(c.selected);
+        if (next.has(k)) next.delete(k);
+        else next.add(k);
+        setSelection(c, next);
+        swallow = true;
+        e.preventDefault();
+        return;
+      }
+    }
+    // 🔴 範囲選択: Shift + 背景のドラッグ、または「選択」を押している間の背景のドラッグ
+    if (e.button === 0 && background && !space && (e.shiftKey || c.selectMode) && band === null && pan === null) {
+      const p = vpPoint(c, e.clientX, e.clientY);
+      band = { id: e.pointerId, sx: p.x, sy: p.y, cx: e.clientX, cy: e.clientY, add: e.shiftKey, el: null };
+      try {
+        vp.setPointerCapture(e.pointerId);
+      } catch {
+        // 同上
+      }
+      e.preventDefault();
+      return;
+    }
     const wants = e.button === 1 || (e.button === 0 && (space || background));
     if (!wants || pan !== null) return;
     pan = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, sx: e.clientX, sy: e.clientY };
@@ -470,6 +742,23 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
       centerAt(e);
       return;
     }
+    if (band !== null && e.pointerId === band.id) {
+      const p = vpPoint(c, e.clientX, e.clientY);
+      if (band.el === null) {
+        if (Math.abs(p.x - band.sx) < PAN_SLOP && Math.abs(p.y - band.sy) < PAN_SLOP) return;
+        band.el = doc.createElement('div');
+        band.el.setAttribute('data-pkc-field', MARQUEE_FIELD);
+        band.el.setAttribute('aria-hidden', 'true');
+        vp.append(band.el);
+      }
+      const x = Math.min(p.x, band.sx);
+      const y = Math.min(p.y, band.sy);
+      band.el.style.left = `${Math.round(x)}px`;
+      band.el.style.top = `${Math.round(y)}px`;
+      band.el.style.width = `${Math.round(Math.abs(p.x - band.sx))}px`;
+      band.el.style.height = `${Math.round(Math.abs(p.y - band.sy))}px`;
+      return;
+    }
     if (pan === null || e.pointerId !== pan.id) return;
     if (!pan.moved && Math.abs(e.clientX - pan.sx) < PAN_SLOP && Math.abs(e.clientY - pan.sy) < PAN_SLOP) return;
     pan.moved = true;
@@ -483,8 +772,33 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
       mini = null;
       return;
     }
+    if (band !== null && e.pointerId === band.id) {
+      const b = band;
+      band = null;
+      if (b.el === null) {
+        // 押しただけ(引いていない)── Shift なしなら選択を外す
+        if (!b.add && c.selected.size > 0) setSelection(c, []);
+        return;
+      }
+      b.el.remove();
+      swallow = true;
+      if (e.type === 'pointercancel') return;
+      // 🔑 ワールド座標は器の実際の位置から引く(`boardPointOf` ── 掴む・つなぐと同じ 1 本)
+      const a = boardPointOf(host, b.cx, b.cy);
+      const z = boardPointOf(host, e.clientX, e.clientY);
+      const indexed: IndexedRect[] = [];
+      for (const { el, rect } of c.rects) {
+        const k = placeKeyOf(el);
+        if (k !== null) indexed.push({ key: k, ...rect });
+      }
+      const hit = selectRectsInBox(indexed, { x: a.x, y: a.y, w: z.x - a.x, h: z.y - a.y });
+      setSelection(c, b.add ? [...c.selected, ...hit] : hit);
+      return;
+    }
     if (pan === null || e.pointerId !== pan.id) return;
     swallow = pan.moved;
+    // 🔑 背景を押しただけ(動かしていない)なら選択を外す
+    if (!pan.moved && e.type !== 'pointercancel' && c.selected.size > 0) setSelection(c, []);
     pan = null;
     vp.removeAttribute('data-pkc-canvas-panning');
   };
@@ -567,6 +881,9 @@ function openCanvas(view: BoardView, host: HTMLElement): Canvas {
     rects: [],
     frame: null,
     geometry: null,
+    selected: new Set(),
+    selectMode: false,
+    draw: null,
     dispose: () => {},
   };
   c.dispose = wire(c, () => views.get(host));
@@ -586,6 +903,9 @@ function openCanvas(view: BoardView, host: HTMLElement): Canvas {
 
 /** キャンバスを畳む(器を元の場所へ戻し、印と transform を外す)。 */
 function closeCanvas(c: Canvas): void {
+  // 🔴 手書きの面も一緒に閉じる(描く面を置き去りにしない)
+  c.draw?.close();
+  c.draw = null;
   c.dispose();
   if (c.frame !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(c.frame);
   c.frame = null;
@@ -601,6 +921,8 @@ function closeCanvas(c: Canvas): void {
     el.style.removeProperty('--pkc-cull-w');
     el.style.removeProperty('--pkc-cull-h');
   }
+  // 選択は表示の状態 ── 通常表示へ戻したら外す
+  for (const el of host.querySelectorAll(`[${SELECTED_ATTR}]`)) el.removeAttribute(SELECTED_ATTR);
 }
 
 /**
@@ -672,6 +994,7 @@ export function syncBoardView(host: HTMLElement, lid: string, body: string): boo
     const c = view.canvas;
     c.lid = lid;
     measure(c);
+    applySelection(c);
     applyCamera(c, undefined);
     drawMinimapCards(c);
     applyCulling(c);
@@ -723,6 +1046,15 @@ function onCanvasKey(e: KeyboardEvent, host: HTMLElement): void {
   const view = views.get(host);
   const c = view?.canvas;
   if (view === undefined || c == null) return;
+  // 🔴 Esc: 整列のメニュー → 選択の順に外す(何も無ければ素通し ── 開いているノートの Esc を奪わない)
+  if (e.key === 'Escape') {
+    if (view.bar.querySelector(`[data-pkc-field="${ALIGN_MENU_FIELD}"]`) !== null) closeAlignMenu(view.bar);
+    else if (c.selected.size > 0) setSelection(c, []);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
   // ⚠ 付箋の ⠿ の矢印キー(`place-drag.ts`)は奪わない ── ここは + / − / 0 / Shift + 1 だけ
   if (e.key === '+' || e.key === '=' || e.key === ';') zoomCentered(c, view, c.cam.zoom * CANVAS_ZOOM_STEP);
   else if (e.key === '-' || e.key === '_') zoomCentered(c, view, c.cam.zoom / CANVAS_ZOOM_STEP);
@@ -773,9 +1105,46 @@ export function runCanvasCommand(
     case 'default':
       onDefault(view.lid, !isCanvasLayout(view.body));
       return true;
+    case 'select':
+      if (c !== null) {
+        c.selectMode = !c.selectMode;
+        c.vp.toggleAttribute('data-pkc-canvas-select', c.selectMode);
+        syncBar(view);
+      }
+      return true;
+    case 'align':
+      if (c !== null && c.selected.size >= 2) toggleAlignMenu(view);
+      return true;
+    case 'group': {
+      if (c === null || c.selected.size < 2) return true;
+      const lines = selectedRects(c)
+        .map((s) => Number(s.el.getAttribute('data-pkc-place-line')))
+        .filter((n) => Number.isInteger(n));
+      if (lines.length >= 2) ports?.groupPlaces?.(view.lid, lines);
+      return true;
+    }
+    case 'draw':
+      if (c !== null) toggleDraw(c, view);
+      return true;
     default:
       return false;
   }
+}
+
+/**
+ * 🔴 **整列のメニューの項目を押したとき**。
+ * @returns 受けた(押し所が整列の項目だった)か
+ */
+export function runCanvasAlign(item: Element): boolean {
+  const kind = item.getAttribute(ALIGN_ATTR);
+  const bar = item.closest(`[data-pkc-field="${BAR_FIELD}"]`);
+  if (bar === null || !isAlignKind(kind)) return false;
+  const host = hostOfBar(bar);
+  const view = host === null ? undefined : views.get(host);
+  closeAlignMenu(bar);
+  if (view?.canvas == null) return true;
+  runAlign(view.canvas, view.lid, kind);
+  return true;
 }
 
 /**
@@ -785,16 +1154,35 @@ export function runCanvasCommand(
  */
 export function installCanvasViewport(
   root: HTMLElement,
-  setDefault: (lid: string, on: boolean) => void,
+  portsOrSetDefault: CanvasPorts | ((lid: string, on: boolean) => void),
 ): () => void {
   const doc = root.ownerDocument;
+  const mine: CanvasPorts =
+    typeof portsOrSetDefault === 'function' ? { setDefault: portsOrSetDefault } : portsOrSetDefault;
+  ports = mine;
   const onClick = (e: MouseEvent): void => {
-    const btn = (e.target as Element | null)?.closest?.(`[${CMD_ATTR}]`);
-    if (btn == null) return;
-    if (runCanvasCommand(btn, setDefault)) e.preventDefault();
+    const t = e.target as Element | null;
+    const item = t?.closest?.(`[${ALIGN_ATTR}]`);
+    if (item != null) {
+      if (runCanvasAlign(item)) e.preventDefault();
+      return;
+    }
+    const btn = t?.closest?.(`[${CMD_ATTR}]`);
+    if (btn == null) {
+      // 🔑 メニューの外を押したら閉じる
+      for (const m of doc.querySelectorAll(`[data-pkc-field="${ALIGN_MENU_FIELD}"]`)) {
+        const bar = m.closest(`[data-pkc-field="${BAR_FIELD}"]`);
+        if (bar !== null) closeAlignMenu(bar);
+      }
+      return;
+    }
+    if (runCanvasCommand(btn, mine.setDefault)) e.preventDefault();
   };
   doc.addEventListener('click', onClick);
-  return () => doc.removeEventListener('click', onClick);
+  return () => {
+    doc.removeEventListener('click', onClick);
+    if (ports === mine) ports = null;
+  };
 }
 
 /**
