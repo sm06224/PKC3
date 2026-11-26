@@ -75,6 +75,7 @@ describe('hydrate が鍵へ volatile を渡す', () => {
       .split('\n')
       .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'))
       .join('\n');
-    expect(src).toContain('hydrateFigures(r.inserted, { volatile: true })');
+    // ⚠ 3 つ目の引数(` ```3d ` の添付を引く口。v4.0 PR-12)が続いてもよい
+    expect(src).toMatch(/hydrateFigures\(r\.inserted, \{ volatile: true \}[,)]/);
   });
 });

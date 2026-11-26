@@ -47,6 +47,8 @@ describe('caretBlockAt(#1451)', () => {
     expect(hint('csv')).toBe(`表(csv)の中: 閉じは ${F}`);
     expect(hint('mermaid')).toBe(`図(mermaid)の中: 閉じは ${F}`);
     expect(hint('chart-render')).toBe(`グラフ(chart)の中: 閉じは ${F}`);
+    expect(hint('3d')).toBe(`3D シーン(3d)の中: 閉じは ${F}`);
+    expect(hint('3d-norender')).toBe(`3D シーン(3d)の中: 閉じは ${F}`);
     expect(hint('js'), '対照群: 素のコード').toBe(`コード内: 記法は働きません(閉じは ${F})`);
     expect(hint('csv')).not.toContain('記法は働きません');
   });

@@ -339,6 +339,8 @@ nav button.p{width:auto;font-size:12px;padding:4px 10px;margin:2px 8px 0;
 .b>*{max-width:100%}
 a.f{display:inline-block;margin:8px 0;padding:6px 10px;border:1px solid #8884;border-radius:6px;
   color:inherit;text-decoration:none}
+/* 3D モデルの案内(PR-12。配る HTML では描かない)。 */
+p.m3{margin:8px 0 0;opacity:.8;font-size:.9em}
 /* 🔴 **PDF は読める大きさで出す**(2026-08-15)。⚠ object 要素は固有寸法を持たないので、
    規則を書かないと **300×150** に落ちる(アプリ側で実際に踏んだ症状がこれ)。 */
 object.p{display:block;width:100%;height:calc(100vh - 12rem);min-height:320px;
@@ -536,6 +538,14 @@ try{
       var o=document.createElement('object');o.className='p';
       o.type='application/pdf';o.data=u;
       o.appendChild(dl(key,name,sink,u));return o;
+    }
+    /* 🔴 **3D モデルは配る HTML では描かない**(v4.0 PR-12)── Three.js を同梱しないので、保存の導線と案内を出す。
+       ⚠ 黙ってリンクだけにしない(なぜ見えないのかを 1 行で言う)。 */
+    if(kind==='model3d'){
+      var mw=document.createElement('div');
+      var mn=document.createElement('p');mn.className='m3';
+      mn.textContent='3D モデルはこの HTML では表示できません。保存して 3D に対応したアプリで開くか、PKC3 で開いてください';
+      mw.appendChild(mn);mw.appendChild(dl(key,name,sink));return mw;
     }
     return dl(key,name,sink);
   }
@@ -1301,7 +1311,8 @@ export async function writePortableHtml(
      * ⚠ 元にしているのは添付の目録の MIME(この file が画像・PDF の判定で
      *   既に使っている物と同じ)── ここで別の出所に変えない。
      */
-    const kind = assetPreviewKind(mime);
+    // 🔑 名前も渡す(3D モデルは `text/plain` や種類なしで登録されうる ── PR-12)
+    const kind = assetPreviewKind(mime, name);
     const meta = {
       key: a.key,
       mime,

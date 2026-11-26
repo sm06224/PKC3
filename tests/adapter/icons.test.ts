@@ -339,7 +339,12 @@ describe('図案の登記に死んだ行を残さない', () => {
       for (const m of bare(readFileSync(f, 'utf-8')).matchAll(/'([a-z0-9-]+)'/g))
         literals.add(m[1] as string);
     }
-    const unpointed = names.filter((n) => !pointed.has(n) && !literals.has(n));
+    /**
+     * ⚠ **畳んだ図案は、無関係な字面で「指されている」ことにしない**(v4.0 PR-12 で踏んだ)。
+     *   ` ```3d ` の立体の種類 `'box'` が素の literal 走査に拾われ、封印中の図案 `box` が
+     *   「誰かが使っている」に見えた(使う道は 1 本も増えていない)。畳んだ物は表から指されたときだけ外す。
+     */
+    const unpointed = names.filter((n) => !pointed.has(n) && (FOLDED.includes(n) || !literals.has(n)));
     expect(unpointed, '誰も指さない図案が増えた ── 呼ぶ道を作るか、落とすか、畳むと書く').toEqual(FOLDED);
   });
 });

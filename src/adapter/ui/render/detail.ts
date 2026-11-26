@@ -28,6 +28,7 @@ import { replaceOnMediaError } from './media-error';
 import { lineStartOffset, scrollTopForLine } from '@features/markdown/line-offset';
 import { isZipAttachment } from '@features/archive/zip-browse';
 import { hydrateMermaid, pruneScopes, type HydrateOptions, type MermaidScope } from './mermaid-hydrate';
+import { hydrate3d, mount3dViewer, resolveSceneModel, type Hydrate3dOptions } from './viewer-3d';
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
@@ -90,6 +91,8 @@ import { paintReadingTime } from './reading-time';
 export function hydrateFigures(
   root: ParentNode | readonly ParentNode[],
   opts?: HydrateOptions,
+  /** ` ```3d ` の `asset:鍵` を引く口(v4.0 PR-12)。渡さない面ではモデルだけ断る。 */
+  opts3d?: Hydrate3dOptions,
 ): MermaidScope[] {
   // ⚠ **数式もここに束ねる**(#707)── 面は 6 か所あるので、別の口を作ると
   //    そのうち 1 つで数式だけ字のまま残る(まさに mermaid が踏んだ形)。
@@ -101,6 +104,9 @@ export function hydrateFigures(
     hydrateReact(root),
     hydrateWidgets(root),
     hydrateMath(root),
+    // 🔑 ` ```3d ` の 3D ビューア(v4.0 PR-12)── 器が無ければ何もしない(Three.js を 1 バイトも読まない)。
+    //    `asset:鍵` のモデルは呼び側が渡す口(`getAssetBlob`)で引く ── 渡さない面ではモデルだけ断る
+    hydrate3d(root, opts3d),
   ];
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
@@ -1264,7 +1270,7 @@ export class DetailRenderer {
       wanted: (lids) => wanted?.(lids),
       // 🔴 図と添付画像は**読む面と同じ口**(`hydrateFigures` / 貸出)に乗せる(#529 W3-②)
       lender: this.assets,
-      figures: (roots) => hydrateFigures(roots),
+      figures: (roots) => hydrateFigures(roots, undefined, this.figureOpts()),
       currentContainerId: this.cidRef,
       // 🔴 「見えそうな枠」の基準 = 板を送る器(W3-③)
       viewRoot: this.scroller,
@@ -1283,7 +1289,7 @@ export class DetailRenderer {
       },
       wanted: (keys) => wanted?.(keys),
       lender: this.assets,
-      figures: (roots) => hydrateFigures(roots),
+      figures: (roots) => hydrateFigures(roots, undefined, this.figureOpts()),
       currentContainerId: this.cidRef,
     });
     // 🔴 添付ノートは「絵を出せる画像か」が**読んだ後**に分かる ── 既定の大きさを当て直す
@@ -2128,7 +2134,7 @@ export class DetailRenderer {
         //    `<img>` の ObjectURL を revoke してしまう)
         if (applied.inserted.length > 0) {
           void this.hydrateAssetRefs(applied.inserted, this.hydrateToken, opts);
-          this.mermaidScopes.push(...hydrateFigures(applied.inserted));
+          this.mermaidScopes.push(...hydrateFigures(applied.inserted, undefined, this.figureOpts()));
         }
         // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
         //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
@@ -2938,7 +2944,7 @@ export class DetailRenderer {
           //    (= 何も出ない枠)のままだった。貼付を足して初めて表に出た症状だが、
           //    原因は貼付ではない ── CLAUDE.md §7「片側を直したら反対側を疑う」。
           void this.hydrateAssetRefs(applied.inserted, this.hydrateToken, previewOpts);
-          scopes.push(...hydrateFigures(applied.inserted));
+          scopes.push(...hydrateFigures(applied.inserted, undefined, this.figureOpts()));
         }
         // 🔴 **積もらせない**(P8 段⑰。レビュー H-5)── 静穏 tick ごとに塊が
         //    増え、画面に無い PNG の URL と観測器が編集中ずっと生きていた
@@ -3392,7 +3398,7 @@ export class DetailRenderer {
       //    画像の塊を押して閉じたときに `<img>` が空の枠になる(実測)
       onInserted: (els) => {
         void this.hydrateAssetRefs(els, this.hydrateToken, previewOpts);
-        scopes.push(...hydrateFigures(els));
+        scopes.push(...hydrateFigures(els, undefined, this.figureOpts()));
         this.pruneLends();
         // 🔴 1 画面編集の塊にも SQL の答えを出す(#1223 の残り)。⚠ 鍵は編集に入った時点の本文(2 列の下見と同じ)
         this.sqlEmbeds.sync(pane, initialBody, true);
@@ -3620,7 +3626,7 @@ export class DetailRenderer {
           // 🔴 添付の画像もここで差す(#250 ── 2 面側と同じ穴が在った)
           void this.hydrateAssetRefs(r.inserted, this.hydrateToken, previewOpts);
           // 🔴 編集プレビューは途中の原文を焼く ── 最古扱いで置く(他のノートの図を押し出さない)
-          scopes.push(...hydrateFigures(r.inserted, { volatile: true }));
+          scopes.push(...hydrateFigures(r.inserted, { volatile: true }, this.figureOpts()));
         }
         pruneScopes(scopes);
         // 🔴 **画面から消えた `<img>` のぶんを返す**(読む面と同じ規律)──
@@ -4103,7 +4109,7 @@ export class DetailRenderer {
       // 🔴 添付の説明にも図が書ける(P8 段⑬ review L-3)。かつてここだけ
       //    `hydrateMermaid` を呼んでおらず、**器が空のまま**残っていた ──
       //    「本文なら描けるのに、添付の説明だと描けない」という一貫性の穴
-      this.mermaidScopes.push(...hydrateFigures(desc));
+      this.mermaidScopes.push(...hydrateFigures(desc, undefined, this.figureOpts()));
       // 🔴 添付の説明にも SQL の答えを出す(#1223 の残り。「添付の説明では出ない」を直した)
       this.sqlEmbeds.sync(desc, description);
     }
@@ -4386,9 +4392,26 @@ export class DetailRenderer {
       stale: () => token !== this.hydrateToken,
       // 🔴 **図とグラフはここでも埋める** ── `asset:` で読み込んだ mermaid が器のまま残らないように
       onReplaced: (next) => {
-        this.mermaidScopes.push(...hydrateFigures(next));
+        this.mermaidScopes.push(...hydrateFigures(next, undefined, this.figureOpts()));
       },
     });
+  }
+
+  /**
+   * 🔴 **図の塊へ渡す付帯の口**(v4.0 PR-12)── ` ```3d ` の `model: "asset:鍵"` を、この面の添付の貸し出し
+   * (`this.assets`)から引く。⚠ 種類は添付の登録情報(`listMimes`)を先に見る(Blob の `type` は空のことがある)。
+   */
+  private figureOpts(): Hydrate3dOptions {
+    const assets = this.assets;
+    if (!assets) return {};
+    return {
+      getAssetBlob: async (key) => {
+        const blob = await assets.getBlob(key);
+        if (!blob) return null;
+        const mime = assets.listMimes ? (await assets.listMimes().catch(() => null))?.get(key) : undefined;
+        return mime === undefined ? { blob } : { blob, mime };
+      },
+    };
   }
 
   /**
@@ -4412,7 +4435,26 @@ export class DetailRenderer {
     try {
       // ⚠ 見せ方の判定は `features/asset/asset-preview-kind.ts` の 1 本だけを使う
       //    (別窓の側と同じ規則 ── 片方だけ PDF を知っている状態を作らない)
-      let kind = assetPreviewKind(mime);
+      // 🔑 名前も渡す ── `.obj` / ASCII の `.stl` は `text/plain`、`.glb` は種類なしで登録されうる(PR-12)
+      let kind = assetPreviewKind(mime, fileName);
+      if (kind === 'model3d') {
+        /**
+         * 🔴 **3D モデルはその場の 3D ビューアで見る**(v4.0 PR-12)。描くのは共通の `mount3dViewer`
+         * (` ```3d ` と同じ 1 本)。Three.js は描画面が見えて最初の 1 コマを描くときに初めて読む。
+         * ⚠ 上の「添付をダウンロード」はそのまま残す(片道の操作を作らない)。
+         * ⚠ 後始末は器と同じ寿命(`lends` ── 次の描画・ノートの切替で `dispose()` が走る)。
+         */
+        const model = await resolveSceneModel(assetKey, async (k) => {
+          const blob = await assets.getBlob(k);
+          return blob ? { blob, mime, name: fileName } : null;
+        });
+        if (token !== this.hydrateToken) return;
+        if (typeof model === 'string') return missing();
+        const viewer = mount3dViewer(host, { kind: 'model', model: model });
+        viewer.element.setAttribute('data-pkc-field', 'attachment-3d');
+        this.lends.track({ key: null, url: null, dispose: () => viewer.dispose(), els: [host] });
+        return;
+      }
       /** 🔴 中身で言い当てた種類(#1220)。`null` = 登録された種類のまま。 */
       let retype: { kind: 'image' | 'pdf'; mime: string; blob: Blob } | null = null;
       if (kind === 'text') {
