@@ -424,7 +424,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
     });
 
     it('取り込み: 割り当てを標準に戻すときは、置き換わる件数を言う', () => {
-      const mine = JSON.stringify({ 'create-entry': ['Alt+M'], 'delete-entry': ['Alt+D'] });
+      const mine = JSON.stringify({ 'create-entry': ['Alt+J'], 'delete-entry': ['Alt+D'] });
       const plan = planSettingsImport(withDefaults([], ['pkc3.keymap']), (k) => (k === 'pkc3.keymap' ? mine : null));
       expect(plan.keymapReplace).toEqual({ from: 2, to: 0 });
     });
@@ -445,7 +445,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
 
   /** 🔴 #1087 B3 ── 割り当ては全体が置き換わる。件数で言う(動きは変えない)。 */
   it('🔴 ショートカットキーの割り当てを含む file は、いまの件数とファイルの件数を言う', () => {
-    const mine = JSON.stringify({ 'create-entry': ['Alt+M'], 'row-commit': ['Mod+Enter'], 'filer-rename': ['F2'] });
+    const mine = JSON.stringify({ 'create-entry': ['Alt+J'], 'row-commit': ['Mod+Enter'], 'filer-rename': ['F2'] });
     const theirs = JSON.stringify({ 'create-entry': ['Alt+N'] });
     const plan = planSettingsImport(file([{ key: 'pkc3.keymap', value: theirs }]), (k) => (k === 'pkc3.keymap' ? mine : null));
     expect(plan.keymapReplace).toEqual({ from: 3, to: 1 });

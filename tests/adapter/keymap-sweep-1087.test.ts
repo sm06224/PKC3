@@ -58,7 +58,7 @@ describe('1. 待ち受け中の素の Tab は割り当てない', () => {
     expect(st.map.has(KEY), '保存に書いた').toBe(false);
     // 待ち受けは終わっている ── 次の打鍵は割り当てにならない
     document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'm', code: 'KeyM', altKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', altKey: true, bubbles: true, cancelable: true }),
     );
     expect(store.getBindings()['deselect-entry']).toEqual(before);
     panel.dispose();
@@ -78,8 +78,8 @@ describe('2. 変換を確定した打鍵は割り当ての材料にしない', (
     const { store, panel } = startCapture('create-entry');
     const before = store.getBindings()['create-entry'];
     const ev = new KeyboardEvent('keydown', {
-      key: 'm',
-      code: 'KeyM',
+      key: 'j',
+      code: 'KeyJ',
       altKey: true,
       keyCode: 229,
       bubbles: true,
@@ -90,9 +90,9 @@ describe('2. 変換を確定した打鍵は割り当ての材料にしない', (
     expect(store.getBindings()['create-entry']).toEqual(before);
     // 待ち受けは続いている ── 次の普通の打鍵で割り当たる
     document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'm', code: 'KeyM', altKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', altKey: true, bubbles: true, cancelable: true }),
     );
-    expect(store.getBindings()['create-entry']).toContain('Alt+M');
+    expect(store.getBindings()['create-entry']).toContain('Alt+J');
     panel.dispose();
   });
 });
@@ -146,9 +146,9 @@ describe('4. 1 件も読めない保存は「割当なし」ではない', () =>
     const s = new KeymapStore(st);
     expect(s.getBindings()['edit-entry']).toEqual(cmd.defaults);
     expect(s.isDefault('edit-entry')).toBe(true);
-    expect(s.addBinding('create-entry', 'Alt+M')).toBeNull();
+    expect(s.addBinding('create-entry', 'Alt+J')).toBeNull();
     const saved = JSON.parse(st.map.get(KEY)!) as Record<string, unknown>;
     expect(saved['edit-entry'], '読めない生の値が保存から消えた').toEqual(['Hyper+E']);
-    expect(saved['create-entry']).toEqual(['Alt+N', 'Alt+M']);
+    expect(saved['create-entry']).toEqual(['Alt+N', 'Alt+J']);
   });
 });

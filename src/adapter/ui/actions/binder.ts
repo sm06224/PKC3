@@ -611,6 +611,7 @@ import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock, MENU_FROM_ATTR } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { formatTarget } from './format-target';
+import { activeRichCell, RICH_CELL_FIELD, richCellOf } from '@adapter/ui/render/rich-cell';
 import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
 import { isRepeatUnit, materializedDates } from '@features/schedule/repeat';
 import { buildIcs, resolveIcsZone } from '@features/schedule/ics';
@@ -652,7 +653,9 @@ function openFormatBarMenu(root: HTMLElement, target: HTMLElement, src: Element 
   const items = exportMenuItemsFrom(src, opener, true);
   if (items.length === 0) return;
   const doc = root.ownerDocument;
-  const keep = formatTargetOf(doc.activeElement);
+  // 🔴 リッチ編集のセル(PR-05)に居ても欄に居たまま開く(焦点が外れるとセルが確定して閉じ、文字色の書き込む先が消える)
+  const keep: HTMLElement | null =
+    formatTargetOf(doc.activeElement) ?? (richCellOf(doc.activeElement) !== null ? (doc.activeElement as HTMLElement) : null);
   const r = target.getBoundingClientRect();
   const opened = openContextMenu(root, { x: r.left, y: r.bottom }, items, keep ?? target, {}, { keepFocus: keep !== null });
   if (keep !== null && opened !== null) {
@@ -3189,8 +3192,8 @@ function editorTitle(root: HTMLElement): HTMLInputElement | null {
 function settleRowEditor(root: HTMLElement): void {
   const el = document.activeElement;
   if (
-    el instanceof HTMLTextAreaElement &&
-    el.getAttribute('data-pkc-field') === 'row-source' &&
+    el instanceof HTMLElement &&
+    (el instanceof HTMLTextAreaElement ? el.getAttribute('data-pkc-field') === 'row-source' : richCellOf(el) !== null) &&
     root.contains(el)
   ) {
     el.blur();
@@ -13536,9 +13539,18 @@ const ACTIONS: Record<string, ActionHandler> = {
   },
   'format-text': (_dispatcher, target, services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
+    if (!op) return;
+    /**
+     * 🔴 **リッチ編集のセル(PR-05)には、同じ規則(`applyFormatSaying`)を綴り直した原文の上で当てる**。
+     * 既に太字なら外れる等のトグルも規則の側が持つ。表せない結果(揃え・表 …)はセルが原文の編集へ切り替えて渡す。
+     */
+    const rich = activeRichCell(root);
+    if (rich !== null) {
+      rich.applyEdit((sel) => applyFormatSaying(sel, op, (t) => services.showStatus?.(t)));
+      return;
+    }
     // ⚠ live の 1 面では活性の行(`row-source`)に効く(`formatTarget` の注記)
     const ta = formatTarget(root);
-    if (!op) return;
     if (!ta) {
       sayNoFormatTarget(services);
       return;
@@ -20164,6 +20176,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     if (id === null) return;
     const color = id === '' ? null : textColorValue(id);
     if (id !== '' && color === null) return;
+    // 🔴 リッチ編集のセル(PR-05)── 規則は同じ `applyTextColor` の 1 本(断ったら理由を言って何も変えない)
+    const rich = activeRichCell(root);
+    if (rich !== null) {
+      rich.applyEdit((sel) => {
+        const next = applyTextColor(sel, color);
+        const why = refusalOf(next);
+        if (why !== null) services.showStatus?.(why);
+        return next;
+      });
+      return;
+    }
     const ta = formatTarget(root);
     if (!ta) {
       sayNoFormatTarget(services);
@@ -21640,6 +21663,12 @@ export function bindActions(
      *   自身が開いた回に、その直後のここで畳んでしまわない(開いた瞬間に消える)。
      */
     const peekedBefore = appPanes.isPeeking();
+    /**
+     * 🔴 **リッチ編集のセルの担当外の道具**(日付・雛形・リンク・図・番号の振り直し …。PR-05)は、
+     *   セルを**原文の編集へ切り替えてから**押す ── 道具は今までどおり原文の欄(`formatTarget`)に書く。
+     * ⚠ 書式(`format-text`)と文字色はセルの上で当てる(上の 2 つの handler)。
+     */
+    if (CARET_TOOLS.has(action) && action !== 'format-text' && action !== 'apply-text-color') activeRichCell(root)?.toSource();
     handler(dispatcher, el, services, root);
     /**
      * ⚠ 右クリックの「ここに追記する」(`append-at-heading`)は**欄を使う操作**である
@@ -22530,6 +22559,21 @@ export function bindActions(
     // ⚠ **追記欄より先に置く** ── 変換確定の Enter で送ってしまうと、
     // 日本語で書く人は「打ち終わる前に飛ぶ」を毎回踏む
     if (ke.isComposing || ke.keyCode === 229) return;
+    /**
+     * 🔴 **リッチ編集のセルの書式の近道**(Ctrl+B / Ctrl+I / Ctrl+K …。PR-05)── 1 面の行の欄と同じ表
+     *   (`row` の文脈・`FORMAT_OF`)を通し、当て方はセルの `applyEdit`(書式の帯と同じ 1 本)。
+     * ⚠ ブラウザ自前の書式(`<b>` を入れる既定)は止める。確定・Enter・Esc はセル自身が受ける。
+     */
+    if (field === RICH_CELL_FIELD) {
+      const rich = richCellOf(ke.target);
+      const rowCmd = keymap.match(ke, 'row');
+      const op = rowCmd === null ? undefined : FORMAT_OF[rowCmd];
+      if (rich !== null && op !== undefined) {
+        ke.preventDefault();
+        rich.applyEdit((sel) => applyFormatSaying(sel, op, (t) => services.showStatus?.(t)));
+      }
+      return;
+    }
     /**
      * 🔴 **パンくずのパス入力**(#1982 A4)── Enter で移動 / Esc でやめる。⚠ それ以外の鍵は**入力へ通す**
      * (欄はフォルダの面の中なので、下の面の鍵(Backspace = 親へ など)に化けると打てない ── 名前の打ち替えと同じ作法)。

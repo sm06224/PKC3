@@ -67,16 +67,16 @@ describe('割当の保存', () => {
     const st = fakeStorage();
     const s = new KeymapStore(st);
     expect(st.map.size, '何もしていないのに保存を書いている').toBe(0);
-    expect(s.addBinding('create-entry', 'Alt+M')).toBeNull();
+    expect(s.addBinding('create-entry', 'Alt+J')).toBeNull();
     expect(st.map.has('pkc3.keymap')).toBe(true);
-    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+J']);
     expect(s.isDefault('create-entry')).toBe(false);
   });
 
   it('🔴 既定へ戻すと保存ごと消える(要らない行を残さない)', () => {
     const st = fakeStorage();
     const s = new KeymapStore(st);
-    s.addBinding('create-entry', 'Alt+M');
+    s.addBinding('create-entry', 'Alt+J');
     s.resetCommand('create-entry');
     expect(s.isDefault('create-entry')).toBe(true);
     expect(st.map.size, '既定に戻したのに保存が残っている').toBe(0);
@@ -118,8 +118,8 @@ describe('割当の保存', () => {
     };
     const s = new KeymapStore(dead);
     // 割り当て自体はこの session で効く ── 書けなかったことだけを言う(#1087)
-    expect(s.addBinding('create-entry', 'Alt+M')?.kind).toBe('unsaved');
-    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
+    expect(s.addBinding('create-entry', 'Alt+J')?.kind).toBe('unsaved');
+    expect(s.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+J']);
   });
 
   it('🔴 別のタブが書き換えたら読み直す(再読込まで効かない、を作らない)', () => {
@@ -131,15 +131,15 @@ describe('割当の保存', () => {
     });
     const off = s.watchOtherTabs(window);
     expect(s.getBindings()['create-entry']).toEqual(['Alt+N']); // 1 度読ませる(cache を作る)
-    st.map.set('pkc3.keymap', JSON.stringify({ 'create-entry': ['Alt+M'] }));
+    st.map.set('pkc3.keymap', JSON.stringify({ 'create-entry': ['Alt+J'] }));
     window.dispatchEvent(new StorageEvent('storage', { key: 'pkc3.keymap' }));
-    expect(s.getBindings()['create-entry'], 'cache が更新されていない').toEqual(['Alt+M']);
+    expect(s.getBindings()['create-entry'], 'cache が更新されていない').toEqual(['Alt+J']);
     expect(changed, '購読者に伝わっていない').toBe(1);
     off();
     offChange();
     st.map.set('pkc3.keymap', JSON.stringify({ 'create-entry': ['Alt+P'] }));
     window.dispatchEvent(new StorageEvent('storage', { key: 'pkc3.keymap' }));
-    expect(s.getBindings()['create-entry'], '外したのに効いている').toEqual(['Alt+M']);
+    expect(s.getBindings()['create-entry'], '外したのに効いている').toEqual(['Alt+J']);
   });
 });
 
@@ -358,11 +358,11 @@ describe('画面への配線', () => {
   it('🔴 割り当て直すと、新しい鍵が効いて古い鍵は効かない', () => {
     const store = new KeymapStore(fakeStorage());
     store.removeBinding('create-entry', 'Alt+N');
-    expect(store.addBinding('create-entry', 'Alt+M')).toBeNull();
+    expect(store.addBinding('create-entry', 'Alt+J')).toBeNull();
     const { d } = mounted(store);
     press('n', { code: 'KeyN', altKey: true });
     expect(d.getState().selectedLid, '外した既定がまだ効いている').toBeFalsy();
-    press('m', { code: 'KeyM', altKey: true });
+    press('j', { code: 'KeyJ', altKey: true });
     expect(d.getState().selectedLid, '割り当てた鍵が効いていない').toBeTruthy();
   });
 
@@ -824,13 +824,13 @@ describe('設定の面(割り当て直す口)', () => {
     const store = new KeymapStore(fakeStorage());
     const panel = buildKeymapPanel(store, document);
     document.body.append(panel.root);
-    store.addBinding('create-entry', 'Alt+M');
+    store.addBinding('create-entry', 'Alt+J');
     store.addBinding('edit-entry', 'Alt+Q');
     const all = panel.root.querySelector<HTMLButtonElement>('[data-pkc-field="keymap-reset-all"]')!;
     all.click();
-    expect(store.getBindings()['create-entry'], '聞く前に消えた').toContain('Alt+M');
+    expect(store.getBindings()['create-entry'], '聞く前に消えた').toContain('Alt+J');
     expect(await answerDialog('cancel')).toBe('自分で変えた割り当て 2 件を、全部はじめに戻します');
-    expect(store.getBindings()['create-entry'], 'やめたのに消えた').toContain('Alt+M');
+    expect(store.getBindings()['create-entry'], 'やめたのに消えた').toContain('Alt+J');
     expect(store.getBindings()['edit-entry'], 'やめたのに消えた').toContain('Alt+Q');
     all.click();
     await answerDialog('ok');
@@ -853,9 +853,9 @@ describe('設定の面(割り当て直す口)', () => {
       .querySelector<HTMLButtonElement>('[data-pkc-field="keymap-assign"][data-pkc-command="create-entry"]')!
       .click();
     document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'm', code: 'KeyM', altKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', altKey: true, bubbles: true, cancelable: true }),
     );
-    expect(store.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+M']);
+    expect(store.getBindings()['create-entry']).toEqual(['Alt+N', 'Alt+J']);
     panel.dispose();
   });
 
@@ -975,7 +975,7 @@ describe('設定の面(割り当て直す口)', () => {
         '[data-pkc-field="keymap-reset"][data-pkc-command="create-entry"]',
       )!;
     expect(reset().disabled, '既定のままなのに押せる').toBe(true);
-    store.addBinding('create-entry', 'Alt+M');
+    store.addBinding('create-entry', 'Alt+J');
     expect(reset().disabled, '変えたのに押せない').toBe(false);
     reset().click();
     expect(store.getBindings()['create-entry']).toEqual(['Alt+N']);
@@ -1008,7 +1008,7 @@ describe('設定の面(割り当て直す口)', () => {
       .click();
     panel.dispose();
     document.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'm', code: 'KeyM', altKey: true, bubbles: true, cancelable: true }),
+      new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', altKey: true, bubbles: true, cancelable: true }),
     );
     expect(store.getBindings()['create-entry'], '外したはずの listener が拾った').toEqual(['Alt+N']);
   });
@@ -1317,8 +1317,8 @@ describe('ヘルプの一覧', () => {
         ?.textContent ?? '';
     expect(cell()).toBe(chordLabel('Alt+N', false));
     store.removeBinding('create-entry', 'Alt+N');
-    store.addBinding('create-entry', 'Alt+M');
-    expect(cell(), 'ヘルプが古い割当のまま').toBe(chordLabel('Alt+M', false));
+    store.addBinding('create-entry', 'Alt+J');
+    expect(cell(), 'ヘルプが古い割当のまま').toBe(chordLabel('Alt+J', false));
   });
 
   it('🔴 キーの無い操作は一覧に出さず、割り当てる場所を 1 行で案内する(#1163 依頼 96-2 = A)', () => {
@@ -1337,8 +1337,8 @@ describe('ヘルプの一覧', () => {
     // 外したら、その行は一覧から消える。割り当て直したら戻る
     store.removeBinding('toggle-replace', 'Mod+H');
     expect(row('toggle-replace')).toBeNull();
-    store.addBinding('toggle-replace', 'Alt+M');
-    expect(row('toggle-replace')?.textContent).toBe(chordLabel('Alt+M', false));
+    store.addBinding('toggle-replace', 'Alt+J');
+    expect(row('toggle-replace')?.textContent).toBe(chordLabel('Alt+J', false));
     // 案内は設定の場所を実在の字で言う
     const guide = region.querySelector('[data-pkc-field="help-key-guide"]')?.textContent ?? '';
     expect(guide).toContain('システム → 設定 → ショートカットキー');

@@ -168,8 +168,10 @@ import { join } from 'node:path';
  * - 2026-11-26(v4.0 Phase 1 / PR-04): **656**(そのときの実数 656)。`word-format.smoke.spec.ts` を新設(起動 2 つ)。⚠ 既存の道中には載せられない ──
  *   見る相手は、編集の書き方が違う 2 つ(2 ペイン編集 / 1 画面編集)で、書き方は起動前の設定(`pkc3.editor-mode`)で決まる。
  *   2 ペインの側は文字装飾 → 揃え → 帯の並び → ページ設定 ▾ → スマホ幅を 1 本の道中にまとめた(4 本 → 1 本)。
+ * - 2026-11-26(v4.0 Phase 1 / PR-05): **658**(そのときの実数 658)。`rich-editor.smoke.spec.ts` を新設(起動 2 つ)。⚠ 既存の道中には載せられない ──
+ *   フラグ `editor.rich` を保存値で立てた起動と、立てない起動(既定の無破壊)の 2 つが要る。
  */
-export const BOOT_BUDGET = 656;
+export const BOOT_BUDGET = 658;
 // 2026-11-25(Stage 4): **650**(実数 650)。⚠ main が 649 > 641 で赤だった(#2069 / #2071 / #2073 で上げ忘れ。PR の CI は test-pr の選択でこの test を回さず、
 //   main への push の全量でだけ鳴っていた)── 事実に合わせた。足した起動は次の 9 つ:
 //   - #2069(#1442 S3-1)`builtin-apps.smoke.spec.ts` に 2 本(起動 2 つ)── 広い別ウィンドウの予定表の 2 ペインで本体の › が左の小さな月も送る / 900px で縦に積む。
@@ -224,7 +226,7 @@ export const BOOT_BUDGET = 656;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 328; // v4.0 Phase 1 / PR-04: 実数 656 の半分(下限は実数の半分以上 ── smoke-budget.test)
+export const BOOT_FLOOR = 329; // v4.0 Phase 1 / PR-05: 実数 658 の半分(下限は実数の半分以上 ── smoke-budget.test)
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {

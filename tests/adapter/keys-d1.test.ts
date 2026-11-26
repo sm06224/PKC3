@@ -201,9 +201,9 @@ describe('313 / 117-3: 割り当てを断る', () => {
   });
 
   it('🔴 保存済みの Ctrl+N は読み込みで捨てない(ノートを作るの分だけ)', () => {
-    const kept = resolveUsableBindings({ 'create-entry': ['Mod+N', 'Alt+M'] });
+    const kept = resolveUsableBindings({ 'create-entry': ['Mod+N', 'Alt+J'] });
     expect(kept.unusable, '保存済みの Ctrl+N を使えない物にした').toEqual([]);
-    expect(kept.bindings['create-entry']).toEqual(['Mod+N', 'Alt+M']);
+    expect(kept.bindings['create-entry']).toEqual(['Mod+N', 'Alt+J']);
     // 対照群: 別の操作に付けてあった Ctrl+N は、ブラウザが取るキーなので使わない(保存には残る)
     const other = resolveUsableBindings({ 'edit-entry': ['Mod+N'] });
     expect(other.unusable.map((u) => `${u.commandId}:${u.chord}:${u.problem.kind}`)).toEqual(['edit-entry:Mod+N:refused']);

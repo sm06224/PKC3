@@ -52,6 +52,8 @@ import {
 // ⚠ 継ぎ足しの規則は **1 本**(`detail.ts` の commit と同じ関数を使う)
 import { spliceLines } from '@features/markdown/edit-journal';
 import { appKeymap, type KeymapStore } from './keymap';
+import { RichCell, type RichCellHooks, type RichSplit } from './rich-cell';
+import { composeRichBlock, nextRichMeta, PARAGRAPH_META } from '@features/markdown/rich-block';
 
 /**
  * 🔴 **その場に自分の意味を持っている物**(2026-08-28。着地前レビュー E)。
@@ -149,14 +151,18 @@ const ROW_ABOVE = new WeakMap<HTMLTextAreaElement, () => string>();
  * ⚠ 1 面の書き方は、行を確定するまで打った字が state に無い ── 控え(`draft-writer`)が読む本文に入らず、
  *   打ちかけのままタブを閉じると消えていた。継ぎ足しの規則は確定と同じ(`spliceLines` + `restoreEol`)。
  */
-const ROW_BODY = new WeakMap<HTMLTextAreaElement, () => string | null>();
+const ROW_BODY = new WeakMap<HTMLElement, () => string | null>();
 
 /** 1 画面の書き方の行の欄の印(`data-pkc-field`)。⚠ 控える側(`main.ts`)と同じ字を使う(§7)。 */
 export const ROW_SOURCE_FIELD = 'row-source';
 
-/** 開いている行の欄の字を継ぎ足した本文(欄が行の欄でない / まだ打っていなければ `null`)。 */
-export function rowDraftBody(ta: HTMLTextAreaElement): string | null {
-  return ROW_BODY.get(ta)?.() ?? null;
+/**
+ * 開いている行の欄の字を継ぎ足した本文(欄が行の欄でない / まだ打っていなければ `null`)。
+ * 🔴 リッチ編集のセル(`rich-cell`)も受ける(PR-05)── 控えはセルを包む要素に付けてある(種類が変わってセルが作り直されても引ける)。
+ */
+export function rowDraftBody(el: HTMLElement): string | null {
+  const fn = ROW_BODY.get(el) ?? ROW_BODY.get(el.closest<HTMLElement>('[data-pkc-rich-wrap]') ?? el);
+  return fn?.() ?? null;
 }
 export function rowTextAbove(ta: HTMLTextAreaElement): string {
   return ROW_ABOVE.get(ta)?.() ?? '';
@@ -274,6 +280,12 @@ export interface RowSwapCallbacks {
    * 戻ってくる症状は「画像が消えたまま気づけない」といういちばん静かな形になる。
    */
   onInserted(els: readonly Element[]): void;
+  /**
+   * 🔴 **リッチ編集を使うか**(フラグ `editor.rich`。v4.0 Phase 1 / PR-05)。開くたびに読む ──
+   *   フラグ画面で切り替えたら、次に押したブロックから効く(再起動は要らない)。
+   * ⚠ 渡さなければ使わない(= 今までの原文の `<textarea>` だけ。既定)。
+   */
+  richEnabled?(): boolean;
 }
 
 /** `update()` の返り。⚠ `ok: false` は**行の差し替えを開かない**という意味。 */
@@ -289,7 +301,9 @@ export interface RowSwapUpdate {
  * `body` / `starts` / `ends` が古い座標なので、そのまま開かずにここへ積む。
  */
 type PendingOpen =
-  | { kind: 'line'; line: number; caret: 'start' | 'end'; restore?: RowRestore }
+  | { kind: 'line'; line: number; caret: 'start' | 'end'; restore?: RowRestore; exact?: boolean }
+  /** 行 `line` の前に、新しい空のブロックを開く(リッチ編集の Enter)。 */
+  | { kind: 'insert'; line: number }
   | { kind: 'append' }
   | { kind: 'all' }
   | { kind: 'first' };
@@ -354,6 +368,13 @@ interface Active {
   pendingCommit: boolean;
   /** 封印中に届いたパッチ(latest-wins で 1 件だけ持つ)。 */
   held: { body: string; html: string; ranges: readonly SourceRange[] } | null;
+  /**
+   * 🔴 **リッチ編集のセル**(PR-05)。`null` なら原文の `<textarea>`。
+   * ⚠ リッチのあいだ `textarea` は DOM に入れない(値の器にもしない)── 「原文」に切り替えたときに初めて入る。
+   */
+  rich: RichCell | null;
+  /** リッチ編集で開いた(途中で原文へ切り替えても立ったまま)。書き足しの前後に空行を補うかの判定に使う。 */
+  richOpened: boolean;
 }
 
 /** 🔴 この字数を超える本文だけ、連続入力のときに開放終端の走査をまとめる(#1467) */
@@ -466,7 +487,7 @@ export class RowSwap {
     const rest = this.active;
     // ⚠ 確定が活性を残したとき(= 想定外)も、外す前に落とす(blur の再入を防ぐ)
     this.active = null;
-    rest?.textarea.remove();
+    if (rest !== null) detachField(rest);
   }
 
   get isActive(): boolean {
@@ -535,11 +556,16 @@ export class RowSwap {
      * ⚠ ここへ来る時点で本文は活性化した時と同一(上のガード)なので、
      * 持ち主は必ず居る ── 引けなかった場合の分岐は置かない(死んだ判定になる)。
      */
-    const idx = this.blockIndexForLine(a.startLine) ?? a.blockIndex;
+    /**
+     * 🔴 **挿入の行(範囲が空 = 書き足す行・Enter で作った行)は、塊を差し替えずに間へ挟む**(PR-05)。
+     * ⚠ 行番号で持ち主を引くと**次の塊**が当たり、その塊がスロットに化けて画面から消える。
+     */
+    const insertion = a.endLine < a.startLine;
+    const idx = insertion ? this.insertionIndex(a.startLine) : (this.blockIndexForLine(a.startLine) ?? a.blockIndex);
     a.blockIndex = idx;
     // ⚠ 範囲(S6)では**まとめて 1 つの文字列**で覚える ── 1 塊ぶんだけ覚えると
     //    閉じたときに残りの塊が戻らない(本文が画面から消える)
-    a.originalHtml = blocks.slice(idx, idx + a.blockCount).join('') || a.originalHtml;
+    if (!insertion) a.originalHtml = blocks.slice(idx, idx + a.blockCount).join('') || a.originalHtml;
     const withSlot = [...blocks];
     /**
      * 🔴 **開いた時と同じ形へ組み直す**(#423)── 下位要素を開いているなら、
@@ -549,7 +575,7 @@ export class RowSwap {
      */
     const subHtml =
       a.sub === null ? null : blockWithSubSlot(blocks[idx] ?? '', a.sub.selector, a.sub.k);
-    withSlot.splice(idx, a.blockCount, subHtml ?? SLOT_HTML);
+    withSlot.splice(idx, insertion ? 0 : a.blockCount, subHtml ?? SLOT_HTML);
     /**
      * 🔴 **pin で守って当てる**(S4)。
      *
@@ -570,7 +596,7 @@ export class RowSwap {
       //   忘れると描き直しのたびに**段落を押した行だけ全幅へ跳ねる**
       //   (表は元から付かないので、失敗の向きはこちら)
       if (a.prose) slot.setAttribute(PROSE_ROW_ATTR, '');
-      slot.append(a.textarea);
+      slot.append(a.rich?.wrap ?? a.textarea);
     }
     this.markOpenEnds();
     return { ok: true, inserted: r.inserted };
@@ -603,7 +629,7 @@ export class RowSwap {
     if (a === null) return;
     // ⚠ **先に活性を落とす**(理由は `restoreActive` と同じ ── 再入の防止)
     this.active = null;
-    a.textarea.remove();
+    detachField(a);
     this.cb.notify?.(reason);
   }
 
@@ -795,7 +821,19 @@ export class RowSwap {
       this.openFirst();
       return;
     }
+    if (p.kind === 'insert') {
+      this.openInsert(p.line);
+      return;
+    }
     const idx = this.blockIndexForLine(p.line);
+    if (p.exact === true && idx !== null) {
+      // 🔴 Enter で作ったリスト項目 / 段落(PR-05)── 塊の中のその行の項目を狙う(塊ごと開かない)
+      const el = this.subElementAtLine(idx, p.line);
+      this.activate(idx, el ?? this.unitElement(idx) ?? this.host, 0, 0, p.caret);
+      return;
+    }
+    // ⚠ 控えた caret へ戻す開き直し(#582)は原文の欄で開く(戻す先の位置は原文の字の位置)
+    this.suppressRich = p.restore !== undefined;
     // 予約した行の持ち主が消えた(確定で塊が合体した等)── それ以上は追わない
     let opened = idx !== null && this.activateLine(idx, p.caret);
     if (p.restore !== undefined) {
@@ -811,6 +849,7 @@ export class RowSwap {
       }
       this.finishRestore(opened, p.restore);
     }
+    this.suppressRich = false;
   }
 
   /** その塊の中で、`line` から始まる表の行 / 箇条書きの項目の要素(無ければ null)。 */
@@ -967,6 +1006,7 @@ export class RowSwap {
       caret,
       prose: this.proseSpan(blockIndex, blockIndex),
       sub: subHtml === null || sub === null ? null : { selector: sub.selector, k: sub.k },
+      rich: true,
     });
   }
 
@@ -999,6 +1039,7 @@ export class RowSwap {
       crs: [],
       originalHtml: '',
       withSlot: [...this.view.blocks, SLOT_HTML],
+      rich: true,
       caret: 0,
       /**
        * 🔴 **末尾に足す行は「直前の塊」に揃える**(2026-08-08 の 2 巡目レビュー)。
@@ -1058,7 +1099,7 @@ export class RowSwap {
   extendTo(blockIndex: number): boolean {
     const a = this.active;
     if (a === null) return false;
-    if (normalizeEol(a.textarea.value) !== a.source) {
+    if (typedOf(a) !== a.source) {
       this.commitActive();
       this.cb.notify?.('確定しました。もう一度 Shift+クリックで範囲を選べます');
       return false;
@@ -1164,6 +1205,11 @@ export class RowSwap {
     prose: boolean;
     /** 塊の中の何番目を開いているか(#423)。`null` = 塊ごと。 */
     sub?: { selector: string; k: number } | null;
+    /**
+     * 🔴 リッチ編集で開いてよい開き方か(1 つの塊 / 項目 / 書き足す行。PR-05)。
+     * ⚠ 範囲(Shift+クリック)・全文の編集は原文を見たいので立てない。
+     */
+    rich?: boolean;
   }): boolean {
     // 実際に開けたなら予約は用済み(古い予約が後から焦点を奪わないように)。⚠ 待たせている依頼が在れば断りを返す
     this.setPending(null);
@@ -1186,7 +1232,6 @@ export class RowSwap {
     //    「いま開いている行」を編むので、本文全体と**別の名前**にする
     ta.setAttribute('aria-label', 'この行の原文');
     ta.value = o.source;
-    slot.append(ta);
     ROW_ABOVE.set(ta, () => {
       const above = this.body.split('\n').slice(0, o.startLine);
       return above.length === 0 ? '' : `${above.join('\n')}\n`;
@@ -1216,7 +1261,35 @@ export class RowSwap {
       composing: false,
       pendingCommit: false,
       held: null,
+      rich: null,
+      richOpened: false,
     };
+    const active = this.active;
+    /**
+     * 🔴 **安全なブロックならリッチ編集のセルで開く**(フラグ `editor.rich`。PR-05)。
+     * ⚠ 判定は `RichCell.create` の 1 本(形 + 本物の描き手での往復が原文と 1 バイトも違わない)。
+     *   通らなければ今までどおり原文の `<textarea>`(意図しない記法の破壊を 0 にする)。
+     */
+    const rich =
+      o.rich === true && !this.suppressRich && this.cb.richEnabled?.() === true
+        ? RichCell.create(document, o.source, this.richHooks())
+        : null;
+    if (rich !== null) {
+      active.rich = rich;
+      active.richOpened = true;
+      slot.append(rich.wrap);
+      ROW_BODY.set(rich.wrap, () => {
+        // ⚠ 変換中は綴り直さない(DOM を読むだけでも、契約どおり封印の間は触らない)
+        if (active.composing || active.rich === null) return null;
+        const typed = active.rich.currentSource();
+        if (typed === o.source) return null;
+        const text = restoreEol(typed, o.crs, this.body.split('\n').length - 1 === o.endLine);
+        return spliceLines(this.body, o.startLine, o.endLine, this.padInsertion(active, text));
+      });
+      rich.focus(o.caret);
+      return true;
+    }
+    slot.append(ta);
     this.wire(ta);
     // ⚠ 高さは `syncActiveBox` が 1 か所で決める(上限つき ── S6 の全文差し替えで
     //    5000 行の箱を作らない)。ここで別に代入しない
@@ -1224,6 +1297,175 @@ export class RowSwap {
     ta.focus();
     ta.setSelectionRange(o.caret, o.caret);
     return true;
+  }
+
+  /** リッチ編集のセルに渡す口(確定・封印・切替の規則はこの class の 1 か所)。 */
+  private richHooks(): RichCellHooks {
+    return {
+      compositionStart: () => {
+        if (this.active) this.active.composing = true;
+      },
+      compositionEnd: () => this.endComposition(),
+      isComposing: () => this.active?.composing === true,
+      commit: (save) => {
+        this.boundaryStep = NO_BOUNDARY_STEP;
+        if (this.commitActive() && save) this.cb.saveNote?.();
+      },
+      enter: (split) => this.richEnter(split),
+      toSource: (text, start, end) => this.richToSource(text, start, end),
+      boundary: (dir, atEdge) => {
+        const r = stepAtBoundary(this.boundaryStep, dir, atEdge);
+        this.boundaryStep = r.state;
+        if (r.move) this.moveToAdjacentBlock(dir === 'down');
+      },
+      unseal: () => {
+        if (this.active) this.active.composing = false;
+      },
+      notify: (m) => this.cb.notify?.(m),
+      keymap: this.keymap,
+    };
+  }
+
+  /**
+   * 🔴 **封印が解けた**(`compositionend`)。原文の欄とリッチのセルの共通の 1 本。
+   * ⚠ 意味は「封印が解けた」だけ ── 確定の引き金にしない(実測 2)。保留した描き直しと確定をここで流す。
+   */
+  private endComposition(): void {
+    const a = this.active;
+    if (!a) return;
+    a.composing = false;
+    const held = a.held;
+    a.held = null;
+    if (held) this.update(held.body, held.html, held.ranges);
+    if (a.pendingCommit) {
+      a.pendingCommit = false;
+      this.commitActive();
+    }
+  }
+
+  /**
+   * 🔴 **リッチのセル → 原文の `<textarea>`**(「原文」ボタン / `Alt+M` / 表せない書式)。
+   * 打った内容(綴り直したブロックの原文)と選択を持って行く。⚠ 変換中は切り替えない。
+   */
+  private richToSource(text: string, start: number, end: number): void {
+    const a = this.active;
+    if (a === null || a.rich === null || a.composing) return;
+    const rich = a.rich;
+    // ⚠ 先にセルの聞き耳を止める ── 焦点のあるセルを外すと同期で blur が来て、確定して閉じてしまう
+    rich.dispose();
+    a.rich = null;
+    const ta = a.textarea;
+    ta.value = text;
+    rich.wrap.replaceWith(ta);
+    this.wire(ta);
+    this.syncActiveBox();
+    ta.focus();
+    ta.setSelectionRange(start, end);
+  }
+
+  /**
+   * 🔴 **リッチのセルで Enter**(PR-05)── いまのブロックを確定し、直後に新しいブロックを作ってそこへ移る。
+   * - リスト項目: 次の同じ種類の項目(caret の後ろの字はそちらへ)。**空の項目で Enter ならリストを外して段落へ**。
+   * - 段落・見出し・引用: 次の段落(caret の後ろの字はそちらへ。無ければ空の段落を間に開く)。
+   * ⚠ 確定は `commitActive` の 1 本(継ぎ足しの規則・行数のずれの予約もそこが持つ)。
+   */
+  private richEnter(split: RichSplit): void {
+    const a = this.active;
+    if (a === null || a.rich === null || a.composing) return;
+    const rich = a.rich;
+    const meta = rich.meta;
+    const start = a.startLine;
+    const insertion = a.endLine < a.startLine;
+    if (split.head === '' && split.tail === '') {
+      if (meta.kind === 'list-item') {
+        // 空の項目 → その行を空けて、そこに段落を開く(リストを外す)
+        if (this.commitActive(false, '')) this.queueOpen({ kind: 'insert', line: start + 1 });
+        return;
+      }
+      // 空の段落での Enter は何もしない(空のブロックを積み増さない)
+      if (meta.kind === 'paragraph') return;
+    }
+    const headText = !rich.dirty && split.tail === '' ? a.source : composeRichBlock(meta, split.head);
+    const before = insertion && headText !== '' && this.padsOf(a).before ? 1 : 0;
+    const after = start + before + headText.split('\n').length;
+    if (meta.kind === 'list-item') {
+      const next = composeRichBlock(nextRichMeta(meta), split.tail);
+      if (this.commitActive(false, `${headText}\n${next}`)) {
+        this.queueOpen({ kind: 'line', line: after, caret: 'start', exact: true });
+      }
+      return;
+    }
+    if (split.tail === '') {
+      if (this.commitActive(false, headText)) this.queueOpen({ kind: 'insert', line: after });
+      return;
+    }
+    const next = composeRichBlock(PARAGRAPH_META, split.tail);
+    if (this.commitActive(false, `${headText}\n\n${next}`)) {
+      this.queueOpen({ kind: 'line', line: after + 1, caret: 'start', exact: true });
+    }
+  }
+
+  /** 確定の後に開く。描き直しを待つ必要があれば予約し、要らなければすぐ開く。 */
+  private queueOpen(p: PendingOpen): void {
+    this.setPending(p);
+    if (this.painted && this.staleAfter === null && !this.awaitingUpdate && this.active === null) this.openPending();
+  }
+
+  /** 行 `line` の前に入る位置(塊の並びの中で)。原文を持つ塊のうち、`line` 以降に始まる最初のもの。 */
+  private insertionIndex(line: number): number {
+    for (let i = 0; i < this.starts.length; i += 1) {
+      if (this.starts[i]! >= 0 && this.starts[i]! >= line) return i;
+    }
+    // ⚠ 描き直しの最中は `view` がまだスロット込み(1 つ多い)── 数えるのは原文の塊の表のほう
+    return this.starts.length;
+  }
+
+  /**
+   * 🔴 **行 `line` の前に、新しい空のブロックを開く**(リッチ編集の Enter。PR-05)。
+   * 範囲は空(`[line, line - 1]`)── 継ぎ足しの規則がそのまま「間に挟む」になる(`appendRow` の末尾版と同じ形)。
+   */
+  private openInsert(line: number): boolean {
+    if (this.active !== null && !this.commitActive()) return false;
+    if (this.staleAfter !== null) {
+      this.setPending({ kind: 'insert', line });
+      return true;
+    }
+    if (line >= this.body.split('\n').length) return this.appendRow();
+    const pos = this.insertionIndex(line);
+    const withSlot = [...this.view.blocks];
+    withSlot.splice(pos, 0, SLOT_HTML);
+    return this.open({
+      blockIndex: pos,
+      blockCount: 1,
+      startLine: line,
+      endLine: line - 1,
+      source: '',
+      crs: [],
+      originalHtml: '',
+      withSlot,
+      caret: 0,
+      prose: true,
+      rich: true,
+    });
+  }
+
+  /** 書き足す行の前後が空行でないか(段落が前後の塊に吸い込まれないよう、空行を補う)。 */
+  private padsOf(a: Active): { before: boolean; after: boolean } {
+    const lines = this.body.split('\n');
+    return {
+      before: a.startLine > 0 && (lines[a.startLine - 1] ?? '').trim() !== '',
+      after: a.startLine < lines.length && (lines[a.startLine] ?? '').trim() !== '',
+    };
+  }
+
+  /**
+   * 🔴 **リッチ編集で書き足した段落の前後に空行を補う**(PR-05)。
+   * ⚠ 補わないと、前の段落・リストの続きとして読まれる(怠惰な続きの行)。原文の欄で書き足す行は今までどおり補わない。
+   */
+  private padInsertion(a: Active, text: string): string {
+    if (!a.richOpened || a.endLine >= a.startLine || text === '') return text;
+    const pad = this.padsOf(a);
+    return `${pad.before ? '\n' : ''}${text}${pad.after ? '\n' : ''}`;
   }
 
   /** 塊を作っている最初の要素。 */
@@ -1304,19 +1546,8 @@ export class RowSwap {
       const a = this.active;
       if (a) a.composing = true;
     });
-    ta.addEventListener('compositionend', () => {
-      const a = this.active;
-      if (!a) return;
-      // ⚠ 意味は「**封印が解けた**」だけ ── 確定の引き金にしない(実測 2)
-      a.composing = false;
-      const held = a.held;
-      a.held = null;
-      if (held) this.update(held.body, held.html, held.ranges);
-      if (a.pendingCommit) {
-        a.pendingCommit = false;
-        this.commitActive();
-      }
-    });
+    // ⚠ 意味は「**封印が解けた**」だけ ── 確定の引き金にしない(実測 2)。リッチのセルと同じ 1 本
+    ta.addEventListener('compositionend', () => this.endComposition());
     /**
      * 🔴 **`isComposing` で return しない**(実測: 確定を運ぶ `input` 自身が
      * `isComposing === true` で、その後に `input` は来ない)。ここでやるのは
@@ -1447,7 +1678,8 @@ export class RowSwap {
    */
   private syncActiveBox(): void {
     const a = this.active;
-    if (!a) return;
+    // ⚠ リッチのセルは高さを自分で持つ(箱の高さ・開放終端の印は原文の欄のもの)
+    if (!a || a.rich !== null) return;
     /**
      * 高さは中身に合わせる(属性だけ ── 封印中に呼ばれても composition は壊れない)。
      * ⚠ **上限を置く**(S6)── `Ctrl+A` の全文差し替えでは 5000 行の箱ができて
@@ -1550,10 +1782,11 @@ export class RowSwap {
   private moveToAdjacentBlock(down: boolean): void {
     const a = this.active;
     if (a === null) return;
-    const ta = a.textarea;
     let next: number | null = null;
+    // ⚠ 挿入の行(範囲が空)はスロットが塊の間に挟まっているだけ ── 次の塊はスロットの位置から数える
+    const insertion = a.endLine < a.startLine;
     if (down) {
-      for (let i = a.blockIndex + a.blockCount; i < this.starts.length; i += 1) {
+      for (let i = insertion ? a.blockIndex : a.blockIndex + a.blockCount; i < this.starts.length; i += 1) {
         if (this.starts[i]! >= 0) {
           next = i;
           break;
@@ -1570,7 +1803,7 @@ export class RowSwap {
     // 先頭より上には行けない ── 既定(その行の先頭へ動くだけ)に任せる
     if (!down && next === null) return;
     // 何も打っていない書き足し行(範囲が空)で ↓ ── 開き直しても同じ行なので何もしない
-    if (down && next === null && a.endLine < a.startLine && normalizeEol(ta.value) === a.source) return;
+    if (down && next === null && a.endLine < a.startLine && typedOf(a) === a.source) return;
     // ⚠ `preventDefault` は要らない ── 既定はもう走り終わっている(そして
     //    端に居たので何も動かしていない)
     if (next === null) this.appendRow();
@@ -1632,7 +1865,7 @@ export class RowSwap {
    * 確定して閉じる。⚠ 変換中は確定しない(`pendingCommit` に回す)。
    * `force` は `dispose` だけが立てる(後から確定する機会が無いとき ── 変換中・ダイアログ中の見送りをやめる)。
    */
-  commitActive(force = false): boolean {
+  commitActive(force = false, override?: string): boolean {
     const a = this.active;
     if (a === null) return true;
     if (a.composing && !force) {
@@ -1656,7 +1889,11 @@ export class RowSwap {
      * ⚠ **変換中(`composing`)の扱いは上のまま** ── そちらが先に効く。
      */
     if (!force && isAppDialogOpen()) return false;
-    const typed = normalizeEol(a.textarea.value);
+    /**
+     * 🔴 リッチのセルは「変えていなければ開いた時の原文そのもの」を返す(綴り直さない ── 原本不変)。
+     * `override` はリッチの Enter が渡す確定の字(いまのブロック + 次のブロック)。
+     */
+    const typed = override ?? typedOf(a);
     const start = a.startLine;
     const end = a.endLine;
     /**
@@ -1718,7 +1955,7 @@ export class RowSwap {
      * 🔴 **本文へ戻すときは元の改行コードで**(#1087 A-2)。開いた時に行末が `\r` だった行は `\r` を付け直し、
      *   増えた行は塊の改行コード(1 行でも `\r` があれば CRLF)に合わせる。本文の最後の行は元から `\r` が無い。
      */
-    const text = restoreEol(typed, a.crs, this.body.split('\n').length - 1 === end);
+    const text = this.padInsertion(a, restoreEol(typed, a.crs, this.body.split('\n').length - 1 === end));
     if (text.split('\n').length === end - start + 1) {
       this.body = spliceLines(this.body, start, end, text);
     } else {
@@ -1744,7 +1981,7 @@ export class RowSwap {
      * 🔴 **打った字があるときは、捨てる前に聞く**(2 列の編集の Esc と同じ問い・同じ字)。
      *   変えていなければ今までどおり聞かずに閉じる。聞いている間の Esc 連打は 1 回にまとめる。
      */
-    if (normalizeEol(a.textarea.value) !== a.source) {
+    if (typedOf(a) !== a.source) {
       if (this.cancelAsking) return;
       this.cancelAsking = true;
       void confirmInApp(this.host, '入力した内容を捨てますか', {
@@ -1755,6 +1992,7 @@ export class RowSwap {
         // 待つ間に確定・差し替えなどで別の行になっていたら何もしない
         if (this.active !== a) return;
         if (answer === 'ok') this.restoreActive();
+        else if (a.rich !== null) a.rich.focus();
         else a.textarea.focus();
       });
       return;
@@ -1764,6 +2002,9 @@ export class RowSwap {
 
   /** 捨てる確認を出している間(Esc の連打を 1 回にする)。 */
   private cancelAsking = false;
+
+  /** caret を控えた開き直し(#582)の間だけ立つ ── そのときは原文の欄で開く。 */
+  private suppressRich = false;
 
   /**
    * 活性を畳んで、**差し替える前の描画へ戻す**。
@@ -1785,7 +2026,7 @@ export class RowSwap {
      * ⚠ happy-dom は `remove()` で `blur` を飛ばさないので、unit だけでは出ない。
      */
     this.active = null;
-    a.textarea.remove();
+    detachField(a);
     const blocks = [...this.view.blocks];
     blocks[a.blockIndex] = a.originalHtml;
     const r = applyBlocks(this.host, blocks.join(''), this.view, []);
@@ -1800,6 +2041,23 @@ export class RowSwap {
 /** 改行を LF にそろえる(ブラウザが `textarea.value` にするのと同じ)。 */
 function normalizeEol(text: string): string {
   return text.replace(/\r\n?/g, '\n');
+}
+
+/**
+ * いま欄に在る字(ブロックの原文。LF)。🔴 **変わったかの判定はこれと開いた時の原文の比較 1 か所**。
+ * リッチのセルは変えていなければ原文そのもの(`RichCell.currentSource`)。
+ */
+function typedOf(a: Active): string {
+  return a.rich !== null ? a.rich.currentSource() : normalizeEol(a.textarea.value);
+}
+
+/** 欄(原文の `<textarea>` / リッチのセル)を DOM から外す。⚠ 呼ぶ前に活性を落としておく(blur の再入を防ぐ)。 */
+function detachField(a: Active): void {
+  if (a.rich !== null) {
+    a.rich.dispose();
+    a.rich.wrap.remove();
+  }
+  a.textarea.remove();
 }
 
 /**
