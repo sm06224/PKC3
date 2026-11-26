@@ -47,6 +47,13 @@ import {
   HTML_SANDBOX_BLOCKED_MSG_TYPE,
   imgSrcDirective,
 } from './external-images';
+import { WIDGET_BASE_STYLE, widgetPrelude, widgetThemePreludeScript } from './widget-bridge';
+
+/**
+ * テーマを受け取る箱の印(v4.0 Phase 2 / PR-07)。親の `installWidgetBridge` が配色の変化をこの箱へ配る。
+ * ⚠ 印だけ ── 箱の中身(`srcdoc`)にテーマの値を焼かない(焼くと配色を変えるたびに箱が読み直される)。
+ */
+export const WIDGET_FRAME_ATTR = 'data-pkc-widget-frame';
 
 /** iframe 高さ cap(無限スクロール abuse 防止)。 */
 export const HTML_SANDBOX_MAX_HEIGHT = 5000;
@@ -137,6 +144,11 @@ export function buildHtmlSandboxIframe(
    * 渡し忘れ(塞がる)は user に見える。
    */
   allowExternalImages: boolean = false,
+  /**
+   * `id=` を書いたが保存つきの器を出さない面(書き出し・埋め込み・プレビュー)の id(PR-07)。
+   * 🔑 箱の中だけの `localStorage`(seed 空・親は登録しないので保存されない)を入れる ── 1 行目で止まらない。
+   */
+  widgetId: string | null = null,
 ): string {
   // iframe ID:DOM 内 unique(postMessage で iframe を特定)。
   // 🔴 **中身から決める**(乱数にしない ── P8 段⑩ で判明)。かつて
@@ -145,6 +157,46 @@ export function buildHtmlSandboxIframe(
   // (= iframe が毎回読み直され、中身が一度消える)。
   const iframeId = `pkc-html-render-${stableKey(content, String(occurrence))}`;
 
+  const fullDoc = buildHtmlSandboxDoc(
+    content,
+    iframeId,
+    allowExternalImages,
+    widgetId === null ? widgetThemePreludeScript(iframeId) : widgetPrelude(iframeId, widgetId, {}),
+  );
+
+  // srcdoc attribute は HTML escape(&, ", <, > → entities)。
+  // entities は attribute parsing 時に解決されて iframe には raw HTML が
+  // 渡されるので、< / > escape しても render に影響なし。改行は保持。
+  const srcdoc = fullDoc
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  return (
+    `<iframe class="pkc-html-render" ` +
+    `data-pkc-html-render-id="${iframeId}" ` +
+    `sandbox="allow-scripts" ` +
+    `referrerpolicy="no-referrer" ` +
+    `loading="lazy" ` +
+    `${WIDGET_FRAME_ATTR}="" ` +
+    `style="width:100%;border:0;height:0;display:block;" ` +
+    `title="HTML sandbox render"${sourceLineAttrs} ` +
+    `srcdoc="${srcdoc}"></iframe>`
+  );
+}
+
+/**
+ * 箱の中身(HTML 全文)を組む。` ```html ` の箱(`buildHtmlSandboxIframe`)と、`id=` の在るウィジェットの箱
+ * (adapter の `widget-bridge.ts` が見えたときに組む)の**両方が使う 1 本**(CSP を 2 か所に書かない)。
+ * @param headExtra CSP の `<meta>` の後・content の前に置く script(テーマ連動 / 保存の shim)
+ */
+export function buildHtmlSandboxDoc(
+  content: string,
+  iframeId: string,
+  allowExternalImages: boolean,
+  headExtra: string = '',
+): string {
   // CSP:default-src は self + data:、script は inline only(外部 src 禁止)、
   // connect は none(fetch 禁止)、frame は none(再帰 iframe 禁止)。
   // 🔴 **`img-src` だけが可変**(2026-08-06)── ここが唯一「外へ出られる」穴で、
@@ -205,33 +257,13 @@ export function buildHtmlSandboxIframe(
     cspContent.replace(/"/g, '&quot;') + '">' +
     // ⚠ **content より前**(上の violationScript の注記を読むこと)
     violationScript +
-    '<style>' +
-    'body{margin:0;padding:0.5rem;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;line-height:1.5;color:#222;}' +
-    '*{box-sizing:border-box;}' +
-    'img,svg,video,canvas{max-width:100%;height:auto;}' +
-    '</style>' +
+    // 🔑 テーマ連動の prelude(と、`id=` の在る箱では保存の shim)も content より前
+    headExtra +
+    // 🔑 文字色は親のテーマ(`--pkc-fg`)、親の居ない書き出しでは今までどおり #222
+    '<style>' + WIDGET_BASE_STYLE + '</style>' +
     '</head><body>' + content + resizeScript +
     '</body></html>';
-
-  // srcdoc attribute は HTML escape(&, ", <, > → entities)。
-  // entities は attribute parsing 時に解決されて iframe には raw HTML が
-  // 渡されるので、< / > escape しても render に影響なし。改行は保持。
-  const srcdoc = fullDoc
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  return (
-    `<iframe class="pkc-html-render" ` +
-    `data-pkc-html-render-id="${iframeId}" ` +
-    `sandbox="allow-scripts" ` +
-    `referrerpolicy="no-referrer" ` +
-    `loading="lazy" ` +
-    `style="width:100%;border:0;height:0;display:block;" ` +
-    `title="HTML sandbox render"${sourceLineAttrs} ` +
-    `srcdoc="${srcdoc}"></iframe>`
-  );
+  return fullDoc;
 }
 
 /**

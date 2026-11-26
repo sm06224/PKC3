@@ -252,6 +252,12 @@ export interface ShimOptions {
   seed: Readonly<Record<string, string>>;
   /** 1 アプリの上限(既定 2MB)。 */
   limit?: number;
+  /**
+   * 差分の合図の名前(既定 `APP_STORAGE_MESSAGE`)。
+   * 🔑 ノートの中のウィジェット(`widget-bridge.ts`)も**同じ prelude**を使う ── 合図の名前と上限だけを変える
+   *   (Proxy の `localStorage` を 2 本書かない。CLAUDE.md §7)。
+   */
+  tag?: string;
 }
 
 /**
@@ -267,7 +273,7 @@ export function buildStorageShim(opts: ShimOptions): string {
   return (
     '<script>' +
     SHIM_SOURCE +
-    `(${inlineJson(opts.seed)},${String(limit)},${inlineJson(APP_STORAGE_MESSAGE)});` +
+    `(${inlineJson(opts.seed)},${String(limit)},${inlineJson(opts.tag ?? APP_STORAGE_MESSAGE)});` +
     '</script>'
   );
 }

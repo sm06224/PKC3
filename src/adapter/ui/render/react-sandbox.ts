@@ -11,12 +11,14 @@
  *   `iframe[data-pkc-html-render-id]` なので、止めた要求の申告・高さの引き継ぎも同じ道に乗る。
  * ⚠ 失敗(ランタイムを読めない)は器に理由を残し、原文は器に残す(黙って空にしない)。
  */
-import { restoreSandboxHeights } from '@features/markdown/html-sandbox';
+import { restoreSandboxHeights, WIDGET_FRAME_ATTR } from '@features/markdown/html-sandbox';
 import { errorMessageJa } from '@features/error-text';
 import { reactFrameDoc } from '@adapter/platform/render/react-frame-doc';
 import { watchVisible } from './visible-watch';
 import { typingQuietIn } from './typing-gate';
 import { registerLiveScope, type MermaidScope } from './mermaid-hydrate';
+import { attachWidgetResetBar, keepWidgetSeedFresh, registerWidgetFrame, widgetMountParts } from './widget-bridge';
+import { widgetPrelude } from '@features/markdown/widget-bridge';
 
 export const REACT_ATTR = 'data-pkc-react-src';
 
@@ -66,13 +68,35 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
   const loaded = new Map<HTMLElement, Promise<void>>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const occurrences = new Map<string, number>();
+  /** 器 → 何番目か(⚠ 置き直し〔状態を初期化〕で数え直さない ── 同じ箱の id を保つ)。 */
+  const occOf = new WeakMap<HTMLElement, number>();
+  /** 器 → 保存してよい箱の登録の解除(`id=` の在る React だけ。PR-07)。 */
+  const unregisters = new Map<HTMLElement, () => void>();
+  /** 器 → 「状態を初期化」のバー。 */
+  const bars = new Map<HTMLElement, { sync: () => void; remove: () => void }>();
+  const unmount = (host: HTMLElement, keepBar: boolean): void => {
+    unregisters.get(host)?.();
+    unregisters.delete(host);
+    frames.get(host)?.remove();
+    frames.delete(host);
+    loaded.delete(host);
+    started.delete(host);
+    if (!keepBar) {
+      bars.get(host)?.remove();
+      bars.delete(host);
+    }
+  };
 
   const place = async (host: HTMLElement): Promise<void> => {
     if (disposed || started.has(host) || !host.isConnected) return;
     started.add(host);
     const source = host.getAttribute(REACT_ATTR) ?? '';
-    const n = occurrences.get(source) ?? 0;
-    occurrences.set(source, n + 1);
+    let n = occOf.get(host);
+    if (n === undefined) {
+      n = occurrences.get(source) ?? 0;
+      occurrences.set(source, n + 1);
+      occOf.set(host, n);
+    }
     try {
       const { runtime, tailwind } = await (loader ?? loadReactRuntime)();
       if (disposed || !host.isConnected) return;
@@ -85,7 +109,38 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
       f.setAttribute('referrerpolicy', 'no-referrer');
       f.title = 'React の表示';
       f.style.cssText = 'width:100%;border:0;height:0;display:block;';
-      f.srcdoc = reactFrameDoc(source, runtime, tailwind, id);
+      // 🔑 テーマを受け取る箱(PR-07)。`id=` の在る器は保存の shim も焼く(前回の値を seed に)
+      f.setAttribute(WIDGET_FRAME_ATTR, '');
+      const parts = widgetMountParts(host, id);
+      f.srcdoc = reactFrameDoc(source, runtime, tailwind, id, parts.prelude);
+      if (parts.lid !== null && parts.widgetId !== null) {
+        const { lid, widgetId } = parts;
+        let bar = bars.get(host) ?? null;
+        if (bar === null) {
+          bar = attachWidgetResetBar(host, lid, widgetId, () => {
+            unmount(host, true);
+            void place(host);
+          });
+          bars.set(host, bar);
+        }
+        const b = bar;
+        b.sync();
+        keepWidgetSeedFresh(f, lid, widgetId, parts.seed, (seed) =>
+          reactFrameDoc(source, runtime, tailwind, id, widgetPrelude(id, widgetId, seed)),
+        );
+        unregisters.set(
+          host,
+          registerWidgetFrame(f, {
+            lid,
+            widgetId,
+            onChange: () => b.sync(),
+            remount: () => {
+              unmount(host, false);
+              void place(host);
+            },
+          }),
+        );
+      }
       host.append(f);
       frames.set(host, f);
       loaded.set(host, new Promise<void>((resolve) => f.addEventListener('load', () => setTimeout(resolve, 300), { once: true })));
@@ -124,11 +179,9 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
   }
 
   const dropGone = (): void => {
-    for (const [host, f] of [...frames]) {
+    for (const host of [...frames.keys()]) {
       if (host.isConnected) continue;
-      f.remove();
-      frames.delete(host);
-      loaded.delete(host);
+      unmount(host, false);
     }
   };
 
@@ -138,7 +191,7 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
       io?.disconnect();
       for (const t of timers) clearTimeout(t);
       timers.clear();
-      for (const f of frames.values()) f.remove();
+      for (const host of [...frames.keys()]) unmount(host, false);
       frames.clear();
       loaded.clear();
     },

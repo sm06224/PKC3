@@ -51,6 +51,10 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *        数えて残りを捨てていたので、外の JavaScript / CSS / `fetch` が止まっても
  *        **画面に 1 行も出ず**、CDN を前提にした中身は真っ白になった。
  *        ⚠ 門は 1 つも開けていない(運ぶのは種別と件数だけ ── URL は載せない)。
+ *      ⚠ **2026-11-26(v4.0 Phase 2 / PR-07)に同じ箱がもう一度動いた**:箱の head にテーマ連動の
+ *        prelude(親の配色を `--pkc-*` で受ける)が入り、既定の文字色が `color:var(--pkc-fg,#222)` になり、
+ *        iframe に印 `data-pkc-widget-frame` が付いた。PKC2 の箱は暗い配色でも `#222` 固定で、
+ *        **暗い地の上に暗い字**になっていた。⚠ 門は 1 つも開けていない(sandbox / CSP は同じ)。
  *   4. **行頭アラインの属性値を `end` → `opposite` にした**(2026-08-08、user 指摘)。
  *      裁定で `|>` の意味が「グローバルの寄せを反対にする」になった以上、logical end を
  *      表す `end` と同じ値にしておけない ── 説明的な形 `:::paragraph{align=end}` と

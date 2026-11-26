@@ -1410,7 +1410,9 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-11-26(v4.0 Phase 1 / PR-05): `rich-editor.smoke.spec.ts` を**新設**(+1 file / +2 件)。🔴 ここでしか見えない:実マウスで段落を押すと
     //    `contenteditable` のセルが開き、実打鍵と帯(▾ の一覧を含む)がセルから焦点を奪わずに効く・確定した原文がプレーンな PKC-Markdown で
     //    ほかのブロック(コード・:::format)が 1 バイトも変わらない・フラグ OFF では今までどおり。139 → 140。
-    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(140);
+    // ⚠ 2026-11-26(v4.0 Phase 2 / PR-07): `widget-bridge.smoke.spec.ts` を**新設**(+1 file / +1 件)。🔴 ここでしか見えない:実ブラウザの
+    //    opaque origin の箱で、`id=` の在るウィジェットの `localStorage` が再読み込みをまたいで残り、配色の切り替えで箱が読み直されない。140 → 141。
+    expect(files.length, 'smoke の spec file が増減した(足したらこの数を直す)').toBe(141);
     // ⚠ 2026-11-21(#1982 段 5-3): `note-tabs.smoke.spec.ts` を**新設**(+1 file / +1 件)。🔴 ここでしか見えない:有効なタブが
     //    本物の CSS で形(太字・左端の線)になる / 1 枚では場所を取らない / 印刷の media で消える(unit は字の有無しか見られず、
     //    詳細度と順番で負けて紙に出ていたのをこの spec が見つけた)。116 → 117。
@@ -1684,7 +1686,8 @@ describe('🔴 smoke の spec は黙って消えない(2026-08-29)', () => {
     // ⚠ 2026-11-26(v4.0 Phase 1 / PR-03): `page-layout.smoke.spec.ts` を新設(+3 件)。648 → 651。
     // ⚠ 2026-11-26(v4.0 Phase 1 / PR-04): `word-format.smoke.spec.ts` を新設(+2 件 ── 2 ペインの道中 / 1 画面編集)。651 → 653。
     // ⚠ 2026-11-26(v4.0 Phase 1 / PR-05): `rich-editor.smoke.spec.ts` を新設(+2 件 ── フラグ ON の道中 / フラグ OFF)。653 → 655。
-    ).toBe(655);
+    // ⚠ 2026-11-26(v4.0 Phase 2 / PR-07): `widget-bridge.smoke.spec.ts` を新設(+1 件 ── 保存・編集・配色・初期化・状態なしの枠の道中)。655 → 656。
+    ).toBe(656);
   });
 });
 

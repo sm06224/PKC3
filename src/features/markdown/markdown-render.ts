@@ -46,6 +46,7 @@ import { cellEditButtonHtml, detectCsvLang, renderCsvFence, shapeButtonHtml } fr
 import { embedViewSource, isEmbedViewInfo, isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
 import { formHtml, isFormInfo } from './form-def';
 import { buildHtmlSandboxIframe } from './html-sandbox';
+import { parseWidgetId, widgetPlaceholderHtml, WIDGET_ID_ATTR, WIDGET_LIVE_ATTR } from './widget-bridge';
 import {
   EXTERNAL_IMAGE_ATTR,
   EXTERNAL_IMAGE_CLASS,
@@ -365,6 +366,11 @@ export function parseRenderableFence(info: string | null | undefined): Renderabl
     mode = 'both';
     base = lower.slice(0, -'-both'.length);
   }
+  /**
+   * 🔑 ` ```jsx id="…" ` は React のウィジェット(PR-07)。⚠ **`id=` の在るときだけ** ── 素の ` ```jsx ` は
+   *   今までどおりコードの表示のまま(既存のノートの見え方を変えない)。
+   */
+  if (base === 'jsx' && parseWidgetId(rest) !== null) base = 'react';
   if (!RENDERABLE_FENCE_LANGS.has(base)) return null;
   return { lang: base as RenderableFenceLang, mode, rest };
 }
@@ -421,6 +427,8 @@ function buildRenderableSlotHtml(
    * `undefined` = セルを押せないまま(既定)。csv 系だけが使う。
    */
   firstContentLine: number | undefined,
+  /** `id=` の在るウィジェットを保存つきの器で出すか(PR-07。`RenderOptions.liveWidgets`)。 */
+  liveWidgets: boolean = false,
 ): string | null {
   switch (fence.lang) {
     case 'html':
@@ -439,10 +447,21 @@ function buildRenderableSlotHtml(
      *   生 HTML を通す判断は別の話で、ここでは変えない。
      */
     // eslint-disable-next-line no-fallthrough
-    case 'svg':
+    case 'svg': {
+      /**
+       * 🔴 **`id=` の在る ` ```html ` は状態を持つウィジェット**(v4.0 Phase 2 / PR-07)── 器(placeholder)だけ出す。
+       * 箱は adapter(`widget-bridge.ts`)が**見えたとき**に、前回保存した値を焼いて置く(1 行目の同期
+       * `localStorage.getItem` が前回の値を返す)。⚠ 器は原文と id しか持たないので、状態が変わっても
+       * 無関係な段落を編集しても塊の HTML は変わらない(動いている箱を作り直さない)。
+       * ⚠ `svg` は対象外(状態を持つ理由が無い)。読めない id は今までどおりの箱に落とす。
+       */
+      const widgetId = fence.lang === 'html' ? parseWidgetId(fence.rest) : null;
+      if (widgetId !== null && liveWidgets) return widgetPlaceholderHtml(content, widgetId, allowExternalImages);
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
-      return buildHtmlSandboxIframe(content, '', occurrence, allowExternalImages);
+      // 🔑 器を出さない面の `id=` は、箱の中だけの `localStorage`(保存しない)を入れて描く(書き出しでも動く)
+      return buildHtmlSandboxIframe(content, '', occurrence, allowExternalImages, widgetId);
+    }
     case 'mermaid': {
       // pgc-203 wave-α' polish #24:placeholder div のみ emit。実 SVG render は
       // adapter 層の `hydrateMermaidPlaceholders` が lazy import('mermaid') で
@@ -479,7 +498,14 @@ function buildRenderableSlotHtml(
        * ⚠ 原文は属性に持つ(生きている箱を、無関係な編集で作り直さない)。
        */
       const escapedReact = md.utils.escapeHtml(content);
-      return `<div class="pkc-react-placeholder" data-pkc-react-src="${escapedReact}" data-pkc-md-block-kind="react"><pre class="pkc-react-source"><code class="language-jsx">${escapedReact}</code></pre></div>`;
+      // 🔑 `id=` の在る React は状態を持つウィジェット(PR-07)── 器に id を添えるだけ(箱は `react-sandbox.ts` が組む)
+      const reactWidgetId = parseWidgetId(fence.rest);
+      // ⚠ 保存するのは**保存つきの面だけ**(`data-pkc-widget-live`)── ほかの面は箱の中だけの localStorage
+      const reactWidgetAttr =
+        reactWidgetId === null
+          ? ''
+          : ` ${WIDGET_ID_ATTR}="${md.utils.escapeHtml(reactWidgetId)}"${liveWidgets ? ` ${WIDGET_LIVE_ATTR}="1"` : ''}`;
+      return `<div class="pkc-react-placeholder" data-pkc-react-src="${escapedReact}"${reactWidgetAttr} data-pkc-md-block-kind="react"><pre class="pkc-react-source"><code class="language-jsx">${escapedReact}</code></pre></div>`;
     }
     default: {
       // csv / tsv / psv:suffix を剥がした info を渡す(`noheader` 等の
@@ -919,6 +945,7 @@ function renderRenderableFence(
       occurrence,
       (env as { allowExternalImages?: boolean } | undefined)?.allowExternalImages === true,
       firstContentLine,
+      (env as { liveWidgets?: boolean } | undefined)?.liveWidgets === true,
     );
     if (slot !== null) {
       return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, occurrence);
@@ -3749,6 +3776,15 @@ export interface RenderMarkdownOptions {
    * ⚠ 渡さなければ属性は 1 つも出ない = goldens は 1 バイトも動かない。
    */
   readonly interactiveCodeBlocks?: boolean;
+  /**
+   * 🔴 **`id=` の在るウィジェットを「保存つきの器」で出すか**(v4.0 Phase 2 / PR-07。既定 `false`)。
+   *
+   * ⚠ **本体の読む面だけ** `true` にする ── 器の保存先は本文の器の lid(`data-pkc-widget-lid`)で決まるので、
+   *   別のノートを描き込む面(板・節の埋め込み)で器を出すと、**埋め込んだ側のノートの保存を読み書きできてしまう**。
+   * 🔑 `false` の面(書き出した HTML・印刷・埋め込み・編集中のプレビュー・添付の説明)では、今までどおりの箱で描き、
+   *   箱の中だけの `localStorage`(保存しない)を入れる ── 1 行目の `localStorage.getItem` で止まらない。
+   */
+  readonly liveWidgets?: boolean;
   /**
    * 🔴 **チェックの印を押せる形で出すか**(#277。既定 `false` = 押せない)。
    *
@@ -7005,6 +7041,8 @@ function renderMarkdownCore(
     /** 本文の `vars`(入力欄の現在値。#1456) */
     vars: Readonly<Record<string, string>>;
     interactiveCodeBlocks: boolean;
+    /** `id=` の在るウィジェットを保存つきの器で出すか(PR-07) */
+    liveWidgets: boolean;
     interactiveTags: boolean;
     phoneLinks: boolean;
     interactiveDates: boolean;
@@ -7042,6 +7080,8 @@ function renderMarkdownCore(
     vars: opts.vars ?? {},
     // 🔴 コード枠に ✎ を出すか(#1044 段3)。既定は出さない
     interactiveCodeBlocks: opts.interactiveCodeBlocks === true,
+    // 🔴 ウィジェットを保存つきの器で出すか(PR-07)。既定は出さない(保存しない箱)
+    liveWidgets: opts.liveWidgets === true,
     // 🔴 本文中のタグを押せる形で出すか(#550 段③)。既定は押せない
     interactiveTags: opts.interactiveTags === true,
     // 🔴 素の電話番号を押せる形にするか(#278 段②)。既定は切

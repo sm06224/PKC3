@@ -16,6 +16,7 @@
  */
 import { escapeScript } from './script-escape';
 import { sandboxResizeScript, sandboxViolationScript } from '@features/markdown/html-sandbox';
+import { WIDGET_BASE_STYLE } from '@features/markdown/widget-bridge';
 
 export const REACT_FRAME_CSP =
   "default-src 'none'; img-src data: blob:; font-src data:; style-src 'unsafe-inline'; " +
@@ -68,8 +69,15 @@ export function scriptLiteral(text: string): string {
 
 /**
  * @param iframeId 箱の id(`data-pkc-html-render-id`。高さ・止めた要求の申告の宛先を決める)
+ * @param headExtra テーマ連動の prelude(`id=` の在る箱では保存の shim も)── ランタイムより前に置く(PR-07)
  */
-export function reactFrameDoc(source: string, runtime: string, tailwind: string, iframeId: string): string {
+export function reactFrameDoc(
+  source: string,
+  runtime: string,
+  tailwind: string,
+  iframeId: string,
+  headExtra: string = '',
+): string {
   return (
     '<!DOCTYPE html><html><head><meta charset="utf-8">' +
     '<meta name="viewport" content="width=device-width, initial-scale=1">' +
@@ -77,7 +85,9 @@ export function reactFrameDoc(source: string, runtime: string, tailwind: string,
     // ⚠ CSP の `<meta>` より後・本文より前(止めた要求を取りこぼさない)
     // 🔴 画像の違反は申告しない(箱は外へ出ない方針のまま。同意の帯を出しても CSP は開かない)
     sandboxViolationScript(iframeId, false) +
-    '<style>body{margin:0;padding:0.5rem;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;line-height:1.5;color:#222}*{box-sizing:border-box}img,svg,video,canvas{max-width:100%;height:auto}</style>' +
+    headExtra +
+    // 🔑 文字色は親のテーマ(`--pkc-fg`)、親の居ない所では今までどおり #222(` ```html ` の箱と同じ 1 本)
+    `<style>${WIDGET_BASE_STYLE}</style>` +
     '</head><body><div id="root"></div>' +
     `<script>${escapeScript(runtime)}</script>` +
     `<script>${escapeScript(tailwind)}</script>` +

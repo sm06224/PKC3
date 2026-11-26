@@ -33,6 +33,7 @@ import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
 import { hydratePlotly } from './plotly-raster';
 import { hydrateReact } from './react-sandbox';
+import { hydrateWidgets, remountStaleWidgets, WIDGET_LID_ATTR } from './widget-bridge';
 import { SqlEmbedHydrator } from './sql-embed-hydrate';
 import { fenceAssetUnreadableText, hydrateFenceHosts } from './fence-asset-hydrate';
 import { applyHeadingFold, revealBlock } from './heading-fold';
@@ -91,7 +92,15 @@ export function hydrateFigures(
 ): MermaidScope[] {
   // ⚠ **数式もここに束ねる**(#707)── 面は 6 か所あるので、別の口を作ると
   //    そのうち 1 つで数式だけ字のまま残る(まさに mermaid が踏んだ形)。
-  return [hydrateMermaid(root, opts), hydrateChart(root, opts), hydratePlotly(root, opts), hydrateReact(root), hydrateMath(root)];
+  // 🔑 `id=` の在る ` ```html ` のウィジェットも同じ束に乗せる(PR-07 ── 面ごとに呼び忘れない)
+  return [
+    hydrateMermaid(root, opts),
+    hydrateChart(root, opts),
+    hydratePlotly(root, opts),
+    hydrateReact(root),
+    hydrateWidgets(root),
+    hydrateMath(root),
+  ];
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
 import { captureCellInput, reopenCellInput } from './cell-input';
@@ -1881,6 +1890,8 @@ export class DetailRenderer {
       this.bodyKind = 'attachment';
       this.bodyView = EMPTY_VIEW;
       this.bodyHost!.textContent = '';
+      // 🔴 前に開いたノートの lid を残さない(説明文の中の器が、前のノートの保存を名乗らない ── PR-07 レビュー)
+      this.bodyHost!.setAttribute(WIDGET_LID_ATTR, lid);
       this.bodyHost!.removeAttribute(LONG_NOTE_ATTR);
       this.renderAttachment(body, shown, lid, selfContainerId(state), meta.title, knownAppGroupNames(state));
       if (keepPick !== null) this.refocusPick(keepPick);
@@ -1940,6 +1951,11 @@ export class DetailRenderer {
          *   書き出した HTML・印刷には受け手(`edit-cell`)が居ない。
          */
         interactiveCells: true,
+        /**
+         * 🔴 **`id=` の在るウィジェットを保存つきの器で出す**(PR-07)。⚠ **この面だけ** ── 保存先は本文の器の lid
+         *   (`data-pkc-widget-lid`)で決まる。埋め込み・プレビュー・書き出しは保存しない箱で描く。
+         */
+        liveWidgets: true,
         /**
          * 🔴 **入力欄の定義(` ```yaml form `)を、打てる形で出す**(#1456)。⚠ **この面だけ**
          *   (受け手 `form-save` ほかが居る面 ── 書き出した HTML・印刷・章の窓は値の表のまま)。
@@ -2032,6 +2048,9 @@ export class DetailRenderer {
         this.pendingSectionInstall === null
       ) {
         const host = this.bodyHost!;
+        // 🔑 ウィジェットの保存先(PR-07)── 器が作り直されていても lid を持たせ直す(冪等)
+        host.setAttribute(WIDGET_LID_ATTR, lid);
+        remountStaleWidgets(host);
         this.sqlEmbeds.sync(host, body);
         this.syncMissingLinks();
         this.syncPlaceEmbeds();
@@ -2084,11 +2103,18 @@ export class DetailRenderer {
          *   新しい字が欄を閉じるまで画面に出ない(打ったのに古い字のまま見える)。
          */
         const keptCell = captureCellInput(host);
+        /**
+         * 🔴 **ウィジェットの保存先の lid を器に持たせる**(PR-07)── 箱が名乗る lid は使わず、ここから引く。
+         * ⚠ 塊を当てる**直前**に付け替える(当てる前に付けると、まだ前のノートの塊が新しい lid を名乗る時間が延びる)。
+         */
+        host.setAttribute(WIDGET_LID_ATTR, lid);
         // 🔴 **長大なノートだけ**、画面の外の塊の配置を飛ばす印を付ける(#1467)。⚠ 塊を入れる**前**に(最初の配置から効かせる)
         syncLongNote(host, body);
         // 🔑 **変わった塊だけ**当てる(P8 段⑩⑪)── scroll も図も生き残る
         const applied = applyBlocks(host, html, this.bodyView);
         this.bodyView = applied.view;
+        // 🔴 別のノートから持ち越された塊のウィジェットは、新しい lid で置き直す(前のノートの領域へ書かせない)
+        remountStaleWidgets(host);
         if (keptCell !== null) reopenCellInput(host, keptCell);
         // writing / direction / align / layout の属性契約(dir 込みで 1 箇所)
         applyDocumentGlobals(host, extractDocumentGlobals(body));
