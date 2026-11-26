@@ -68,6 +68,8 @@ export interface EntryAction {
     | 'pinnable'
     | 'pinned'
     | 'labelled'
+    | 'sync-selectable'
+    | 'sync-selected'
     | 'attachment'
     | 'kind-changeable'
     | 'transcript';
@@ -171,6 +173,11 @@ export interface EntryMenuContext {
   /** 🔴 **色ラベルが付いているか**(#1982 段 4)。`true` のときだけ「色ラベルを外す」を出す(`undefined` = 出さない)。 */
   readonly labelled?: boolean;
   /**
+   * 🔴 **選択同期で直接指定しているか**(#2066 段 5-B)。⚠ **省く = 出さない**(`undefined`)── 同期が入 かつ
+   *   「選んだエントリだけ同期」のとき、user 領域のノートの行のメニューだけが渡す(同期が切・ワークスペース全体・system 領域は渡さない)。
+   */
+  readonly syncDirect?: boolean;
+  /**
    * 🔴 **時刻つきの行(文字起こし)が在るか**(#1447)。⚠ 本文を読むのは呼び側で、**開いているノートのときだけ**渡す
    *   (別の行の本文は右クリックのためだけに読まない)。省く = 出さない。
    */
@@ -197,6 +204,9 @@ const WHEN: Readonly<
   pinnable: (ctx) => ctx.pinned === false,
   pinned: (ctx) => ctx.pinned === true,
   labelled: (ctx) => ctx.labelled === true,
+  // 🔴 選択同期も**対**(#2066 段 5-B)── どちらか一方だけが出る。`undefined` はどちらも出さない
+  'sync-selectable': (ctx) => ctx.syncDirect === false,
+  'sync-selected': (ctx) => ctx.syncDirect === true,
   // 🔴 種類を変えられるのはノートとログだけ(台帳 #1852 I2 / 依頼 157)── 判定は `canChangeKind` 1 本
   'kind-changeable': (ctx) => canChangeKind(ctx.archetype),
   // 🔴 字幕ファイル(#1447)── 時刻つきの行があるノートだけ。`undefined`(本文を知らない)は出さない
@@ -535,6 +545,13 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'note-label-set', label: '色ラベルを付ける…', group: 'this-one' },
   { action: 'note-label-clear', label: '色ラベルを外す', group: 'this-one', when: 'labelled', menuOnly: true },
+  /**
+   * 🔴 **同期対象にする / 外す**(#2066 段 5-B)── 選択同期の直接指定。⚠ **対で置く**(置けるなら外せる)。
+   * ⚠ 右クリックだけ(`menuOnly`)。同期が入 かつ「選んだエントリだけ同期」の間だけ、左の列の行のメニューが ctx の `syncDirect` を渡す。
+   *   右の列(情報ペイン)には専用の「同期対象」の欄がある。
+   */
+  { action: 'sync-select-entry', label: '同期対象にする', group: 'this-one', when: 'sync-selectable', menuOnly: true },
+  { action: 'sync-unselect-entry', label: '同期対象から外す', group: 'this-one', when: 'sync-selected', menuOnly: true },
   /**
    * 🔴 **ゴミ箱を開く**(#1646 の 1 = B。Gemini 裁定 = #1163 の依頼 40 の推薦どおり C = A + B)。
    *
@@ -1675,6 +1692,8 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   'bookmark-note-add': '2 ペインのブックマークに並べます(そこから押すと、このノートを開けます)',
   'bookmark-note-remove': '2 ペインのブックマークから、このノートを外します(ノートは消えません)',
   'pin-note': 'このノートを左のペインの一覧の上に固定します(いつでも 1 押しで開けます)',
+  'sync-select-entry': 'このエントリを、他の端末との同期対象にします(選んだエントリだけ同期しているとき)',
+  'sync-unselect-entry': '同期対象から外します。ノートは消えず、他の端末のノートも削除されません',
   'unpin-note': '一覧の上の固定から、このノートを外します(ノートは消えません)',
   'note-label-set': '8 色からこのノートの色ラベルを選びます(左のペインの行の左端に線が出ます)',
   'note-label-clear': 'このノートの色ラベルを外します(ノートは消えません)',
@@ -1845,6 +1864,8 @@ export const FOLDER_EXPORT_NOTE = 'フォルダの中のノートは入りませ
 
 export function entryActionHint(action: string, ctx: EntryMenuContext): string {
   if (ctx.archetype === 'folder' && FOLDER_EXPORT_BLOCKED_ACTIONS.has(action)) return FOLDER_EXPORT_NOTE;
+  // 🔴 選択同期(#2066 段 5-B)── フォルダは「配下も」と言う(押すと何が運ばれるかを先に読ませる)
+  if (action === 'sync-select-entry' && ctx.archetype === 'folder') return 'このフォルダ配下のエントリを、まとめて他の端末との同期対象にします';
   if (action === 'write-back-file') {
     /**
      * 🔴 **この 1 件だけ上限の門の外に在った**(#587 C-3 の着地後レビュー)。

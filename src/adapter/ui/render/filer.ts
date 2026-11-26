@@ -26,6 +26,8 @@ import { getAncestorFolders, listSiblings } from '@features/relation/tree';
 import { CRUMB_INPUT_FIELD, captureCrumbInput, restoreCrumbInput } from './crumb-path-input';
 import { stampChanges } from '@features/relation/meta-stamps';
 import { filerRows, flatParentNames } from '@features/relation/filer-list';
+import { SELECTIVE_REASON_HINTS, SELECTIVE_REASON_LABELS, selectiveActive } from '@features/sync/selective-view';
+import type { SelectiveReason } from '@features/sync/selective-sync';
 import {
   SMART_ARCHETYPE,
   SMART_FIELDS,
@@ -279,6 +281,7 @@ export class FilerRenderer {
   /** 🔴 色ラベルの絞りと表の写し(#1982 段 4)。指紋に入れないと、色を付けても絞っても描き直さない。 */
   private lastLabelFilter: number | null = null;
   private lastLabels: ReadonlyMap<string, number> | null = null;
+  private lastSyncScope: AppState['syncScope'] = null;
   /** ⚠ 並び順と本文検索の当たりも指紋(着地前レビュー 3 ── 入れないと死んだ操作子になる)。 */
   private lastSort: AppState['entrySort'] | null = null;
   /** 「最近開いた順」の材料の写し(依頼 274 / 334)。変わったときだけ並べ直す。 */
@@ -1087,9 +1090,12 @@ export class FilerRenderer {
     parentName: string | undefined,
     dayStamp: number,
     label: number | undefined,
+    syncReason: string | undefined = undefined,
   ): string {
     return [
       m.title,
+      // 🔴 選択同期の印(#2066 段 5-B)── `buildRow` が読む物と同じ(効いていないときは空)
+      syncReason ?? '',
       // 🔴 色ラベル(#1982 段 4)── 行の左の線に出す材料なので指紋に入れる(`buildRow` が読む物と同じ)
       label === undefined ? '' : String(label),
       m.archetype,
@@ -1136,6 +1142,9 @@ export class FilerRenderer {
     // 🔴 色ラベル(#1982 段 4)── 行の左端の線(CSS が `--note-N` で引く)。選択の線とは別の辺(右の端)で出す
     const noteLabel = state.noteLabels.get(m.lid);
     if (noteLabel !== undefined) tr.setAttribute('data-pkc-note-label', String(noteLabel));
+    // 🔴 選択同期(#2066 段 5-B)── 同期が入 かつ 選んだエントリだけ同期のときだけ。対象外の行には何も付けない
+    const syncReason = syncReasonOf(state, m.lid);
+    if (syncReason !== undefined) tr.setAttribute('data-pkc-sync-scope', syncReason);
     if (m.lid === state.selectedLid) tr.setAttribute('data-pkc-selected', '');
     // ⚠ **開いている**(`selected`)と**印を付けた**(`marked`)は別の印である
     paintRowMark(tr, marked.has(m.lid));
@@ -1165,6 +1174,7 @@ export class FilerRenderer {
       name.append(chip, input);
     } else {
       name.append(chip, document.createTextNode(m.title));
+      if (syncReason !== undefined) name.append(syncScopeMark(syncReason));
       // 🔴 長い題名は列で切れる ── 全文を hover で読める(#1087 L5)。「中まで全部出す」の行は下で親の名前を足す
       name.title = m.title;
             if (parentName !== undefined) {
@@ -1373,7 +1383,7 @@ export class FilerRenderer {
       for (let i = c * size; i < to; i += 1) {
         const m = list[i]!;
         const parentName = this.parentNames.get(m.lid);
-        const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, dayStamp, state.noteLabels.get(m.lid));
+        const sig = this.rowSignature(m, m.lid === state.renamingLid, parentName, dayStamp, state.noteLabels.get(m.lid), syncReasonOf(state, m.lid));
         let tr = this.rows.get(m.lid);
         if (tr !== undefined && this.rowSigs.get(m.lid) === sig) {
           const sel = m.lid === state.selectedLid;
@@ -1515,6 +1525,8 @@ export class FilerRenderer {
       state.kindFilter !== this.lastKinds ||
       state.labelFilter !== this.lastLabelFilter ||
       state.noteLabels !== this.lastLabels ||
+      // 🔴 選択同期の写し(#2066 段 5-B)── 印を付け外しする(同じ中身なら reducer が参照を替えない)
+      state.syncScope !== this.lastSyncScope ||
       state.entrySort !== this.lastSort ||
       state.entrySortDesc !== this.lastSortDesc ||
       // 🔴 並べ直しの時機は reducer が決める(`settleOpenedOrder`)── 開いただけでは変わらない
@@ -1627,6 +1639,7 @@ export class FilerRenderer {
     this.lastKinds = state.kindFilter;
     this.lastLabelFilter = state.labelFilter;
     this.lastLabels = state.noteLabels;
+    this.lastSyncScope = state.syncScope;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastOpenedShown = state.openedAtShown;
@@ -2178,4 +2191,24 @@ export function mountFilerRow(root: ParentNode, lid: string): HTMLElement | null
   const req: FilerMountRequest = { lid, row: null };
   table.dispatchEvent(new CustomEvent<FilerMountRequest>(FILER_MOUNT_EVENT, { bubbles: true, detail: req }));
   return req.row;
+}
+
+/** 🔴 選択同期の理由(#2066 段 5-B)。効いていない(同期が切・ワークスペース全体)・対象外は `undefined`。 */
+export function syncReasonOf(state: Pick<AppState, 'syncScope'>, lid: string): SelectiveReason | undefined {
+  const view = state.syncScope;
+  return selectiveActive(view) ? view.reasons.get(lid) : undefined;
+}
+
+/**
+ * 🔴 **選択同期の印**(#2066 段 5-B)── 題名の右の小さな無彩色の印。形で理由を分ける(CSS。色は使わない)。
+ * ⚠ 字は持たない(題名の文字列・読み上げを汚さない)── 理由は `title` と `aria-label` で読む。
+ */
+export function syncScopeMark(reason: SelectiveReason): HTMLSpanElement {
+  const mark = document.createElement('span');
+  mark.setAttribute('data-pkc-field', 'sync-scope-mark');
+  mark.setAttribute('data-pkc-sync-scope', reason);
+  mark.setAttribute('role', 'img');
+  mark.setAttribute('aria-label', SELECTIVE_REASON_LABELS[reason]);
+  mark.title = `${SELECTIVE_REASON_LABELS[reason]}: ${SELECTIVE_REASON_HINTS[reason]}`;
+  return mark;
 }

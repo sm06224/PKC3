@@ -113,6 +113,8 @@ describe('止める op の仕分け(#971)', () => {
     'listWorkspaces',
     'counts',
     'listEntryMetas',
+    // 選択同期(#2066 段 5-B)の画面の写しの材料 ── 読むだけ(行を作らない)
+    'syncSelectiveView',
     // system 領域のノート一覧(設計 doc §1.1、段①)── listEntryMetas と同じ読み専用
     'listSystemEntries',
     // タグの色(#1457)── 読むだけ(書く `putTagColor` は CORRUPT_BLOCKED_OPS 側)

@@ -294,6 +294,24 @@ describe('🔴 選択同期(#2066 段 5-A)の設定の行', () => {
     }
   }, 60_000);
 
+  it('🔴 画面の写しの材料(syncSelectiveView。#2066 段 5-B)は読むだけ: 切でも入(全体)でも同期の行を 1 本も作らない', async () => {
+    const w = await spawn();
+    await w.request({ op: 'init', dbName: 'sel-view', memory: true });
+    await w.request({ op: 'openContainer', cid: 'c1', title: 'unit' });
+    await w.request({ op: 'upsertEntry', cid: 'c1', entry: entry('a'), checkpoint: true });
+    await w.request({ op: 'syncConfigure', enabled: false });
+    expect(await w.request({ op: 'syncSelectiveView', cid: 'c1' }), '切なのに断った / 既定でない').toEqual({
+      selective: { mode: 'all', related: '1hop', directLids: [] },
+      notes: [],
+      relations: [],
+      bodyRefs: {},
+    });
+    await w.request({ op: 'syncConfigure', enabled: true });
+    const all = await w.request({ op: 'syncSelectiveView', cid: 'c1' });
+    expect(all.notes, 'ワークスペース全体なのにノートを読んだ').toEqual([]);
+    expect(await syncScopesIn((await w.request({ op: 'exportImage' })).image), '読むだけの op が同期の行を作った').toEqual([]);
+  }, 60_000);
+
   it('ワークスペースの削除で、そのワークスペースの選択の行も消える(他のワークスペースは残る)', async () => {
     const w = await spawn();
     await w.request({ op: 'init', dbName: 'sel2', memory: true });

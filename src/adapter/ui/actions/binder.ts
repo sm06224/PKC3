@@ -168,6 +168,9 @@ import { appOpenedStore } from '@adapter/platform/opened-store';
 import type { LocalFolder } from '@adapter/platform/local-folder';
 import type { FolderSync } from '@adapter/platform/folder-sync';
 import type { SyncRemoteForm } from '@adapter/platform/sync-folder';
+import { selectiveMenuCtx } from '@features/sync/selective-view';
+import { isReservedSyncLid } from '@features/sync/sync-guard';
+import { SYNC_SCOPE_MODE_ATTR, SYNC_SCOPE_RELATED_ATTR } from '../render/settings/sync-selective';
 import {
   runAcceptPeer,
   runChange,
@@ -2311,6 +2314,16 @@ export interface BinderServices {
   forgetSyncRecords?(): void | Promise<void>;
   /** 🔴 差分ファイルを書き出す(#2000 段 2。`all` = 全件)。設定が切のときは配線側が断る。 */
   exportSyncDiff?(all: boolean): void;
+  /**
+   * 🔴 **選択同期**(#2066 段 5-B)── 範囲・関連の範囲・直接指定の付け外し・一括解除。実体は `SyncScopeKeeper`(`sync-scope.ts`)。
+   * ⚠ 同期が切のときは実体が何もしない(押し所も出ない)。
+   */
+  syncScope?: {
+    setMode(mode: 'all' | 'selective'): void | Promise<unknown>;
+    setRelated(related: 'off' | '1hop' | 'recursive'): void | Promise<unknown>;
+    setDirect(lid: string, on: boolean): void | Promise<unknown>;
+    clearAll(): void | Promise<unknown>;
+  };
   /**
    * 🔴 **同期フォルダ**(#2000 段 3)。選ぶ・許可を出し直すは**押した操作の中**で呼ぶ(ブラウザが許可の窓を出せるのはそのときだけ)。
    * やめる = handle と記録を消す(フォルダのファイルは残す)。
@@ -19508,6 +19521,39 @@ const ACTIONS: Record<string, ActionHandler> = {
   'forget-sync-records': (_dispatcher, _target, services) => {
     void services.forgetSyncRecords?.();
   },
+  /** 🔴 選択同期の範囲(#2066 段 5-B)── 「ワークスペース全体」/「選んだエントリだけ同期」。値は押した選択肢の属性。 */
+  'set-sync-scope-mode': (_dispatcher, target, services) => {
+    const v = target.getAttribute(SYNC_SCOPE_MODE_ATTR);
+    if (v === 'all' || v === 'selective') void services.syncScope?.setMode(v);
+  },
+  /** 🔴 選択同期の関連エントリの自動同伴(#2066 段 5-B)。 */
+  'set-sync-scope-related': (_dispatcher, target, services) => {
+    const v = target.getAttribute(SYNC_SCOPE_RELATED_ATTR);
+    if (v === 'off' || v === '1hop' || v === 'recursive') void services.syncScope?.setRelated(v);
+  },
+  /** 🔴 直接指定をすべて外す(確認は実体。ノートは消えない)。 */
+  'clear-sync-selection': (_dispatcher, _target, services) => {
+    void services.syncScope?.clearAll();
+  },
+  /**
+   * 🔴 **同期対象にする / 外す**(#2066 段 5-B。右クリック・情報ペイン)。⚠ 相手は**メニューを開いた瞬間のノート**(`rowLidOrSelected`)。
+   * ⚠ system 領域のノートは対象にしない(押し所も出さない)。
+   */
+  'sync-select-entry': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null || !st.entryMetas.has(lid) || isReservedSyncLid(lid)) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ノートが見つかりません' });
+      return;
+    }
+    void services.syncScope?.setDirect(lid, true);
+  },
+  'sync-unselect-entry': (dispatcher, target, services) => {
+    const st = dispatcher.getState();
+    const lid = rowLidOrSelected(st, target);
+    if (lid === null) return;
+    void services.syncScope?.setDirect(lid, false);
+  },
   // 🔴 同期の競合のノート(題名に「同期の競合」)を、左の一覧の絞り込みで探す(`filter-by-tag` と同じ出し方)
   'show-sync-conflicts': (dispatcher, target) => {
     if (!phoneShowList(dispatcher)) return;
@@ -25444,6 +25490,8 @@ export function bindActions(
         pinned: appNotePins.has(lid),
         // 🔴 色ラベル(#1982 段 4)── 付いているときだけ「色ラベルを外す」を出す
         labelled: appNoteLabels.get(lid) !== null,
+        // 🔴 選択同期(#2066 段 5-B)── 同期が入 かつ 選んだエントリだけ同期のとき、user 領域のノートだけ
+        ...selectiveMenuCtx(st.syncScope, lid),
       }).map(withRowShortcut),
       st.openBody?.lid === lid,
     );

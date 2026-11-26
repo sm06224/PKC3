@@ -79,6 +79,7 @@ import { createAlarmEnabledSection } from './settings/alarm-enabled';
 import { createSyncEnabledSection } from './settings/sync-enabled';
 import { createSyncFolderSection } from './settings/sync-folder';
 import { createSyncS3Section } from './settings/sync-s3';
+import { createSyncSelectiveSection } from './settings/sync-selective';
 import { appSyncFolderView, type SyncFolderViewSource } from './sync-folder-view';
 import { appSyncEnabled, type SyncEnabledStore } from './sync-enabled';
 import { createVoiceBoostSection } from './settings/voice-boost';
@@ -319,6 +320,8 @@ export class SettingsRenderer {
       createTooNarrowSection(region, tooNarrowOk),
       createPersistSection(region),
       createSyncEnabledSection(region, syncEnabled),
+      // 🔴 同期の範囲(選択同期。#2066 段 5-B)── 端末間の同期のすぐ下(オンのときだけ出す)
+      createSyncSelectiveSection(region, syncEnabled),
       // 🔴 同期フォルダ(#2000 段 3)── 端末間の同期のすぐ下(オンのときだけ押せる)
       createSyncFolderSection(region, syncFolderView, syncEnabled),
       // 🔴 S3 互換の保管先(#2000 段 4a-4)── 同期フォルダのすぐ下(同時にはどちらか一方)
