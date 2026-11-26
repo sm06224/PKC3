@@ -63,6 +63,22 @@ const VALID_LAYOUT: ReadonlySet<Layout> = new Set([
 const HORIZONTAL_ALIGNS: ReadonlySet<Align> = new Set(['left', 'right', 'center'] as const);
 const VERTICAL_ALIGNS: ReadonlySet<Align> = new Set(['top', 'bottom', 'center'] as const);
 
+/**
+ * 🔴 **ボードを無限キャンバスで開く印**(v4.0 Phase 2 / PR-09)── frontmatter の `layout: canvas`。
+ * ⚠ 本文に書くのはこの 1 行だけ。カメラ(位置・倍率)は表示の状態であり本文には書かない。
+ */
+export const CANVAS_LAYOUT = 'canvas';
+
+/** 本文の frontmatter が `layout: canvas` か(前後の空白と大文字小文字は問わない)。 */
+export function isCanvasLayout(body: string): boolean {
+  // 🔑 前書きを読む前の早い門(大文字小文字を問わない ── 下の比較と同じ規則)
+  if (!body || !/canvas/i.test(body)) return false;
+  const fm = parseFrontmatter(body);
+  if (!fm.found) return false;
+  const raw = fm.meta['layout'];
+  return typeof raw === 'string' && raw.trim().toLowerCase() === CANVAS_LAYOUT;
+}
+
 /** frontmatter から document globals を抽出。不在 / 全省略なら全 undefined。 */
 export function extractDocumentGlobals(body: string): DocumentGlobals {
   const result: DocumentGlobals = { warnings: [] };
@@ -97,7 +113,9 @@ export function extractDocumentGlobals(body: string): DocumentGlobals {
   }
 
   const layoutRaw = fm.meta['layout'];
-  if (typeof layoutRaw === 'string') {
+  // 🔴 `layout: canvas` は用紙ではなく**ボードを無限キャンバスで開く**印(v4.0 Phase 2 / PR-09。`isCanvasLayout`)──
+  //   用紙の値ではないので属性には出さず、無効の警告も出さない
+  if (typeof layoutRaw === 'string' && layoutRaw.trim().toLowerCase() !== CANVAS_LAYOUT) {
     if (VALID_LAYOUT.has(layoutRaw as Layout)) {
       result.layout = layoutRaw as Layout;
     } else {

@@ -309,7 +309,9 @@ describe('reducer の門 ── 1 枚でも読めなければ 1 枚も書かな�
     expect(asks, '対照群: 正しい形が出ていない').toHaveLength(1);
     asks.length = 0;
     d.dispatch({ ...ok, moves: [{ line: at(0), x: 1, y: 1 }, { line: 1, x: 2, y: 2 }] });
-    d.dispatch({ ...ok, moves: [{ line: at(0), x: 1, y: 1 }, { line: at(1), x: -2, y: 2 }] });
+    d.dispatch({ ...ok, moves: [{ line: at(0), x: 1, y: 1 }, { line: at(1), x: 1.5, y: 2 }] });
+    // 🔑 負の位置は受ける(無限キャンバス。PR-09)── 範囲の外(±100000 を越える)は断る
+    d.dispatch({ ...ok, moves: [{ line: at(0), x: 1, y: 1 }, { line: at(1), x: -100001, y: 2 }] });
     d.dispatch({ ...ok, moves: [] });
     d.dispatch({ type: 'GROUP_PLACES', lid: 'n1', lines: [at(0), 1] });
     d.dispatch({ type: 'GROUP_PLACES', lid: 'n1', lines: [at(0)] });

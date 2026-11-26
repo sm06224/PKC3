@@ -1729,12 +1729,12 @@ test('🔴 本文を右クリックして「ここに付箋を置く」と、押
   await dlg.locator('[data-pkc-field="dialog-cancel"]').click();
   await expect(dlg).toHaveCount(0);
   await expect(named, 'やめたのに位置が変わった').toHaveAttribute('data-pkc-x', expectX);
-  // 通らない値 ── 窓は閉じず、理由が出る(負の数)
+  // 通らない値 ── 窓は閉じず、理由が出る(負の幅。⚠ x / y の負は無限キャンバスのため受ける ── v4.0 Phase 2 / PR-09)
   await openRect();
-  await rectField('x').fill('-5');
+  await rectField('w').fill('-5');
   await dlg.locator('[data-pkc-field="dialog-ok"]').click();
   await expect(dlg, '通らない値で窓が閉じた').toBeVisible();
-  await expect(dlg.locator('[data-pkc-field="place-rect-error"]')).toContainText('0 以上');
+  await expect(dlg.locator('[data-pkc-field="place-rect-error"]')).toContainText('1 以上');
   // 全角数字で直して決める → 本文が書き換わり、描き直された値が変わる
   await rectField('x').fill('５００');
   await rectField('y').fill('６００');

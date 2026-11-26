@@ -5562,6 +5562,113 @@ dd[data-pkc-field='inspector-toc'] {
 .pkc-board-host .pkc-format-block.pkc-place:not([data-pkc-w]):not([data-pkc-place-framed]) {
   max-width: calc(100% - var(--pkc-place-x, 0px));
 }
+/* 🔴 **無限キャンバス**(v4.0 Phase 2 / PR-09。`canvas-viewport.ts`)。
+ *
+ * 形: [バー] の下に [枠(ビューポート)]。枠が本文の器(= ステージ)を包み、器の transform だけで動かす。
+ * ⚠ 地は無彩色、意味の色はアクセント 1 色(いま映っている所の枠線)だけ(業務画面)。
+ * ⚠ 付箋の位置は器の座標(`x=` / `y=`)のまま ── 枠を消すと今までの板に戻る(印刷も同じ)。 */
+[data-pkc-field='canvas-bar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+  margin: 0 0 var(--s2);
+}
+[data-pkc-field='canvas-bar'] button {
+  font: inherit;
+  font-size: var(--btn-fs-sm);
+  cursor: pointer;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1px var(--s3);
+}
+[data-pkc-field='canvas-bar'] button[hidden] {
+  display: none;
+}
+/* 押している物は地と字の反転で示す(属性だけにしない ── 描画の道具のバーと同じ) */
+[data-pkc-field='canvas-bar'] button[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--surface);
+  font-weight: 600;
+}
+/* 倍率の字は幅を揃える(押すたびに隣のボタンが動かない) */
+[data-pkc-field='canvas-bar'] button[data-pkc-canvas-cmd='zoom-reset'] {
+  min-width: 4.5em;
+  font-variant-numeric: tabular-nums;
+}
+[data-pkc-field='canvas-viewport'] {
+  position: relative;
+  overflow: hidden;
+  height: clamp(320px, calc(100vh - 240px), 2400px);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  background-color: var(--bg);
+  /* 🔑 点の格子 ── 位置と間隔はカメラに付いてくる(`--pkc-canvas-grid*` は `canvas-viewport.ts` が置く) */
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--fg) 18%, transparent) 1px, transparent 1.5px);
+  background-size: var(--pkc-canvas-grid, 24px) var(--pkc-canvas-grid, 24px);
+  background-position: var(--pkc-canvas-grid-x, 0px) var(--pkc-canvas-grid-y, 0px);
+  touch-action: none;
+  overscroll-behavior: contain;
+  cursor: default;
+}
+[data-pkc-field='canvas-viewport']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+[data-pkc-field='canvas-viewport'][data-pkc-canvas-space] {
+  cursor: grab;
+}
+[data-pkc-field='canvas-viewport'][data-pkc-canvas-panning] {
+  cursor: grabbing;
+  user-select: none;
+}
+/* ステージ ── 左上を原点に transform だけで動かす(合成の層に乗せる) */
+[data-pkc-field='canvas-viewport'] > .pkc-board-host[data-pkc-canvas] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  margin: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+/* 🔴 **画面の外の付箋**(カリング)── 中身の描画を飛ばす。外形は測った大きさのまま(線とミニマップが途切れない) */
+.pkc-board-host [data-pkc-canvas-culled] {
+  content-visibility: hidden;
+  contain-intrinsic-size: var(--pkc-cull-w, 120px) var(--pkc-cull-h, 40px);
+}
+[data-pkc-field='canvas-minimap'] {
+  position: absolute;
+  right: var(--s3);
+  bottom: var(--s3);
+  z-index: 2;
+  line-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  opacity: 0.92;
+}
+[data-pkc-field='canvas-minimap'][hidden] {
+  display: none;
+}
+[data-pkc-field='canvas-minimap'] rect[data-pkc-minimap-card] {
+  fill: color-mix(in srgb, var(--fg) 28%, transparent);
+}
+[data-pkc-field='canvas-minimap'] rect[data-pkc-minimap-view] {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+/* 🔴 **通常表示で負の位置の付箋を画面の中へ寄せる**(`canvas-viewport.ts` の `applyNormalShift`)。
+ * ⚠ 正の位置だけのボードには印が付かない(1px も変わらない)。ずらした分だけ下に余白を足す。 */
+.pkc-board-host[data-pkc-board-shift] {
+  transform: translate(var(--pkc-board-shift-x, 0px), var(--pkc-board-shift-y, 0px));
+  margin-bottom: var(--pkc-board-shift-y, 0px);
+}
 /* 🔴 **板の形**(#530 案 A。user 裁定 2026-09-14)── 札が無いときは四角(既定)。
  *
  * ⚠ **板そのものを丸めたり切り抜いたりしない。** 掴む口(`place-grip` = 右上)と
@@ -13381,6 +13488,25 @@ h3[data-pkc-section] {
  * ⚠ 紙の向きでも変わる ── A4 横(1123px)では狭幅の上書きが発火しない。
  */
 @media print {
+  /* 🔴 無限キャンバス(PR-09)── 枠・バー・ミニマップを外し、今までどおりの板として刷る */
+  [data-pkc-field='canvas-bar'],
+  [data-pkc-field='canvas-minimap'] {
+    display: none !important;
+  }
+  [data-pkc-field='canvas-viewport'] {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    border: 0;
+    background: none;
+  }
+  [data-pkc-field='canvas-viewport'] > .pkc-board-host[data-pkc-canvas] {
+    position: relative;
+    transform: none !important;
+  }
+  .pkc-board-host [data-pkc-canvas-culled] {
+    content-visibility: visible;
+  }
   /* 🔴 **紙にボタンの地・枠は出さない**(#1982 ①。画面では字のあるボタンに薄い背景と薄い枠線を付けた)。
    * ⚠ 主・危険の型は色を持つので触らない。画面側の個別規則(帯・器ごと)に勝つため `!important` を使う */
   button:not([data-pkc-variant='primary']):not([data-pkc-variant='danger']) {
@@ -15233,6 +15359,10 @@ h6:hover > .pkc-heading-anchor,
 
 /* OS の「視差効果を減らす」を出している人には、動きをほぼ即時にする */
 @media (prefers-reduced-motion: reduce) {
+  /* 🔴 無限キャンバスの点の格子は出さない(PR-09)── 動かすたびに流れる模様を抑える */
+  [data-pkc-field='canvas-viewport'] {
+    background-image: none;
+  }
   *,
   *::before,
   *::after {

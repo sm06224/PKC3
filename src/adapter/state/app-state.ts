@@ -3172,6 +3172,12 @@ export type UserAction =
    */
   | { type: 'SET_PLACE_STYLE'; lid: string; line: number; style: PlaceStyle }
   /**
+   * 🔴 **このボードを、いつも無限キャンバスで開くか**(v4.0 Phase 2 / PR-09)── 前書きの `layout: canvas` を書く / 外す。
+   * ⚠ 本文に書くのはこの 1 行だけ(カメラの位置・倍率は書かない)。`on: false` は `layout: canvas` のときだけ外す
+   *   (用紙の `layout:` を消さない)。双方向(片道を作らない)。
+   */
+  | { type: 'SET_CANVAS_LAYOUT'; lid: string; on: boolean }
+  /**
    * 🔴 **本文の塊を、本文の中で掴んで並べ替える**(#684 段①。user 要望 2026-09-03)。
    * `start..end` の行(**生の body** の行番号 = 描画の刻印 + frontmatter)を `toBefore` の
    * 前へ動かす。掴んだ時点の行そのものは reducer が画面の本文から捕える(呼び側に
@@ -5704,6 +5710,7 @@ export function reduceCore(
     case 'LOWER_PLACE':
     case 'SET_PLACE_SHAPE':
     case 'SET_PLACE_STYLE':
+    case 'SET_CANVAS_LAYOUT':
       return reducePlaces(state, action);
     case 'MOVE_BLOCK':
     case 'SPLIT_CHAPTER':
@@ -6603,7 +6610,7 @@ export function lineOpenLineOf(shown: string, line: number): string | null {
   return openLine !== undefined && isLineOpen(openLine) ? openLine : null;
 }
 
-/** 板の座標・大きさの値 ── 整数で 0 以上だけ(描画も負の値は捨てる)。 */
+/** 板の大きさの値 ── 整数で 0 以上だけ。⚠ 位置(x / y)は負も受ける ── `isPlacePosition`(`place-rect.ts`)を引く。 */
 export function isPlaceCoord(n: number): boolean {
   return Number.isInteger(n) && n >= 0;
 }

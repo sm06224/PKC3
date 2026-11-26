@@ -46,6 +46,7 @@ import { editedElsewhereReason, elsewhereCheckNotNeeded, type EditLockPort } fro
 import { TRANSIENT_ATTR } from './apply-blocks';
 import { intAttr, rectOf } from './place-board';
 import { placeTargetOf } from './place-drag';
+import { boardPointOf } from './canvas-viewport';
 
 /** 押すと掴むの境目(px)。⚠ `place-drag.ts` と同じ値(同じ手で動かす)。 */
 const DRAG_SLOP = 4;
@@ -82,13 +83,12 @@ interface Drag {
   marked: HTMLElement | null;
 }
 
-/** 器(host)の座標へ写す ── 付箋の `x=` / `y=` と同じ座標系(`binder.ts` の「ここに付箋を置く」と同じ式)。 */
+/**
+ * 器(host)の座標へ写す ── 付箋の `x=` / `y=` と同じ座標系(`binder.ts` の「ここに付箋を置く」と同じ式)。
+ * 🔴 無限キャンバスで拡大・縮小していても同じ座標になる(式は `canvas-viewport.ts` の `boardPointOf` 1 本)。
+ */
 function hostPoint(host: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
-  const r = host.getBoundingClientRect();
-  return {
-    x: clientX - r.left - host.clientLeft + host.scrollLeft,
-    y: clientY - r.top - host.clientTop + host.scrollTop,
-  };
+  return boardPointOf(host, clientX, clientY);
 }
 
 function handleOf(target: EventTarget | null): HTMLElement | null {
@@ -256,6 +256,7 @@ export function installPlaceConnect(
   const moveDrag = (e: PointerEvent): void => {
     const d = drag;
     if (d === null || e.pointerId !== d.pointerId) return;
+    // ⚠ 押すと掴むの境目は画面の px で見る(拡大・縮小に依らない)
     const dx = e.clientX - d.startClientX;
     const dy = e.clientY - d.startClientY;
     if (!d.moved && Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;

@@ -884,7 +884,7 @@ describe('書換の門(MOVE_PLACE)', () => {
   it('🔴 SET_PLACE_RECT ── 範囲外の値・板でない行・開いていない lid・編集中は書かない', () => {
     const { d, events } = booted();
     d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { w: 0 } });
-    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { x: -1 } });
+    d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { x: -100001 } });
     d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 0, rect: { y: 1.5 } });
     d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n1', line: 2, rect: { x: 1 } });
     d.dispatch({ type: 'SET_PLACE_RECT', lid: 'n2', line: 0, rect: { x: 1 } });

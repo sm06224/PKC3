@@ -44,7 +44,8 @@ describe('reducer slices (#1383)', () => {
     // 2026-11-26(#2066 段 5-B): 263 → 264。選択同期の写し(SET_SYNC_SCOPE)を query-scan の slice に足した
     // 2026-11-26(v4.0 Phase 1 / PR-03): 264 → 265。ノートのページ設定(SET_NOTE_LAYOUT)を block-ops の slice に足した
     // 2026-11-26(v4.0 Phase 2 / PR-08): 265 → 266。ウィジェットの状態ブロック(SET_WIDGET_STATE)を body-edit の slice に足した
-    expect(all.length).toBe(266);
+    // 2026-11-26(v4.0 Phase 2 / PR-09): 266 → 267。ボードを「いつもキャンバスで開く」(SET_CANVAS_LAYOUT)を places の slice に足した
+    expect(all.length).toBe(267);
     expect(new Set(all).size).toBe(all.length);
   });
 
