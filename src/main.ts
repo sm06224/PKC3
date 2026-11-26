@@ -245,6 +245,7 @@ import { applySyncDiff, backupSyncSeed, buildSyncDiff, exportSyncDiff, importSyn
 import { idbSyncFolderStore, SyncFolder, type SyncFolderPicker } from '@adapter/platform/sync-folder';
 import { windowSyncRemoteAndE2E } from '@adapter/platform/sync-remote';
 import { appSyncFolderView } from '@adapter/ui/render/sync-folder-view';
+import { SyncScopeKeeper, wireSyncScope } from '@adapter/ui/actions/sync-scope';
 import { readDiffZip } from '@features/sync/diff-file';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
@@ -3835,11 +3836,44 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // 🔴 端末 id が変わるので、同期フォルダに前の id で置いた自分のファイルも片付ける(段 3)
       await syncFolder.forgetRecords().catch(() => undefined);
       showStatus(`同期の記録を消しました(${r.removed} 件。ノートは消えていません)`);
+      // 🔴 選択同期の設定も消える(#2066 段 5-B)── 写しを読み直す
+      void syncScope.refresh();
     } catch (e) {
       appMessagePost.post({ kind: 'problem', source: 'sync', text: `同期の記録を消せませんでした: ${errorText(e)}` });
       showStatus('同期の記録を消せませんでした。メッセージを確認してください');
     }
   };
+  /**
+   * 🔴 **選択同期の写しの係**(#2066 段 5-B)。判断は `features/sync/selective-view.ts`、ここは口を渡すだけ。
+   * ⚠ 同期が切なら worker に聞かない・ワークスペース全体なら worker はノートを読まない(定常の手間ゼロ)。
+   */
+  const syncScope = new SyncScopeKeeper({
+    cid,
+    enabled: () => appSyncEnabled.enabled(),
+    request: (req) => client.request(req),
+    ensureConfigured: ensureSyncConfigured,
+    settle: async () => {
+      await storeEffects?.settled();
+    },
+    publish: (view) => dispatcher.dispatch({ type: 'SET_SYNC_SCOPE', scope: view }),
+    current: () => dispatcher.getState().syncScope,
+    confirm: (message, opts) => ask(message, opts),
+    reportProblem: (text) => appMessagePost.post({ kind: 'problem', source: 'sync', text, fixedHead: fixedHeadForLabels(text, SYNC_MESSAGE_LABELS) }),
+  });
+  // 起動時(同期がオンのときだけ worker に聞く)
+  void syncScope.refresh();
+  // 🔴 エントリ・つながりの変化(選んだエントリだけ同期のときだけ束ねて読み直す)と、画面に戻ったとき(別のタブの付け外し)
+  wireSyncScope(syncScope, {
+    getState: () => dispatcher.getState(),
+    onState: (cb) => dispatcher.onState(cb),
+    onVisible: (cb) => {
+      const h = (): void => {
+        if (document.visibilityState === 'visible') cb();
+      };
+      document.addEventListener('visibilitychange', h);
+      return () => document.removeEventListener('visibilitychange', h);
+    },
+  });
   const syncDeps = async (): Promise<SyncDeps> => {
     const ws = await client.request({ op: 'listWorkspaces' }).catch(() => null);
     const wsTitle = ws?.workspaces.find((w) => w.cid === cid)?.title ?? CONTAINER_TITLE;
@@ -3872,6 +3906,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       reload: async () => {
         await reloadSnapshot(dispatcher, cid, loadSnapshot);
         await Promise.all([reloadNotePins(), reloadNoteLabels()]);
+        // 🔴 取り込み・取り消しで直接指定(`sel:<lid>`)も変わる(#2066 段 5-B)
+        await syncScope.refresh();
       },
       confirmAction: (message, opts) => ask(message, { okLabel: opts?.okLabel ?? '取り込む', cancelLabel: opts?.cancelLabel ?? 'やめる' }),
       genLid: generateLid,
@@ -5000,6 +5036,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       }
       appSyncEnabled.setEnabled(on);
       void configureSync().catch(() => undefined);
+      // 🔴 選択同期の写し(#2066 段 5-B)── 切なら worker に聞かずに消す。入なら読み直す
+      void syncScope.refresh();
       // 🔴 同期フォルダも入 / 切に合わせる(切の間は回らない。handle は憶えたまま)
       void syncFolder.onEnabledChanged();
       showStatus(on ? '端末間の同期をオンにしました。コレクションの「書き出す ▾」に「差分を書き出す」が出ます' : '端末間の同期をオフにしました');
@@ -5014,6 +5052,13 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       await forgetSyncRecords();
     },
     exportSyncDiff: (all) => void withAssetGate(async () => exportSyncDiff(await syncDeps(), { all })),
+    // 🔴 選択同期(#2066 段 5-B)── 範囲・関連・直接指定の付け外し・一括解除
+    syncScope: {
+      setMode: (mode) => syncScope.setMode(mode),
+      setRelated: (related) => syncScope.setRelated(related),
+      setDirect: (lid, on) => syncScope.setDirect(lid, on),
+      clearAll: () => syncScope.clearAll(),
+    },
     // 🔴 同期フォルダ(#2000 段 3)── 選ぶ・許可を出し直すは押した操作の中で呼ぶ(`pick` / `reconnect` は最初の await の前に picker を撃つ)
     syncFolder: {
       pick: () => syncFolder.pick(),

@@ -106,6 +106,8 @@ import {
 import { STACK_ARCHETYPE } from '@features/flavor/stack-flavor';
 import { canChangeKind } from '@features/flavor/kind-change';
 import { setTipTitle } from './tooltip';
+import { selectiveActive, SELECTIVE_ADD_LABEL, SELECTIVE_OUTSIDE_LABEL, SELECTIVE_REASON_LABELS, SELECTIVE_REMOVE_LABEL } from '@features/sync/selective-view';
+import { isReservedSyncLid } from '@features/sync/sync-guard';
 
 /** 素性の行(`data-pkc-field` → 値を入れる `<dd>`)。 */
 type Rows = Map<string, HTMLElement>;
@@ -1431,6 +1433,7 @@ export class InspectorRenderer {
     this.scanLid = state.openBody?.lid === meta.lid ? meta.lid : null;
     this.paintDate(meta, editing, blockedNote);
     this.paintOwner(state, meta, editing, blockedNote);
+    this.paintSyncScope(state, meta);
     this.paintRelationAdd(editing, blockedNote);
     // 🔴 **どのファイルから来たか**を出す(2026-08-05)── 出さないと、書き戻しが
     //    「どこへ」書くのか分からない操作になる。⚠ 行の有無は形(= build 側)
@@ -1778,6 +1781,62 @@ export class InspectorRenderer {
   }
 
   /**
+   * 🔴 **同期対象**を塗る(#2066 段 5-B)。
+   * - 状態を言葉で出す(直接指定 / 親フォルダ配下 / 関連 / 親フォルダの階層のみ / 対象外)。
+   * - ⚠ **置けるなら外せる**: 直接指定でなければ「同期対象にする」、直接指定なら「同期対象から外す」。
+   * - 親フォルダ配下で含まれているときは、どのフォルダから来ているかを添える。
+   * - ⚠ 器は使い回す(押す寸前のボタンを作り直さない)。
+   */
+  private paintSyncScope(state: AppState, meta: EntryMeta): void {
+    const dd = this.rows.get('inspector-sync-scope');
+    if (!dd) return;
+    const dt = dd.previousElementSibling;
+    const view = state.syncScope;
+    const show = selectiveActive(view) && !isReservedSyncLid(meta.lid);
+    dd.hidden = !show;
+    if (dt instanceof HTMLElement) dt.hidden = !show;
+    if (!show) return;
+    let status = dd.querySelector<HTMLElement>('[data-pkc-field="inspector-sync-scope-status"]');
+    let via = dd.querySelector<HTMLElement>('[data-pkc-field="inspector-sync-scope-via"]');
+    let add = dd.querySelector<HTMLButtonElement>('[data-pkc-action="sync-select-entry"]');
+    let remove = dd.querySelector<HTMLButtonElement>('[data-pkc-action="sync-unselect-entry"]');
+    if (status === null || via === null || add === null || remove === null) {
+      dd.textContent = '';
+      status = document.createElement('span');
+      status.setAttribute('data-pkc-field', 'inspector-sync-scope-status');
+      via = document.createElement('span');
+      via.setAttribute('data-pkc-field', 'inspector-sync-scope-via');
+      add = document.createElement('button');
+      add.type = 'button';
+      add.setAttribute('data-pkc-action', 'sync-select-entry');
+      add.textContent = SELECTIVE_ADD_LABEL;
+      remove = document.createElement('button');
+      remove.type = 'button';
+      remove.setAttribute('data-pkc-action', 'sync-unselect-entry');
+      remove.textContent = SELECTIVE_REMOVE_LABEL;
+      remove.title = '直接指定を外します。ノートは消えず、他の端末のノートも削除されません';
+      dd.append(status, via, add, remove);
+    }
+    const reason = view.reasons.get(meta.lid);
+    const text = reason === undefined ? SELECTIVE_OUTSIDE_LABEL : SELECTIVE_REASON_LABELS[reason];
+    if (status.textContent !== text) status.textContent = text;
+    setAttr(status, 'data-pkc-sync-scope', reason ?? 'outside');
+    // 親フォルダ配下: どのフォルダから来ているかを添える
+    const from = reason === 'descendant' ? view.via.get(meta.lid) : undefined;
+    const fromTitle = from === undefined ? null : (state.entryMetas.get(from)?.title ?? null);
+    const viaText = from === undefined ? '' : `親フォルダ「${fromTitle === null || fromTitle === '' ? '(無題)' : fromTitle}」が同期対象のため含まれます`;
+    if (via.textContent !== viaText) via.textContent = viaText;
+    via.hidden = viaText === '';
+    const direct = view.directLids.has(meta.lid);
+    add.hidden = direct;
+    remove.hidden = !direct;
+    // 🔴 フォルダは「配下も」と言う(押すと何が運ばれるかを先に読ませる)
+    add.title = meta.archetype === 'folder' ? 'このフォルダ配下を同期対象にします(中のエントリもまとめて同期します)' : 'このエントリを、他の端末との同期対象にします';
+    setAttr(add, 'data-pkc-entry', meta.lid);
+    setAttr(remove, 'data-pkc-entry', meta.lid);
+  }
+
+  /**
    * 🔴 関係を足す帯も編集中は押せなくする(#513)。
    * ⚠ この帯は操作の帯の loop(`this.buttons`)の**対象外**なので、個別に塗る ──
    *   直す前は編集中も押せて、reducer が黙って捨て、**欄だけ空になっていた**。
@@ -1986,6 +2045,11 @@ export class InspectorRenderer {
      * ⚠ 値は押せる札 + ボタンなので `setRow` ではなく専用の器を持つ(日付と同じ)。
      */
     row('担当', 'inspector-owner');
+    /**
+     * 🔴 **同期対象**(#2066 段 5-B)── 選択同期の状態と、付け外しのボタン(双方向)。
+     * ⚠ 同期が入 かつ「選んだエントリだけ同期」のとき、user 領域のエントリだけ(それ以外は行ごと畳む)。
+     */
+    row('同期対象', 'inspector-sync-scope');
     /**
      * 🔴 **見出しから自動で作る目次**(#493)。
      *

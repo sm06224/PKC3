@@ -485,6 +485,9 @@ describe('右クリックの説明(#587 C-1)', () => {
       // 🔴 ノートの色ラベル(#1982 段 4)── 付ける… は常に / 外すは付いているときの右クリックだけ
       ['note-label-set', 'f2d18fd6'],
       ['note-label-clear', '0f758553'],
+      // 🔴 選択同期(#2066 段 5-B)── 同期対象にする / 外すは対。選択同期のときの右クリックだけ
+      ['sync-select-entry', '1e64c19b'],
+      ['sync-unselect-entry', '13d58ac5'],
     ];
     const digest = (h: string): string =>
       createHash('sha256').update(h).digest('hex').slice(0, 8);
@@ -526,6 +529,9 @@ describe('右クリックの説明(#587 C-1)', () => {
       ...entryMenuActions({ ...ALL, pinned: true }),
       // 🔴 色ラベルを外す項目は `labelled: true` の文脈でだけ出る(#1982 段 4)
       ...entryMenuActions({ ...ALL, labelled: true }),
+      // 🔴 同期対象にする / 外すは `syncDirect` を渡した文脈でだけ出る(#2066 段 5-B)
+      ...entryMenuActions({ ...ALL, syncDirect: false }),
+      ...entryMenuActions({ ...ALL, syncDirect: true }),
       // 🔴 添付のリンクは添付のノートでだけ出る(2026-10-11)
       ...entryMenuActions({ archetype: 'attachment', linkedFile: null }),
       // 🔴 種類を変える口はノートとログでだけ出る(台帳 #1852 I2 / 依頼 157)

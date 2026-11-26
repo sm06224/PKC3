@@ -87,6 +87,7 @@ import {
   readOuts,
   readPairs,
   readSelective,
+  readSelectiveView,
   readSeq,
   readTombstones,
   recordDeletion,
@@ -6250,6 +6251,14 @@ const handlers: Handlers = {
       selective,
       bodyRefs: snap.bodyRefs,
     };
+  },
+  /**
+   * 🔴 **選択同期の画面の写しの材料**(#2066 段 5-B)。読むだけ(行を作らない)。
+   * ⚠ 同期が切のときは断らずに既定(`'all'`)を返し、DB を読まない(切の端末で失敗を積まない・手間を足さない)。
+   */
+  syncSelectiveView: (req) => {
+    if (!syncEnabled) return { selective: { mode: 'all', related: '1hop', directLids: [] }, notes: [], relations: [], bodyRefs: {} };
+    return readSelectiveView(need(), req.cid);
   },
   syncSetSelectiveScope: (req) => {
     // 🔴 同期が切のときは断る(選択の行も 1 本も書かない)

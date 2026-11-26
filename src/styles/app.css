@@ -2004,6 +2004,32 @@ tr[data-pkc-note-label] td:first-child {
   font-size: var(--fs-xs);
 }
 
+/* 🔴 **選択同期の印**(#2066 段 5-B)── 題名の右の小さな印。同期が入 かつ「選んだエントリだけ同期」のときだけ付く。
+ * ⚠ 色は既存の `--muted` 1 色(地は無彩色・意味の色を足さない)。理由は**形**で分ける:
+ *   直接指定 = 塗りの丸 / フォルダ配下 = 輪 / 関連 = 点線の輪 / 親フォルダの階層のみ = 小さな輪。
+ * ⚠ **行の高さ・幅を動かさない**(字の高さより小さい inline の箱。縮まない)。 */
+[data-pkc-field='sync-scope-mark'] {
+  flex: 0 0 auto;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 0.6em;
+  height: 0.6em;
+  margin-inline-start: var(--s2);
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+  vertical-align: middle;
+}
+[data-pkc-field='sync-scope-mark'][data-pkc-sync-scope='direct'] {
+  background: var(--muted);
+}
+[data-pkc-field='sync-scope-mark'][data-pkc-sync-scope='related'] {
+  border-style: dotted;
+}
+[data-pkc-field='sync-scope-mark'][data-pkc-sync-scope='ancestor'] {
+  width: 0.4em;
+  height: 0.4em;
+}
+
 /* 行の更新日(P9 段②)。⚠ **行の高さを増やさない** ── 題名の右端に細字で置く。
  * 数字は等幅にして桁を揃える(業務画面の作法。ばらつくと走査できない)。 */
 [data-pkc-entry] [data-pkc-field='when'] {

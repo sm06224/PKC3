@@ -329,6 +329,48 @@ export function measureStates(db: Database, cid: string, opts: { withBodyRefs?: 
 }
 
 /**
+ * 🔴 **選択同期(#2066 段 5-B)の画面の写しの材料**(読むだけ。行を作らない)。
+ *
+ * - `'all'`(既定)のときは設定だけを返し、ノートを 1 件も読まない(全部のノートの同期の端末に手間を足さない)。
+ * - `'selective'` のときだけ、ノートのメタ(親フォルダは `measureStates` と同じ選び方)と非 structural のつながりを読む。
+ *   本文は関連をたどるとき(`related !== 'off'`)だけ読み、参照の先だけを抜き出す(指紋は測らない)。
+ * ⚠ 閉包そのものは主スレッドが `resolveSelectiveClosure` で決める(書き出しと同じ関数 ── 同じ問いに 2 か所で答えない)。
+ */
+export interface SelectiveView {
+  selective: SelectiveSetting;
+  notes: Array<{ lid: string; archetype: string; parentLid: string | null }>;
+  relations: DiffRelation[];
+  bodyRefs: Record<string, string[]>;
+}
+
+export function readSelectiveView(db: Database, cid: string): SelectiveView {
+  const selective = readSelective(db, cid);
+  const bodyRefs = Object.create(null) as Record<string, string[]>;
+  if (selective.mode !== 'selective') return { selective, notes: [], relations: [], bodyRefs };
+  const metas = db.selectObjects(`SELECT lid, archetype FROM entries WHERE cid = ? AND ${USER_REALM_SQL}`, [cid]) as Array<{ lid: string; archetype: string }>;
+  const live = new Set(metas.map((m) => m.lid));
+  const folders = new Set(metas.filter((m) => m.archetype === 'folder').map((m) => m.lid));
+  const parents = parentMap(db, cid, folders);
+  const notes = metas.map((m) => ({ lid: m.lid, archetype: m.archetype, parentLid: parents.get(m.lid) ?? null }));
+  const relations: DiffRelation[] = [];
+  const rrows = db.selectObjects("SELECT from_lid, to_lid, kind FROM relations WHERE cid = ? AND kind != 'structural' ORDER BY id", [cid]) as Array<{ from_lid: string; to_lid: string; kind: string }>;
+  for (const r of rrows) if (live.has(r.from_lid) && live.has(r.to_lid)) relations.push({ from: r.from_lid, to: r.to_lid, kind: r.kind });
+  if (selective.related !== 'off') {
+    db.exec({
+      sql: `SELECT lid, body FROM entries WHERE cid = ? AND ${USER_REALM_SQL}`,
+      bind: [cid],
+      rowMode: 'array',
+      callback: (r: unknown[]): void => {
+        const from = r[0] as string;
+        const kept = bodyRefTargets(r[1] as string, cid).filter((x) => x !== from && live.has(x));
+        if (kept.length > 0) bodyRefs[from] = kept;
+      },
+    });
+  }
+  return { selective, notes, relations, bodyRefs };
+}
+
+/**
  * 1 つのノートの親フォルダ(生きているフォルダが親の辺。複数なら lid の最小)。⚠ `measureStates` の `parentMap` と同じ選び方
  * (指紋が食い違わないように)── こちらは 1 つのノートだけを索引(`idx_rel_to`)で引くので、全件を読まない。
  */

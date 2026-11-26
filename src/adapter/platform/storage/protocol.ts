@@ -866,6 +866,11 @@ export type StorageRequest =
    * 🔴 **選択同期の設定を変える**(#2066 段 5-A)。範囲(`mode`)・関連の範囲(`related`)・直接指定の追加 / 削除を **1 つの tx** で書く。
    * ⚠ 同期が切のときは断る(行を 1 本も書かない)。省略した欄は触らない。戻り = 書いた後の設定。
    */
+  /**
+   * 🔴 **選択同期の画面の写しの材料を読む**(#2066 段 5-B)。読むだけ(行を作らない)。`'all'` のときはノートを読まない。
+   * ⚠ 同期が切のときは断らずに既定を返す(DB を読まない)。
+   */
+  | { op: 'syncSelectiveView'; cid: string }
   | {
       op: 'syncSetSelectiveScope';
       cid: string;
@@ -1635,5 +1640,13 @@ export interface ResultMap {
   syncMeasureNotes: Array<{ lid: string; content: string; place: string }>;
   syncForget: { removed: number };
   syncSetSelectiveScope: SyncSelectiveSetting;
+  syncSelectiveView: {
+    selective: SyncSelectiveSetting;
+    /** 生きているノートのメタ(`'selective'` のときだけ。`'all'` は空)。 */
+    notes: Array<{ lid: string; archetype: string; parentLid: string | null }>;
+    relations: Array<{ from: string; to: string; kind: string }>;
+    /** 本文の参照(`'selective'` かつ関連をたどるときだけ)。 */
+    bodyRefs: Record<string, string[]>;
+  };
   close: null;
 }

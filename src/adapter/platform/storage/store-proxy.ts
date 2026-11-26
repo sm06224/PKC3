@@ -194,6 +194,8 @@ export const NOT_BROADCAST: ReadonlySet<StorageRequest['op']> = new Set([
   'listContainerIds',
   'listWorkspaces',
   'listEntryMetas',
+  // 選択同期(#2066 段 5-B)の画面の写しの材料 ── 読むだけ
+  'syncSelectiveView',
   'listRelations',
   'listRevisionLids',
   'listRevisionMetas',

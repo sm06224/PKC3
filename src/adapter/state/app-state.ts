@@ -228,6 +228,7 @@ import {
   type SmartSpec,
 } from '@features/smart/smart-spec';
 import { collectEntryTags } from '@features/flavor/entry-tags';
+import type { SyncScopeView } from '@features/sync/selective-view';
 import {
   initialDual,
   paneOf,
@@ -1982,6 +1983,11 @@ export interface AppState {
   /** 🔴 色ラベルの絞り(#1982 段 4)。`null` = 絞らない。⚠ `kindFilter` と別に持つ。 */
   labelFilter: number | null;
   /**
+   * 🔴 **選択同期の写し(#2066 段 5-B)**。`null` = 同期が切(または未読)。正本は storage(`__sync__:<cid>` の行)で、
+   * `main.ts` の係(`sync-scope-sync.ts`)が `SET_SYNC_SCOPE` で入れる。⚠ 画面は `selectiveActive` 1 つで出す / 出さないを決める。
+   */
+  syncScope: SyncScopeView | null;
+  /**
    * 🔴 **本文が当たった lid**(#181 全文検索)。⚠ `null` = **まだ返っていない**
    * であって「0 件」ではない ── 打った直後は題名の結果だけが出て、SQL が返ると
    * **増える**(減る向きに倒すと、打鍵のたびに行が消えてちらつく)。
@@ -2498,6 +2504,7 @@ export const initialState: AppState = {
   noteTabs: createTabSet(),
   tabSeq: 0,
   notePins: NO_NOTE_PINS,
+  syncScope: null,
   labelFilter: null,
   searchHits: null,
   selectionHistory: EMPTY_HISTORY,
@@ -3896,6 +3903,8 @@ export type UserAction =
   | { type: 'NOTE_TAB_EXTERNAL'; lid: string; external: boolean }
   /** ピン留めの写しを入れ替える(#1377)。 */
   | { type: 'SET_NOTE_PINS'; lids: readonly string[] }
+  /** 🔴 選択同期の写しを入れ替える(#2066 段 5-B。`null` = 同期が切)。 */
+  | { type: 'SET_SYNC_SCOPE'; scope: SyncScopeView | null }
   | { type: 'DUAL_SET_FILTER'; side: DualSide; filter: string }
   /** 🔴 **1 つ前 / 次の場所へ**(#273 残件。タブごとの履歴)。 */
   | { type: 'DUAL_BACK'; side: DualSide }
@@ -5523,6 +5532,7 @@ export function reduceCore(
     case 'TOGGLE_KIND_FILTER':
     case 'CLEAR_KIND_FILTER':
     case 'SET_NOTE_LABELS':
+    case 'SET_SYNC_SCOPE':
     case 'SET_LABEL_FILTER':
     case 'SET_OPENED_AT':
     case 'SET_ENTRY_SORT':
