@@ -49,6 +49,7 @@ import { applyBodyTocLinks } from './toc-links';
 import { appMissingLinks } from './missing-links';
 import { applyTitleLinks } from './title-links';
 import { applyPlaceLayout } from './place-board';
+import { syncBoardView } from './canvas-viewport';
 import { PlaceEmbeds } from './place-embed';
 import { SectionEmbeds } from './section-embed';
 import { placeFramed } from '@features/markdown/place-embed';
@@ -1345,6 +1346,11 @@ export class DetailRenderer {
         return m !== undefined && l !== self && placeFramed(m.archetype, bodies?.get(l));
       },
     );
+    /**
+     * 🔴 **板の見え方**(v4.0 Phase 2 / PR-09)── 無限キャンバス / 通常表示のバーと、カメラ・カリング・ミニマップ。
+     * ⚠ 置いた**後**に呼ぶ(付箋の位置と大きさが決まってから測る)。付箋の無い本文では何も作らない。
+     */
+    syncBoardView(host, self, body);
   }
 
   render(state: AppState): void {

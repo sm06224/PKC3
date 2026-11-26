@@ -135,11 +135,13 @@ describe('板のテンプレート(addPlaceTemplate)', () => {
     expect(new Set(ids).size).toBe(6);
   });
 
-  it('閉じていない囲いの中へは足さない / 負・小数の座標・知らないテンプレートは null', () => {
+  it('閉じていない囲いの中へは足さない / 小数・範囲の外の座標・知らないテンプレートは null', () => {
     expect(addPlaceTemplate('本文\n```js\nconst a = 1;\n', 0, 0, 'sticky4')).toBeNull();
     expect(addPlaceTemplate(':::note\nまだ\n', 0, 0, 'sticky4')).toBeNull();
     expect(addPlaceTemplate('本文\n```js\nx\n```\n', 0, 0, 'sticky4')).not.toBeNull();
-    expect(addPlaceTemplate('', -1, 0, 'sticky4')).toBeNull();
+    expect(addPlaceTemplate('', -100001, 0, 'sticky4')).toBeNull();
+    // 🔴 負の座標は書ける(無限キャンバス。v4.0 Phase 2 / PR-09)
+    expect(addPlaceTemplate('', -1, 0, 'sticky4')).toContain('x=-1');
     expect(addPlaceTemplate('', 0, 1.5, 'sticky4')).toBeNull();
     expect(addPlaceTemplate('', 0, 0, 'nope' as never)).toBeNull();
   });
@@ -168,8 +170,10 @@ describe('位置と大きさの検め(parsePlaceRect)', () => {
   });
 
   it.each([
-    ['負', { x: '-5' }, 'x', '0 以上'],
-    ['全角の負', { y: '－５' }, 'y', '0 以上'],
+    ['幅の負', { w: '-5' }, 'w', '1 以上'],
+    ['高さの全角の負', { h: '－５' }, 'h', '1 以上'],
+    ['下限超え', { x: String(-PLACE_RECT_MAX - 1) }, 'x', String(-PLACE_RECT_MAX)],
+    ['負の小数', { y: '-1.5' }, 'y', '整数'],
     ['小数', { w: '12.5' }, 'w', '整数'],
     ['数でない字', { h: 'あ' }, 'h', '整数'],
     ['単位つき', { x: '12px' }, 'x', '整数'],
@@ -182,6 +186,12 @@ describe('位置と大きさの検め(parsePlaceRect)', () => {
     if (r.ok) return;
     expect(r.key).toBe(key);
     expect(r.error).toContain(word);
+  });
+
+  it('🔴 x / y の負は数になる(半角・全角・マイナス記号。無限キャンバス。v4.0 Phase 2 / PR-09)', () => {
+    expect(parsePlaceRect(input({ x: '-120', y: '－１２０' }))).toEqual({ ok: true, rect: { x: -120, y: -120 } });
+    expect(parsePlaceRect(input({ x: '\u2212' + '5' }))).toEqual({ ok: true, rect: { x: -5 } });
+    expect(parsePlaceRect(input({ x: String(-PLACE_RECT_MAX) }))).toEqual({ ok: true, rect: { x: -PLACE_RECT_MAX } });
   });
 
   it('上限ちょうどは通り、x / y の 0 も通る(境界の対照群)', () => {
@@ -221,7 +231,10 @@ describe('位置と大きさを書く(setPlaceRect)', () => {
 
   it('🔴 範囲外・小数の値が 1 つでもあれば全体を断る(一部だけ書かない)', () => {
     expect(setPlaceRect(BODY, at(2, OPEN), { x: 5, w: 0 })).toBeNull();
-    expect(setPlaceRect(BODY, at(2, OPEN), { x: -1 })).toBeNull();
+    expect(setPlaceRect(BODY, at(2, OPEN), { x: -PLACE_RECT_MAX - 1 })).toBeNull();
+    expect(setPlaceRect(BODY, at(2, OPEN), { w: -1 })).toBeNull();
+    // 🔴 負の x / y は書ける(無限キャンバス)── 対照群
+    expect(setPlaceRect(BODY, at(2, OPEN), { x: -1 })).toContain('x=-1');
     expect(setPlaceRect(BODY, at(2, OPEN), { y: 1.5 })).toBeNull();
     expect(setPlaceRect(BODY, at(2, OPEN), { h: PLACE_RECT_MAX + 1 })).toBeNull();
   });

@@ -123,7 +123,8 @@ describe('位置と大きさの窓(pickPlaceRectInApp)', () => {
     expect(openDialog(), '通らないのに閉じた').not.toBeNull();
     expect(errorLine().hidden).toBe(false);
     expect(errorLine().textContent).toContain('幅');
-    expect(errorLine().textContent).toContain('0 以上');
+    // 🔑 幅・高さの下限は 1(x / y は負も受けるので、断りは幅・高さの負だけ ── v4.0 Phase 2 / PR-09)
+    expect(errorLine().textContent).toContain('1 以上');
     expect(document.activeElement).toBe(input('w'));
     // 直して決める
     input('w').value = '300';

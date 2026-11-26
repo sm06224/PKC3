@@ -153,6 +153,7 @@ import { installTooltip } from '@adapter/ui/render/tooltip';
 import { installEditorPrint } from '@adapter/ui/render/print-editing';
 import { installPlaceConnect } from '@adapter/ui/render/place-connect';
 import { installPlaceDrag } from '@adapter/ui/render/place-drag';
+import { installCanvasViewport } from '@adapter/ui/render/canvas-viewport';
 import { installScheduleDrag } from '@adapter/ui/render/schedule-drag';
 import { installScheduleGridDrag } from '@adapter/ui/render/schedule-grid-drag';
 import { installScheduleGridCreate } from '@adapter/ui/render/schedule-grid-create';
@@ -165,7 +166,7 @@ import { agentStoreDeps } from '@adapter/transport/webmcp-deps';
 import { createEntryFromOutside as createEntryFromOutsideImpl } from '@adapter/transport/outside-create';
 import { appAgentTabStatus } from '@adapter/platform/agent-tab-status';
 import { buildAgentTools, AGENT_APPEND_SETTLE_TIMEOUT_MS } from '@adapter/transport/webmcp-tools';
-import { appendUnlessEditedElsewhere, editedElsewhereReason, makeEditLockPort, type EditLockPort } from '@adapter/state/edited-elsewhere';
+import { appendUnlessEditedElsewhere, editedElsewhereReason, elsewhereCheckNotNeeded, makeEditLockPort, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { createAgentGate } from '@features/agent/agent-gate';
 import { appAgentGrants } from '@adapter/platform/agent-grants';
 import { AgentGrantsRouter, appAgentOriginGrants } from '@adapter/platform/agent-origin-grants';
@@ -1785,6 +1786,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   installPlaceDrag(root, dispatcher, editLockPort);
   /** 🔴 付箋に乗せて ● を掴み、別の付箋へ引いて繋ぐ配線(#530 段③d)。⚠ 外さない(アプリと同寿命)。 */
   installPlaceConnect(root, dispatcher, editLockPort);
+  /**
+   * 🔴 **ボードの無限キャンバスのバー**(v4.0 Phase 2 / PR-09)── 見え方・倍率は画面だけで済ませ、
+   * 「いつもキャンバスで開く」だけを本文へ書く(`SET_CANVAS_LAYOUT`)。⚠ 外さない(アプリと同寿命)。
+   */
+  installCanvasViewport(root, (lid, on) => {
+    const fire = (): void => dispatcher.dispatch({ type: 'SET_CANVAS_LAYOUT', lid, on });
+    // 🔑 別のタブが編集中のノートには書かない(付箋をつなぐ `place-connect.ts` と同じ形)
+    if (elsewhereCheckNotNeeded(dispatcher, editLockPort, lid)) {
+      fire();
+      return;
+    }
+    void editedElsewhereReason(dispatcher, editLockPort, lid).then((why) => {
+      if (why !== null) dispatcher.dispatch({ type: 'OP_FAILED', error: `${why}(表示の既定は変えていません)` });
+      else fire();
+    });
+  });
   /**
    * 🔴 **予定の札を、指でも掴んで動かせるようにする配線**(#855 決1)。
    * ⚠ マウスは既存の HTML5 drag(`binder.ts`)のまま ── ここは指・ペンだけを

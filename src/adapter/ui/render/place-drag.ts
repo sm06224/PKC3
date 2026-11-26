@@ -22,6 +22,12 @@
  * 付箋の `group=`(描画が `data-pkc-group` に焼く)が同じ付箋を**どれか 1 枚の ⠿ で掴むと全員**が同じだけ動く。
  * 書くのは離したとき**1 回**(`MOVE_PLACES` ── 途中で一部だけ動いた状態にならない)。取りやめ・断られたときは全員を戻す。
  * ⚠ 動く向きの下限(左上が 0 を下回らない)は**全員で同じだけ**手前で止める(`clampGroupDelta`。形を崩さない)。
+ *
+ * ## 🔴 無限キャンバス(v4.0 Phase 2 / PR-09)
+ *
+ * 器が拡大・縮小されていても、カーソルに 1px もずれずに付いてくる ── 画面の移動量を**倍率で割る**
+ * (`canvasZoomOf`。掴んだ瞬間の倍率を使う)。キャンバスでは下限 0 で止めず、負の所へも動かせる
+ * (`clampGroupDelta` の `infinite`)。通常表示では今までどおり 0 で止める。
  * ⚠ グループが動かすのは**位置だけ**(大きさの角を掴んだときは掴んだ 1 枚だけ)。
  *
  * ## 矢印キーでも動く(#676 段②。「マウスだけで完結し、キーボードは近道」の逆側)
@@ -38,6 +44,7 @@ import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
 import { clampGroupDelta, parsePlaceGroup } from '@features/markdown/place-notation';
 import { placeRotateOf, resizeRotated } from '@features/markdown/place-rotate';
 import { clearConnectLayer, PLACE_FOCUS_ATTR } from './place-board';
+import { canvasZoomOf, isCanvasHost } from './canvas-viewport';
 
 /** 押すと掴むの境目(px)。 */
 const DRAG_SLOP = 4;
@@ -108,6 +115,10 @@ interface Drag {
   readonly rot: number;
   /** 🔴 同じグループの仲間(#530 段⑤b)。位置を掴んだときだけ入る ── 無ければ空(今までと同じ)。 */
   readonly others: Member[];
+  /** 🔴 掴んだ瞬間の器の倍率(無限キャンバス。通常表示は 1)── 画面の移動量をこれで割る。 */
+  readonly zoom: number;
+  /** 🔴 無限キャンバスか(負の所へ動かせる)。 */
+  readonly infinite: boolean;
   moved: boolean;
 }
 
@@ -230,6 +241,8 @@ export function installPlaceDrag(
         grip.getAttribute('data-pkc-field') === 'place-size'
           ? []
           : groupMates(block, to !== null),
+      zoom: canvasZoomOf(block.parentElement),
+      infinite: isCanvasHost(block.parentElement),
       moved: false,
     };
     try {
@@ -281,10 +294,13 @@ export function installPlaceDrag(
   const onPointerMove = (e: PointerEvent): void => {
     if (drag === null || e.pointerId !== drag.pointerId) return;
     follow(drag);
-    const dx = e.clientX - drag.startClientX;
-    const dy = e.clientY - drag.startClientY;
-    if (!drag.moved && Math.abs(dx) < DRAG_SLOP && Math.abs(dy) < DRAG_SLOP) return;
+    const sx = e.clientX - drag.startClientX;
+    const sy = e.clientY - drag.startClientY;
+    // ⚠ 押すと掴むの境目は**画面の px** で見る(倍率で割ると、縮小した板では掴みにくくなる)
+    if (!drag.moved && Math.abs(sx) < DRAG_SLOP && Math.abs(sy) < DRAG_SLOP) return;
     drag.moved = true;
+    const dx = sx / drag.zoom;
+    const dy = sy / drag.zoom;
     if (drag.mode === 'size') {
       if (drag.rot !== 0) {
         // 🔴 回した付箋(#530 段⑤d)── 付箋の向きで伸ばし、掴んだ角の反対側(左上)を画面で動かさない
@@ -300,7 +316,9 @@ export function installPlaceDrag(
       return;
     }
     // 🔑 グループは全員で同じだけ動く(形を崩さない)。1 枚だけなら今までと同じ `max(0, start + d)`
-    const c = clampGroupDelta([drag, ...drag.others].map((m) => ({ x: m.startX, y: m.startY })), dx, dy);
+    const c = clampGroupDelta([drag, ...drag.others].map((m) => ({ x: m.startX, y: m.startY })), dx, dy, {
+      infinite: drag.infinite,
+    });
     drag.block.style.left = `${drag.startX + c.dx}px`;
     drag.block.style.top = `${drag.startY + c.dy}px`;
     for (const m of drag.others) {
@@ -493,8 +511,8 @@ export function installPlaceDrag(
      *   この層を host の子として数える。
      */
     clearConnectLayer(d.block.parentElement);
-    const dx = e.clientX - d.startClientX;
-    const dy = e.clientY - d.startClientY;
+    const dx = (e.clientX - d.startClientX) / d.zoom;
+    const dy = (e.clientY - d.startClientY) / d.zoom;
     if (d.mode === 'size') {
       if (d.rot !== 0) {
         const r = resizeRotated(sizeStart(d), d.rot, dx, dy, { w: MIN_W, h: MIN_H });
@@ -528,9 +546,12 @@ export function installPlaceDrag(
       return;
     }
     // 🔑 グループは全員で同じだけ(`onPointerMove` と同じ `clampGroupDelta` ── 見た目と書く値を食い違わせない)
-    const c = clampGroupDelta([d, ...d.others].map((m) => ({ x: m.startX, y: m.startY })), dx, dy);
-    const x = Math.max(0, Math.round(d.startX + c.dx));
-    const y = Math.max(0, Math.round(d.startY + c.dy));
+    const c = clampGroupDelta([d, ...d.others].map((m) => ({ x: m.startX, y: m.startY })), dx, dy, {
+      infinite: d.infinite,
+    });
+    // ⚠ 下限は `clampGroupDelta` が決める(通常表示は 0、キャンバスは負の端)── ここで 0 に丸め直さない
+    const x = Math.round(d.startX + c.dx);
+    const y = Math.round(d.startY + c.dy);
     // 🔑 取りやめ(元の位置へ戻して離す)は**何も書かず、何も言わない** ──
     //   dispatch すると「値が変わらない」が下流で競合の顔をする(UX レビュー所見 2)
     if (x === d.startX && y === d.startY) {
@@ -556,8 +577,8 @@ export function installPlaceDrag(
       }
       moves.push({
         line: mt.line,
-        x: Math.max(0, Math.round(m.startX + c.dx)),
-        y: Math.max(0, Math.round(m.startY + c.dy)),
+        x: Math.round(m.startX + c.dx),
+        y: Math.round(m.startY + c.dy),
       });
     }
     registerPendingDrop(d, { type: 'MOVE_PLACES', lid: t.lid, moves });
@@ -660,6 +681,7 @@ export function installPlaceDrag(
       [nudge, ...nudge.others].map((m) => ({ x: m.startX, y: m.startY })),
       nudge.x + dx - nudge.startX,
       nudge.y + dy - nudge.startY,
+      { infinite: isCanvasHost(block.parentElement) },
     );
     nudge.x = nudge.startX + c.dx;
     nudge.y = nudge.startY + c.dy;

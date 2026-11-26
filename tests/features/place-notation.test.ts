@@ -224,12 +224,21 @@ describe('位置だけの書き換え(movePlace)', () => {
     expect(movePlace(BOARD, { line: 0, openLine: line0, x: 120, y: 40 })).toBe(BOARD);
   });
 
-  it('行が範囲の外 / 板の行でない / 値が負・小数 ── どれも null(書かない)', () => {
+  it('行が範囲の外 / 板の行でない / 値が小数・範囲の外 ── どれも null(書かない)', () => {
     expect(movePlace(BOARD, { line: 99, openLine: line0, x: 1, y: 2 })).toBeNull();
     // 行番号が板でない行(本文の行)を指しても、byte 一致の前に受理で断る
     expect(movePlace(BOARD, { line: 2, openLine: '- 牛乳', x: 1, y: 2 })).toBeNull();
-    expect(movePlace(BOARD, { line: 0, openLine: line0, x: -1, y: 2 })).toBeNull();
     expect(movePlace(BOARD, { line: 0, openLine: line0, x: 1.5, y: 2 })).toBeNull();
+    expect(movePlace(BOARD, { line: 0, openLine: line0, x: -100001, y: 2 })).toBeNull();
+    expect(movePlace(BOARD, { line: 0, openLine: line0, x: 1, y: 100001 })).toBeNull();
+  });
+
+  it('🔴 負の x / y は書ける(無限キャンバス。v4.0 Phase 2 / PR-09)── 開き行の x= / y= だけが変わる', () => {
+    const out = movePlace(BOARD, { line: 0, openLine: line0, x: -120, y: -40 })!;
+    expect(out.split('\n')[0]).toContain('x=-120');
+    expect(out.split('\n')[0]).toContain('y=-40');
+    expect(out.split('\n').slice(1)).toEqual(BOARD.split('\n').slice(1));
+    expect(movePlace(BOARD, { line: 0, openLine: line0, x: -100000, y: 0 })).not.toBeNull();
   });
 
   it('🔴 frontmatter の中の行は書かない(行番号は原文基準)', () => {
@@ -391,9 +400,10 @@ describe('板の塊を足す(addPlace)(#676)', () => {
     }
   });
 
-  it('負・小数の座標は null', () => {
-    expect(addPlace('本文', -1, 0)).toBeNull();
+  it('小数・範囲の外の座標は null / 負の座標は書ける(無限キャンバス)', () => {
     expect(addPlace('本文', 0, 1.5)).toBeNull();
+    expect(addPlace('本文', -100001, 0)).toBeNull();
+    expect(addPlace('本文', -1, 0)).toContain(':::format{.pkc-place x=-1 y=0 ');
   });
 });
 

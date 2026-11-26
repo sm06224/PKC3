@@ -35,8 +35,10 @@ import type { BlockDirectiveAttrs } from './block-directive-attrs';
 import { parseBlockDirectiveOpen, parseTier1FormatOpen } from './block-directive-attrs';
 import { frontmatterLineCount } from './frontmatter';
 import {
+  isPlacePosition,
   isPlaceRectNumber,
   PLACE_RECT_KEYS,
+  PLACE_RECT_MAX,
   type PlaceRectInput,
   type PlaceRectValue,
 } from './place-rect';
@@ -240,10 +242,16 @@ function placeLinesAt(
   return { lines, fm };
 }
 
-/** 整数で 0 以上か(座標・大きさ・重なりの値はどれもこの形だけを受ける)。 */
+/** 整数で 0 以上か(大きさの値はこの形だけを受ける)。 */
 function isCoord(n: number): boolean {
   return Number.isInteger(n) && n >= 0;
 }
+
+/**
+ * 🔴 **位置(x / y)として書けるか**(v4.0 Phase 2 / PR-09)── 無限キャンバスで左・上へ広げるので**負も受ける**
+ * (`±PLACE_RECT_MAX`)。判定は窓の検め(`place-rect.ts`)と同じ 1 本(§7)。
+ */
+const isPos = isPlacePosition;
 
 /**
  * 🔴 板の塊を動かす ── 開き行の x= / y= **だけ**を書き換える。
@@ -256,7 +264,7 @@ function isCoord(n: number): boolean {
  *   (`store-effects`)が、取りやめた drop に嘘の赤帯を出さないため。
  */
 export function movePlace(body: string, move: PlaceMove): string | null {
-  if (!isCoord(move.x) || !isCoord(move.y)) return null;
+  if (!isPos(move.x) || !isPos(move.y)) return null;
   return spliceOpenLine(body, move, { x: move.x, y: move.y });
 }
 
@@ -772,7 +780,7 @@ export type PlaceGroupMove = PlaceMove;
  *   **1 枚も書かず `null`**。全員が元の位置のままなら body をそのまま返す。
  */
 export function movePlaces(body: string, moves: readonly PlaceGroupMove[]): string | null {
-  for (const m of moves) if (!isCoord(m.x) || !isCoord(m.y)) return null;
+  for (const m of moves) if (!isPos(m.x) || !isPos(m.y)) return null;
   const at = placeLinesAtAll(body, moves, isPlaceOpen);
   if (at === null) return null;
   let changed = false;
@@ -787,23 +795,39 @@ export function movePlaces(body: string, moves: readonly PlaceGroupMove[]): stri
 }
 
 /**
- * 🔴 **グループを掴んだときの動かす量**(画面の掴みと同じ規則の 1 本)。
- * 全員の左上が 0 を下回らないよう、**全員で同じだけ**手前で止める(形を崩さない)。
- * 1 枚だけのときは `max(0, start + d)` と同じ(今までの動き)。
+ * 🔴 **グループを掴んだときの動かす量**(画面の掴みと同じ規則の 1 本)。**全員で同じだけ**手前で止める(形を崩さない)。
+ *
+ * - **通常表示**(既定): 左上が 0 を下回らない。1 枚だけのときは `max(0, start + d)` と同じ(今までの動き)。
+ *   ⚠ もう負の所に居る付箋(無限キャンバスで置いた)は、**それ以上は左・上へ行かない**だけ ── 掴んだ瞬間に 0 へ跳ばさない。
+ * - **無限キャンバス**(`infinite: true`): 下限は `-PLACE_RECT_MAX`(負の所へ自由に動かせる)。
+ * どちらも上限は `PLACE_RECT_MAX`(本文に書ける範囲の外へ出さない)。
  */
 export function clampGroupDelta(
   starts: ReadonlyArray<{ readonly x: number; readonly y: number }>,
   dx: number,
   dy: number,
+  opts: { readonly infinite?: boolean } = {},
 ): { dx: number; dy: number } {
+  if (starts.length === 0) return { dx, dy };
   let minX = Infinity;
   let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   for (const s of starts) {
     minX = Math.min(minX, s.x);
     minY = Math.min(minY, s.y);
+    maxX = Math.max(maxX, s.x);
+    maxY = Math.max(maxY, s.y);
   }
-  if (starts.length === 0) return { dx, dy };
-  return { dx: Math.max(dx, -minX), dy: Math.max(dy, -minY) };
+  const floor = opts.infinite === true ? -PLACE_RECT_MAX : 0;
+  const lowX = Math.min(0, floor - minX);
+  const lowY = Math.min(0, floor - minY);
+  const highX = Math.max(0, PLACE_RECT_MAX - maxX);
+  const highY = Math.max(0, PLACE_RECT_MAX - maxY);
+  return {
+    dx: Math.min(highX, Math.max(lowX, dx)),
+    dy: Math.min(highY, Math.max(lowY, dy)),
+  };
 }
 
 /** 開き行に付いている色・太さ。⚠ 読めない値は `null`(描く側が無視する物と同じ規則)。 */
@@ -956,7 +980,7 @@ export function endsInsideOpenBlock(body: string): boolean {
  *   板ではなく**コードの字**(または別の塊の中身)になって画面に出ない。
  */
 export function addPlace(body: string, x: number, y: number): string | null {
-  if (!isCoord(x) || !isCoord(y)) return null;
+  if (!isPos(x) || !isPos(y)) return null;
   if (endsInsideOpenBlock(body)) return null;
   const block = `:::format{.pkc-place x=${x} y=${y} w=${NEW_PLACE_W} h=${NEW_PLACE_H}}\n\n:::\n`;
   if (body === '') return block;
@@ -970,7 +994,7 @@ export function addPlace(body: string, x: number, y: number): string | null {
  *   開き行の札の並びを壊さない(`place-shape.ts` の「値を素通しにしない」と同じ)。
  */
 export function addPlaceEntry(body: string, x: number, y: number, lid: string): string | null {
-  if (!isCoord(x) || !isCoord(y)) return null;
+  if (!isPos(x) || !isPos(y)) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(lid)) return null;
   if (endsInsideOpenBlock(body)) return null;
   const block = `:::format{.pkc-place entry=${lid} x=${x} y=${y}}\n:::\n`;
@@ -991,7 +1015,7 @@ export function addPlaceTemplate(
   y: number,
   id: PlaceTemplateId,
 ): string | null {
-  if (!isCoord(x) || !isCoord(y)) return null;
+  if (!isPos(x) || !isPos(y)) return null;
   const tpl = PLACE_TEMPLATES.find((t) => t.id === id);
   if (tpl === undefined) return null;
   if (endsInsideOpenBlock(body)) return null;

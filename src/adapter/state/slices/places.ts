@@ -24,14 +24,27 @@ import {
 } from '../app-state';
 import { isPlaceStyle } from '@features/markdown/place-color';
 import { endsInsideOpenBlock, placeBlockUnclosed, placeTextOf } from '@features/markdown/place-notation';
-import { PLACE_RECT_KEYS, isPlaceRectNumber } from '@features/markdown/place-rect';
+import { PLACE_RECT_KEYS, isPlacePosition, isPlaceRectNumber } from '@features/markdown/place-rect';
 import { isPlaceShape } from '@features/markdown/place-shape';
 import { isPlaceTemplateId } from '@features/markdown/place-template';
+import { CANVAS_LAYOUT, isCanvasLayout } from '@features/markdown/document-globals';
 
-export type PlacesAction = Extract<Dispatchable, { type: 'MOVE_PLACE' | 'MOVE_PLACES' | 'GROUP_PLACES' | 'UNGROUP_PLACE' | 'RESIZE_PLACE' | 'CONNECT_PLACE' | 'REMOVE_PLACE_LINE' | 'REMOVE_PLACE' | 'ADD_PLACE' | 'SET_PLACE_RECT' | 'SET_PLACE_TEXT' | 'RAISE_PLACE' | 'LOWER_PLACE' | 'SET_PLACE_SHAPE' | 'SET_PLACE_STYLE' }>;
+export type PlacesAction = Extract<Dispatchable, { type: 'MOVE_PLACE' | 'MOVE_PLACES' | 'GROUP_PLACES' | 'UNGROUP_PLACE' | 'RESIZE_PLACE' | 'CONNECT_PLACE' | 'REMOVE_PLACE_LINE' | 'REMOVE_PLACE' | 'ADD_PLACE' | 'SET_PLACE_RECT' | 'SET_PLACE_TEXT' | 'RAISE_PLACE' | 'LOWER_PLACE' | 'SET_PLACE_SHAPE' | 'SET_PLACE_STYLE' | 'SET_CANVAS_LAYOUT' }>;
 
 export function reducePlaces(state: AppState, action: PlacesAction): ReduceResult {
   switch (action.type) {
+    /**
+     * 🔴 **いつも無限キャンバスで開く / 外す**(v4.0 Phase 2 / PR-09)── 前書きの `layout: canvas`。
+     * 🔑 書換は既存の `frontmatter` 1 本(`SET_NOTE_LAYOUT` と同じ)── 新しい書込経路を作らない。
+     * ⚠ 外すのは `layout: canvas` のときだけ(用紙の `layout: a4-2col` などは消さない)。すでにその形なら書かない。
+     */
+    case 'SET_CANVAS_LAYOUT':
+      return bodyRewriteGate(state, action.lid, '、表示の既定を変えてください', (shown) => {
+        if (shown === null) return null; // 画面に無い本文は書き換えない(押し所はボードの上にしか無い)
+        const now = isCanvasLayout(shown);
+        if (now === action.on) return null;
+        return { kind: 'frontmatter', keys: { layout: action.on ? CANVAS_LAYOUT : undefined } };
+      });
     /**
      * 🔴 **板の塊を動かす**(#283 P4-b)。門(phase / 画面に出ている本文 / 開き行の捕捉)は
      * `bodyRewriteGate` 1 か所 ── 下の 3 つ(#676)と共有する。
@@ -39,7 +52,7 @@ export function reducePlaces(state: AppState, action: PlacesAction): ReduceResul
     case 'MOVE_PLACE':
       return bodyRewriteGate(state, action.lid, '、付箋を動かしてください', (shown) => {
         if (shown === null) return null; // 画面に無い本文の行番号は信じない
-        if (!isPlaceCoord(action.x) || !isPlaceCoord(action.y)) return null;
+        if (!isPlacePosition(action.x) || !isPlacePosition(action.y)) return null;
         const openLine = placeOpenLineOf(shown, action.line);
         if (openLine === null) return null;
         return { kind: 'place-move', line: action.line, openLine, x: action.x, y: action.y };
@@ -50,7 +63,7 @@ export function reducePlaces(state: AppState, action: PlacesAction): ReduceResul
         if (action.moves.length === 0) return null;
         const moves: Array<{ line: number; openLine: string; x: number; y: number }> = [];
         for (const m of action.moves) {
-          if (!isPlaceCoord(m.x) || !isPlaceCoord(m.y)) return null;
+          if (!isPlacePosition(m.x) || !isPlacePosition(m.y)) return null;
           const openLine = placeOpenLineOf(shown, m.line);
           if (openLine === null) return null; // 1 枚でも読めなければ 1 枚も書かない
           moves.push({ line: m.line, openLine, x: m.x, y: m.y });
@@ -144,8 +157,9 @@ export function reducePlaces(state: AppState, action: PlacesAction): ReduceResul
       const gated = bodyRewriteGate(state, action.lid, '、付箋を置いてください', (shown) =>
         // ⚠ 画面に出ていない面へは置かない(押し所は面の上にしか無い ── これまでの門を保つ)
         shown !== null &&
-        isPlaceCoord(action.x) &&
-        isPlaceCoord(action.y) &&
+        // 🔴 位置は負も受ける(無限キャンバスで右クリックした所。v4.0 Phase 2 / PR-09)
+        isPlacePosition(action.x) &&
+        isPlacePosition(action.y) &&
         (action.template === undefined || isPlaceTemplateId(action.template)) &&
         // 🔴 ほかのノートを置く回(#1662 2)── 置く先が台帳に在るノートのときだけ(居ないノートの付箋は「(見つかりません)」になる)
         (action.entry === undefined || (action.template === undefined && state.entryMetas.has(action.entry)))

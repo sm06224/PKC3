@@ -191,7 +191,7 @@ describe('movePlaces(全員を一度に動かす)', () => {
   it('🔴 1 枚でも門が外れたら 1 枚も書かない', () => {
     const b = body(A, B);
     expect(movePlaces(b, [m(b, 0, 40, 50), { line: at(1), openLine: B + 'x', x: 1, y: 1 }])).toBeNull();
-    expect(movePlaces(b, [m(b, 0, -1, 0)])).toBeNull();
+    expect(movePlaces(b, [m(b, 0, -100001, 0)])).toBeNull();
     expect(movePlaces(b, [m(b, 0, 1.5, 0)])).toBeNull();
     expect(movePlaces(b, [m(b, 0, 1, 1), m(b, 0, 2, 2)])).toBeNull();
     // 板の開き行でない行(本文の行)は、開き行の字が一致していても動かさない

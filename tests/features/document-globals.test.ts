@@ -1,6 +1,7 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it } from 'vitest';
 import {
+  isCanvasLayout,
   extractDocumentGlobals,
   extractHeadingNumberConfig,
   globalsToDataAttrs,
@@ -104,5 +105,22 @@ describe('extractHeadingNumberConfig', () => {
     expect(extractHeadingNumberConfig(body('heading-number: false'))).toBeNull();
     expect(extractHeadingNumberConfig(body('heading-number: 0'))).toBeNull();
     expect(extractHeadingNumberConfig('本文のみ')).toBeNull();
+  });
+});
+
+describe('layout: canvas(v4.0 Phase 2 / PR-09)', () => {
+  it('🔴 ボードを無限キャンバスで開く印として読み、用紙の layout の警告を出さない', () => {
+    const body = '---\nlayout: canvas\n---\n本文';
+    expect(isCanvasLayout(body)).toBe(true);
+    expect(isCanvasLayout('---\nlayout: Canvas \n---\n')).toBe(true);
+    const g = extractDocumentGlobals(body);
+    expect(g.layout).toBeUndefined();
+    expect(g.warnings).toEqual([]);
+  });
+  it('対照群: 用紙の値・前書きなし・本文中の字は canvas ではない', () => {
+    expect(isCanvasLayout('---\nlayout: a4-2col\n---\n')).toBe(false);
+    expect(isCanvasLayout('layout: canvas')).toBe(false);
+    expect(isCanvasLayout('')).toBe(false);
+    expect(extractDocumentGlobals('---\nlayout: canva\n---\n').warnings).toHaveLength(1);
   });
 });

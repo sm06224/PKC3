@@ -7,9 +7,11 @@
  *
  * ## 受ける形
  *
- * - **整数だけ**(px)。小数・負・数でない字・単位つきの字は、理由を言って断る(黙って丸めない)。
+ * - **整数だけ**(px)。小数・数でない字・単位つきの字は、理由を言って断る(黙って丸めない)。
+ * - 🔴 **x / y は負も受ける**(v4.0 Phase 2 / PR-09。無限キャンバスで左・上へ広げる)── 範囲は
+ *   `-PLACE_RECT_MAX`〜`PLACE_RECT_MAX`。⚠ 幅・高さの負は今までどおり断る。
  * - 🔑 **全角数字(`１２０`)も受ける** ── 日本語入力のまま打てる(NFKC で半角へ揃える)。
- *   ⚠ 全角のマイナス(`－５`)も半角へ揃うので「負」として断る(数でないと読まれて理由がずれない)。
+ *   全角のマイナス(`－１２０`)も NFKC で半角の `-` に揃うので、x / y では負の数として読む。
  * - 🔑 **空欄は「変えない」** ── 幅・高さを書いていない枠(読む画面の幅で出る)の欄は、空のまま
  *   確定してよい。空欄を 0 と読むと、触っていない札が書き換わる。
  * - **上限は 100000 px**。描画は座標をそのまま CSS に渡すので、桁違いの値は
@@ -46,8 +48,21 @@ export const PLACE_RECT_LABELS: Readonly<Record<PlaceRectKey, string>> = {
 
 export const PLACE_RECT_MAX = 100000;
 
-/** 欄ごとの下限。⚠ 幅・高さが 0 の枠は掴めない(描画の最小は 120 × 40)ので 1 から。 */
-const MIN: Readonly<Record<PlaceRectKey, number>> = { x: 0, y: 0, w: 1, h: 1 };
+/**
+ * 欄ごとの下限。⚠ 幅・高さが 0 の枠は掴めない(描画の最小は 120 × 40)ので 1 から。
+ * 🔴 x / y は負の端まで(無限キャンバス)── 通常表示でも描画が画面の中へ寄せて見せる(`place-board.ts`)。
+ */
+const MIN: Readonly<Record<PlaceRectKey, number>> = { x: -PLACE_RECT_MAX, y: -PLACE_RECT_MAX, w: 1, h: 1 };
+
+/** 位置(x / y)の札か ── 負を受ける欄。 */
+function signed(key: PlaceRectKey): boolean {
+  return key === 'x' || key === 'y';
+}
+
+/** 位置の値として書けるか(x / y の共通の門。整数で `±PLACE_RECT_MAX` の中)。 */
+export function isPlacePosition(n: unknown): n is number {
+  return typeof n === 'number' && Number.isInteger(n) && Math.abs(n) <= PLACE_RECT_MAX;
+}
 
 /** 本文へ書ける 1 つの値か(`setPlaceRect` の門と窓の検めが同じ規則を引く)。 */
 export function isPlaceRectNumber(key: PlaceRectKey, n: unknown): n is number {
@@ -68,13 +83,15 @@ export function parsePlaceRect(input: PlaceRectInput): PlaceRectResult {
     const raw = input[key].normalize('NFKC').trim();
     if (raw === '') continue;
     const name = PLACE_RECT_LABELS[key];
-    if (raw.startsWith('-')) {
-      return { ok: false, key, error: `${name}は 0 以上で入れてください` };
+    // ⚠ NFKC は全角のマイナス(U+FF0D)を半角へ揃えるが、マイナス記号(U+2212)は揃えない ── 揃えてから読む
+    const text = raw.replace(/^\u2212/, '-');
+    if (text.startsWith('-') && !signed(key)) {
+      return { ok: false, key, error: `${name}は 1 以上で入れてください` };
     }
-    if (!/^\d+$/.test(raw)) {
+    if (!/^-?\d+$/.test(text)) {
       return { ok: false, key, error: `${name}は整数(px)で入れてください` };
     }
-    const n = Number(raw);
+    const n = Number(text);
     if (n > PLACE_RECT_MAX) {
       return { ok: false, key, error: `${name}は ${PLACE_RECT_MAX} 以下で入れてください` };
     }

@@ -54,6 +54,7 @@ import {
 import { NAME_RE } from '@features/markdown/block-directive-attrs';
 import { placeRotateOf, rotatedBounds } from '@features/markdown/place-rotate';
 import { PLACE_ENTRY_DEFAULT_H, PLACE_ENTRY_DEFAULT_W } from '@features/markdown/place-embed';
+import { isPlacePosition } from '@features/markdown/place-rect';
 
 /**
  * 🔑 **測れない所で使う大きさ**(happy-dom / まだ画面に出ていない面)。
@@ -160,6 +161,18 @@ export function intAttr(el: Element, name: string): number | null {
 }
 
 /**
+ * 🔴 **位置(`x=` / `y=`)の整数**(v4.0 Phase 2 / PR-09)── 無限キャンバスで左・上へ広げるので**負も読む**。
+ * ⚠ 範囲の外・読めない値は「無い」扱い(`intAttr` と同じく黙って 0 にしない ── 呼び手が既定を決める)。
+ * 判定は本文へ書く側と同じ `isPlacePosition` の 1 本(§7)。
+ */
+export function posAttr(el: Element, name: string): number | null {
+  const raw = el.getAttribute(name);
+  if (raw === null || raw.trim() === '') return null;
+  const n = Number(raw);
+  return isPlacePosition(n) ? n : null;
+}
+
+/**
  * 掴む口を 1 つだけ置く(冪等)。
  * ⚠ `<button>` にする ── `row-swap` が button を編集の対象から外しているので、
  *   掴もうとして編集に落ちない(heading-fold の口と同じ理由)。
@@ -251,8 +264,8 @@ export function rectOf(el: HTMLElement): PlaceRect {
   const w = el.offsetWidth;
   const h = el.offsetHeight;
   const rect = {
-    x: intAttr(el, 'data-pkc-x') ?? 0,
-    y: intAttr(el, 'data-pkc-y') ?? 0,
+    x: posAttr(el, 'data-pkc-x') ?? 0,
+    y: posAttr(el, 'data-pkc-y') ?? 0,
     w: w > 0 ? w : (intAttr(el, 'data-pkc-w') ?? PLACE_FALLBACK_W),
     h: h > 0 ? h : (intAttr(el, 'data-pkc-h') ?? PLACE_FALLBACK_H),
   };
@@ -687,8 +700,8 @@ export function applyPlaceLayout(
   const unsized: UnsizedBox[] = [];
 
   for (const el of blocks) {
-    const x = intAttr(el, 'data-pkc-x') ?? 0;
-    const y = intAttr(el, 'data-pkc-y') ?? 0;
+    const x = posAttr(el, 'data-pkc-x') ?? 0;
+    const y = posAttr(el, 'data-pkc-y') ?? 0;
     const w = intAttr(el, 'data-pkc-w');
     const h = intAttr(el, 'data-pkc-h');
     const z = intAttr(el, 'data-pkc-z');

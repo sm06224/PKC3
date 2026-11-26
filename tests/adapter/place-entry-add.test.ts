@@ -42,7 +42,9 @@ describe('ほかのノートを板に置く(#1662 2)', () => {
     expect(addPlaceEntry(BOARD, 0, 0, 'n2 x=0}')).toBeNull();
     expect(addPlaceEntry(BOARD, 0, 0, '')).toBeNull();
     expect(addPlaceEntry('```\nコード', 0, 0, 'n2')).toBeNull();
-    expect(addPlaceEntry(BOARD, -1, 0, 'n2')).toBeNull();
+    expect(addPlaceEntry(BOARD, -100001, 0, 'n2')).toBeNull();
+    // 🔑 負の位置は書ける(無限キャンバスで右クリックした所。PR-09)
+    expect(addPlaceEntry(BOARD, -1, 0, 'n2')).toContain('entry=n2 x=-1 y=0');
   });
 
   it('🔴 reducer: 台帳に居ないノートは置かない / テンプレートと同時には渡せない / 居れば entry つきの依頼になる', () => {

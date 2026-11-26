@@ -88,6 +88,8 @@ import {
   setPlaceText,
 } from '@features/markdown/place-notation';
 import { parsePlaceRotate } from '@features/markdown/place-rotate';
+import { isPlacePosition, PLACE_RECT_MAX } from '@features/markdown/place-rect';
+import { boardPointOf, canvasBackgroundTarget, isCanvasHost } from '@adapter/ui/render/canvas-viewport';
 import {
   parsePlaceColor,
   parseArrowSpell,
@@ -6183,6 +6185,14 @@ function menuCarriedAt(target: Element, attr: string): number | null {
   if (raw === null) return null;
   const line = Number(raw);
   return Number.isInteger(line) && line >= 0 ? line : null;
+}
+
+/** メニューが運んできた**位置**(付箋の x / y)。🔴 無限キャンバスでは負もある(`menuCarriedAt` は行番号用で負を断る)。 */
+function menuCarriedPos(target: Element, attr: string): number | null {
+  const raw = target.getAttribute(attr);
+  if (raw === null) return null;
+  const n = Number(raw);
+  return isPlacePosition(n) ? n : null;
 }
 
 /**
@@ -16103,8 +16113,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   'add-place': (dispatcher, target, services) => {
     if (refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
-    const x = menuCarriedAt(target, MENU_X_ATTR);
-    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    const x = menuCarriedPos(target, MENU_X_ATTR);
+    const y = menuCarriedPos(target, MENU_Y_ATTR);
     if (ob === null || x === null || y === null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
       return;
@@ -16124,8 +16134,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   'add-place-note': (dispatcher, target, services, root) => {
     if (refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
-    const x = menuCarriedAt(target, MENU_X_ATTR);
-    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    const x = menuCarriedPos(target, MENU_X_ATTR);
+    const y = menuCarriedPos(target, MENU_Y_ATTR);
     if (ob === null || x === null || y === null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
       return;
@@ -16164,8 +16174,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   'add-place-drawing': (dispatcher, target, services) => {
     if (refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
-    const x = menuCarriedAt(target, MENU_X_ATTR);
-    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    const x = menuCarriedPos(target, MENU_X_ATTR);
+    const y = menuCarriedPos(target, MENU_Y_ATTR);
     if (ob === null || x === null || y === null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
       return;
@@ -16195,8 +16205,8 @@ const ACTIONS: Record<string, ActionHandler> = {
   'add-place-template': (dispatcher, target, services, root) => {
     if (refuseStaleMenu(dispatcher, target)) return;
     const ob = dispatcher.getState().openBody;
-    const x = menuCarriedAt(target, MENU_X_ATTR);
-    const y = menuCarriedAt(target, MENU_Y_ATTR);
+    const x = menuCarriedPos(target, MENU_X_ATTR);
+    const y = menuCarriedPos(target, MENU_Y_ATTR);
     if (ob === null || x === null || y === null) {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
       return;
@@ -24970,7 +24980,8 @@ export function bindActions(
    * 「コピー」「画像を保存」が**代わりも無いまま消える**。
    */
   const onContextMenu = (ev: MouseEvent): void => {
-    const target = ev.target;
+    // 🔴 無限キャンバスの背景(器の外形の外)を押したら、器を押したのと同じに読む(右クリックで付箋を置ける。PR-09)
+    const target = ev.target instanceof Element ? canvasBackgroundTarget(ev.target) : ev.target;
     if (!(target instanceof Element)) return;
     /**
      * 🔴 **長押し中 / 直後の行では、メニューを出さない**(#687 D-1)。
@@ -25471,9 +25482,11 @@ export function bindActions(
       if (host !== null) {
         // 🔴 押した所を**器の座標**へ写して運ぶ(#676)── 受け手はメニューの器の中に居るので、
         //    押した瞬間の座標はここでしか読めない。負は 0 で止める(描画は負を捨てる)
-        const r = host.getBoundingClientRect();
-        carry[MENU_X_ATTR] = String(Math.max(0, Math.round(ev.clientX - r.left - host.clientLeft + host.scrollLeft)));
-        carry[MENU_Y_ATTR] = String(Math.max(0, Math.round(ev.clientY - r.top - host.clientTop + host.scrollTop)));
+        // 🔴 無限キャンバス(v4.0 Phase 2 / PR-09)では拡大・縮小を割り戻し、負の所にも置ける(式は `boardPointOf` 1 本)
+        const p = boardPointOf(host, ev.clientX, ev.clientY);
+        const floor = isCanvasHost(host) ? -PLACE_RECT_MAX : 0;
+        carry[MENU_X_ATTR] = String(Math.max(floor, Math.round(p.x)));
+        carry[MENU_Y_ATTR] = String(Math.max(floor, Math.round(p.y)));
       }
       openContextMenu(root, { x: ev.clientX, y: ev.clientY }, items, root.ownerDocument.activeElement, carry);
       return;
