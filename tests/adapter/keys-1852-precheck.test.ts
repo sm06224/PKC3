@@ -196,7 +196,9 @@ describe('237 = A: 狭い画面の編集で、書式のボタンを 1 段にま�
   it('🔴 1 段に残すのは太字 / 斜体 / 箇条書き / チェック / リンクの 5 つ。ほかの全部は「しまう」印を持つ', () => {
     expect([...COMPACT_BAR_OPS].sort()).toEqual(['bold', 'italic', 'link', 'task', 'ul']);
     // 🔴 #1982 段 3: 隠した元(「その他 ▾」の一覧の項目)は帯に並ばない ── 数えるのは直接出すボタンだけ
-    const inSource = (b: Element): boolean => b.closest('[data-pkc-field="format-more-source"]') !== null;
+    // 🔴 v4.0 Phase 1 / PR-04: 「文字色 ▾」「配置 ▾」の一覧の元(`format-menu-source`)も帯に並ばない
+    const inSource = (b: Element): boolean =>
+      b.closest('[data-pkc-field="format-more-source"], [data-pkc-field="format-menu-source"]') !== null;
     const shown = buttons.filter((b) => b !== more && !inSource(b));
     const kept = shown.filter((b) => !b.hasAttribute(FORMAT_MORE_ITEM_ATTR));
     expect(kept.map((b) => b.getAttribute('data-pkc-format')).sort()).toEqual(['bold', 'italic', 'link', 'task', 'ul']);

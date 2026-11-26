@@ -69,6 +69,7 @@ import {
 } from './block-directive-attrs';
 import { ensureBlankAroundColonBlocksWithLineMap } from './colon-block-normalize';
 import {
+  ATTRS_INNER_RE,
   splitAttrs,
   parseVocabularyTokensToStyles,
   parseTier0FormatOpen,
@@ -2302,7 +2303,7 @@ md.inline.ruler.before('emphasis', 'pkc_inline_role', function inlineRoleRule(st
 // 時刻 `12:30:45` 等の誤発火は parseSimpleInlineAttrs 側で keyword / color / size value のいずれにも該当しないため reject される(数値だけは valid attr にならない)。
 // Q7(v4 spec §16、2026-05-25):separator 寛容化に合わせて leading whitespace も accept、
 // `:text: bold red :` 等の padding 形を attrs として valid 化(空白区切り対応)。
-const ATTRS_INNER_RE = /^\s*[a-zA-Z0-9#][a-zA-Z0-9\-,#()\s.%]*$/;
+// ⚠ 綴りの正本は `directive-open.ts` の `ATTRS_INNER_RE`(書式の帯の文字色・下線も同じ 1 本を読む)。
 
 
 

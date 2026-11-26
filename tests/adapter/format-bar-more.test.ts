@@ -19,8 +19,10 @@ import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { buildFormatBar } from '../../src/adapter/ui/render/format-bar';
 import {
   FORMAT_BAR_GROUPS,
+  FORMAT_BAR_MENUS,
   FORMAT_BAR_MORE_GROUPS,
   barItemId,
+  menuBarItems,
   moreBarItems,
   visibleBarItems,
 } from '../../src/features/markdown/format-bar-layout';
@@ -43,7 +45,11 @@ function meta(lid: string): EntryMeta {
 const idOf = (b: Element): string =>
   b.getAttribute('data-pkc-format') !== null
     ? `op:${b.getAttribute('data-pkc-format')}`
-    : `action:${b.getAttribute('data-pkc-action')}`;
+    : b.getAttribute('data-pkc-format-menu') !== null && b.getAttribute('data-pkc-action') === 'open-format-menu'
+      ? `menu:${b.getAttribute('data-pkc-format-menu')}`
+      : b.getAttribute('data-pkc-action') === 'apply-text-color'
+        ? `color:${b.getAttribute('data-pkc-color') || 'none'}`
+        : `action:${b.getAttribute('data-pkc-action')}`;
 
 beforeEach(() => {
   document.body.textContent = '';
@@ -90,11 +96,17 @@ describe('帯の並び(描いた DOM)', () => {
       [...g.querySelectorAll('button')].map(idOf),
     ]);
     expect(more).toEqual(FORMAT_BAR_MORE_GROUPS.map((g) => [g.group, g.items.map(barItemId)]));
-    // 直接 + その他 の合計がボタン全数(「その他 ▾」本体と、狭い画面の「…」を除く)
+    // 🔴 PR-04: ▾ の一覧の元(文字色 / 配置)も隠してあり、表どおり
+    for (const id of ['color', 'align'] as const) {
+      const box = bar.querySelector<HTMLElement>(`[data-pkc-field="format-menu-source"][data-pkc-format-menu="${id}"]`)!;
+      expect(box.hidden, `${id} の元が見えている`).toBe(true);
+      expect([...box.querySelectorAll('button')].map(idOf)).toEqual(FORMAT_BAR_MENUS[id].map(barItemId));
+    }
+    // 直接 + ▾ の一覧 + その他 の合計がボタン全数(「その他 ▾」本体と、狭い画面の「…」を除く)
     const all = [...bar.querySelectorAll('button[data-pkc-action]')].filter(
       (b) => b.getAttribute('data-pkc-action') !== 'open-format-more',
     );
-    expect(all).toHaveLength(visibleBarItems().length + moreBarItems().length);
+    expect(all).toHaveLength(visibleBarItems().length + menuBarItems().length + moreBarItems().length);
   });
 
   it('「その他 ▾」は 1 つで、字は「その他 ▾」・メニューを開くボタンとして名乗っている', () => {

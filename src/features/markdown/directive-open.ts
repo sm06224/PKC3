@@ -69,6 +69,33 @@ function isValidColor(c: string): boolean {
   return NAMED_COLORS.has(c.toLowerCase()) || COLOR_VALUE_RE.test(c);
 }
 
+/**
+ * 🔴 **`:内容:属性:`(L-6)の属性の字の形**(描き手 `markdown-render.ts` と書式の帯 `word-format.ts` が同じ 1 本を読む)。
+ * 先頭は a-z(keyword / 色名)、`#`(hex 色)、または digit(`120%` / `1.5em` 等の size 値、`2xl` の vocab keyword 形)。
+ * 時刻 `12:30:45` 等の誤発火は語彙の照合(`parseVocabularyTokensToStyles`)が弾く(数値だけは属性にならない)。
+ * Q7(v4 spec §16、2026-05-25):前後の空白も受ける(`:text: bold red :`)。
+ */
+export const ATTRS_INNER_RE = /^\s*[a-zA-Z0-9#][a-zA-Z0-9\-,#()\s.%]*$/;
+
+/**
+ * 🔴 **`:内容:属性:` の属性として読めるか**(描き手が `<span>` にする条件と同じ)。
+ * ⚠ 書式の帯(文字色・下線)が「もう囲まれているか」を読むのに使う ── 描き手と別の綴りで判定すると、
+ *   帯が囲みと思った字が画面では字のまま、という食い違いになる(CLAUDE.md §7)。
+ */
+export function isSimpleInlineAttrs(attrs: string): boolean {
+  return attrs !== '' && ATTRS_INNER_RE.test(attrs) && parseVocabularyTokensToStyles(splitAttrs(attrs)) !== null;
+}
+
+/** 属性の 1 語が**文字の色**か(背景色 `bg-…`・大きさ・語彙のキーワードは含めない)。 */
+export function isTextColorToken(token: string): boolean {
+  return (
+    !SIMPLE_INLINE_VOCAB_KEYWORDS.has(token) &&
+    !token.startsWith('bg-') &&
+    !SIZE_VALUE_RE.test(token) &&
+    isValidColor(token)
+  );
+}
+
 // attrs を top-level comma または 空白で split(parens 内 separator は保護)。
 // Q7(v4 spec §16、user direction 2026-05-25):inline / block 両 vocabulary 形で
 // comma / 空白 / 混在 全部 accept。`bold red` / `bold,red` / `bold, red` / `bold , red` 等は

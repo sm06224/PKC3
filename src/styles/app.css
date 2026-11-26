@@ -16495,6 +16495,70 @@ h6:hover > .pkc-heading-anchor,
   font-weight: 600;
 }
 
+/* 🔴 書式の帯の「ページ設定 ▾」のパネル(v4.0 Phase 1 / PR-04)── 中身は情報ペインの「ページ設定」と同じ部品(`note-layout-controls.ts`)。
+ * 浮いた物なので枠・影を持つ(一覧 `context-menu` と同じ段)。位置は `page-setup-panel.ts` が押した ▾ の下へ書く */
+[data-pkc-region='page-setup-panel'] {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  width: min(20rem, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  padding: var(--s2) var(--s3) var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+[data-pkc-region='page-setup-panel'] [data-pkc-field='page-setup-head'] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s2);
+  font-weight: 600;
+}
+[data-pkc-region='page-setup-panel'] [data-pkc-field='page-setup-controls'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-region='page-setup-panel'] [data-pkc-field='page-setup-controls'] > button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+}
+[data-pkc-field='page-setup-print-layout'][aria-pressed='true'] {
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 600;
+}
+/* 「ページ設定 ▾」「文字色 ▾」が開いている間は押し込んだ見た目(「…」と同じ段) */
+[data-pkc-region='format-bar'] [data-pkc-action='open-page-setup'][aria-expanded='true'] {
+  background: var(--pkc-mark-bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 40%, transparent);
+  color: var(--fg);
+}
+/* 🔴 「文字色 ▾」の一覧の見本(PR-04)── 項目の頭に色の小さな四角。色は項目の `--pkc-swatch`(`TEXT_COLORS` が正本)。
+ * ⚠ 字は色の名前のまま(色だけで意味を伝えない)。「色を解除」は見本を持たない(四角を描かない) */
+/* 見本の色の既定(項目ごとの `style` の `--pkc-swatch` がこれに勝つ) */
+[data-pkc-region='context-menu'] [data-pkc-color] {
+  --pkc-swatch: transparent;
+}
+[data-pkc-region='context-menu'] [data-pkc-color]:not([data-pkc-color=''])::before {
+  content: '';
+  display: inline-block;
+  inline-size: 0.9em;
+  block-size: 0.9em;
+  margin-inline-end: var(--s2);
+  vertical-align: -0.1em;
+  border-radius: 2px;
+  background: var(--pkc-swatch);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 25%, transparent);
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════════
  * 輪郭の近接発光(ネオン。B2)── ここから末尾まで 1 つの塊(`render/neon-glow.ts` が印と局所座標を書く)

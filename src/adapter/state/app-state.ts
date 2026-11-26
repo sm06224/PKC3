@@ -1374,6 +1374,19 @@ export function bodyWriteBlockReason(state: AppState, lid: string): string | nul
 }
 
 /**
+ * 🔴 **ノートのページ設定を書けない理由**(書けるなら `null`。v4.0 Phase 1 / PR-04)。
+ *
+ * ⚠ `bodyWriteBlockReason` との違いは 1 つだけ ── **編集中のそのノート**は書ける(下書きの前書きを書き換える。
+ *   reducer の `SET_NOTE_LAYOUT` の下書きの道)。書式の帯の「ページ設定 ▾」は編集中にしか出ないので、ここで断ると
+ *   帯から一度も使えない。
+ * 🔑 判定は 1 か所 ── reducer・情報ペイン・帯のパネルがこれを通る(押せる見た目と、押したときの断りが食い違わない)。
+ */
+export function noteLayoutBlockReason(state: AppState, lid: string): string | null {
+  if (state.phase === 'editing' && state.openBody?.lid === lid && state.sectionDraft?.lid !== lid) return null;
+  return bodyWriteBlockReason(state, lid);
+}
+
+/**
  * 🔴 **`bodyWriteBlockReason` の断りに、操作ごとの続き(「チェックしてください」等)を付ける**(#1087)。
  *
  * ⚠ 断りは 2 つの形がある ── phase 由来は**前置き**(「編集を保存するか、編集をやめてから」)、章 / コードの欄は

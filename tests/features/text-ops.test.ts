@@ -682,9 +682,16 @@ describe('追記', () => {
 
 describe('パネルの表', () => {
   it('🔴 表に並んだ操作は**全部効く**(押しても何も起きないボタンを作らない)', () => {
+    /**
+     * 🔴 v4.0 Phase 1 / PR-04: **外すだけの操作**(揃えを解除 / 字下げを減らす)は、素の字では外す物が無い ──
+     *   付けた状態(先に付ける操作を当てた本文)で押して、本文が変わることを見る(除外しない)。
+     */
+    const PRIME: Partial<Record<FormatOp, FormatOp>> = { 'align-clear': 'align-center', 'indent-less': 'indent-more' };
     for (const { op } of FORMAT_OPS) {
-      const out = applyFormat({ text: 'あいう', start: 0, end: 3 }, op);
-      expect(out.text, `${op} が本文を変えない`).not.toBe('あいう');
+      const base = { text: 'あいう', start: 0, end: 3 };
+      const before = PRIME[op] === undefined ? base : applyFormat(base, PRIME[op]!);
+      const out = applyFormat(before, op);
+      expect(out.text, `${op} が本文を変えない`).not.toBe(before.text);
     }
   });
 

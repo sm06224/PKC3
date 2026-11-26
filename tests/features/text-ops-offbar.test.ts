@@ -13,11 +13,13 @@ import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 const at = (text: string, start: number, end: number) => ({ text, start, end });
 
 describe('帯に出さない記法(#425 段②-a)', () => {
-  it('🔴 帯の表と全体の表が違う ── 5 つだけ落ちている(mermaid は #528 案 B で「先に聞く」側へ)', () => {
+  it('🔴 帯の表と全体の表が違う ── 3 つだけ落ちている(mermaid は #528 案 B で「先に聞く」側へ。ハイライト・取り消し線は PR-04 で帯へ)', () => {
     const off = FORMAT_OPS.filter((o) => o.onBar === false).map((o) => o.op);
-    expect(off.slice(0, 5)).toEqual(['mermaid', 'highlight', 'ruby', 'emdot', 'strike']);
+    expect(off.slice(0, 3)).toEqual(['mermaid', 'ruby', 'emdot']);
     // 🔴 #425: 注意書きのブロック 8 種も帯には出さない(帯には「注意書きを入れる」1 つ)
-    expect(off.slice(5)).toEqual(CALLOUT_CHOICES.map((c) => `callout-${c.role}`));
+    expect(off.slice(3)).toEqual(CALLOUT_CHOICES.map((c) => `callout-${c.role}`));
+    // 🔴 v4.0 Phase 1 / PR-04: ハイライト・取り消し線は帯に出る
+    expect(BAR_FORMAT_OPS.map((o) => o.op)).toEqual(expect.arrayContaining(['highlight', 'strike', 'underline']));
     // ⚠ 空振り防止 ── 帯の側にその 5 つが 1 つも居ないこと
     const bar = new Set(BAR_FORMAT_OPS.map((o) => o.op));
     expect(off.filter((o) => bar.has(o)), '帯にも出てしまっている').toEqual([]);

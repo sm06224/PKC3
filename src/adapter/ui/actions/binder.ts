@@ -547,7 +547,14 @@ import {
   nextMenuIndex,
   MENU_NAV_KEYS,
 } from '../render/context-menu';
-import { syncReplaceToggle } from '../render/format-bar';
+import {
+  FORMAT_MENU_ATTR,
+  FORMAT_MENU_SOURCE_FIELD,
+  syncReplaceToggle,
+  TEXT_COLOR_ATTR,
+} from '../render/format-bar';
+import { closePageSetupPanel, paintPageSetupPanel, pageSetupPanelOf, togglePageSetupPanel } from '../render/page-setup-panel';
+import { applyTextColor, refusalOf, textColorValue } from '@features/markdown/word-format';
 import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
 import { bindCurrentLine } from '../render/current-line';
 import { appCurrentLine } from '../render/current-line-setting';
@@ -636,6 +643,38 @@ import {
 import { copyLabel } from '@features/clipboard/history';
 
 /**
+ * 🔴 **書式の帯の一覧(「その他 ▾」「文字色 ▾」「配置 ▾」)を開く 1 本**(#1982 段 3 / v4.0 Phase 1 / PR-04)。
+ * 🔑 項目は隠した元から読む ── 字・説明・押せない / 灰色の状態は帯の元のボタンのもの(2 本目の判定を持たない)。
+ * ⚠ **本文の欄に居たまま開く**(`keepFocus`)── 焦点が外れると 1 行ずつ打つ編集の行が確定して閉じ、書き込む先が消える。
+ *   矢印キー(↑ ↓ Home End)で項目を選び Enter で押せる(`attachKeepFocusNav`)。それ以外の 1 打鍵では一覧を閉じる(打鍵は本文へ届く)。
+ */
+function openFormatBarMenu(root: HTMLElement, target: HTMLElement, src: Element | null, opener: string): void {
+  const items = exportMenuItemsFrom(src, opener, true);
+  if (items.length === 0) return;
+  const doc = root.ownerDocument;
+  const keep = formatTargetOf(doc.activeElement);
+  const r = target.getBoundingClientRect();
+  const opened = openContextMenu(root, { x: r.left, y: r.bottom }, items, keep ?? target, {}, { keepFocus: keep !== null });
+  if (keep !== null && opened !== null) {
+    // ⚠ 自分が開いた一覧が残っているときだけ閉じる(先に項目を選んで閉じていたら、あとから開いた別の一覧を巻き込まない)
+    // ⚠ `Esc` は閉じる側(`onMenuKey`)に任せる ── ここで先に閉じると、同じ `Esc` が編集を終える側へ流れる
+    /**
+     * ⚠ **修飾キーだけ・変換中のキーでは閉じない**(着地前レビュー)── Shift を押しただけで一覧が消えていた。
+     *   それ以外の 1 打鍵で外す(閉じたあとに聞き耳を残さない)。
+     */
+    const closeOnKey = (ev: KeyboardEvent): void => {
+      if (ev.isComposing || ev.keyCode === 229 || MODIFIER_KEYS.has(ev.key)) return;
+      keep.removeEventListener('keydown', closeOnKey);
+      if (ev.key !== 'Escape' && opened.el.isConnected) closeContextMenu(root);
+    };
+    // ⚠ 張る先は**本文の欄**(欄が消えれば聞き耳も一緒に消える。`root` / 文書へは直に張らない: #876)
+    keep.addEventListener('keydown', closeOnKey);
+    // 🔴 ↑ ↓ Home End で項目を選び、Enter で押せる(欄に居たまま。握ったキーは `closeOnKey` へ届かない ── 一覧は開いたまま)
+    attachKeepFocusNav(root, opened.el, keep);
+  }
+}
+
+/**
  * 🔴 **隠した元のボタンの並びを、そのまま一覧の項目にする**(#1029 / #501。右の列の「書き出す ▾」)。
  * ⚠ 畳んだ(`hidden`)ボタンは出さない。押せない(`disabled`)ボタンは押せない項目で残す(理由は説明欄が出す)。
  * 🔑 字は `[data-pkc-field=label]`(`iconButton` が作る)、説明は `title`。
@@ -663,6 +702,9 @@ function exportMenuItemsFrom(src: Element | null, opener: string, grouped = fals
         [MENU_FROM_ATTR]: opener,
         // 🔑 書式の帯の「その他 ▾」(#1982 段 3)── `format-text` は押した物の `data-pkc-format` が要る
         ...(b.getAttribute('data-pkc-format') !== null ? { 'data-pkc-format': b.getAttribute('data-pkc-format')! } : {}),
+        // 🔑 書式の帯の「文字色 ▾」(PR-04)── 押した見本の id と、頭に描く見本の色(`--pkc-swatch`)を写す
+        ...(b.getAttribute(TEXT_COLOR_ATTR) !== null ? { [TEXT_COLOR_ATTR]: b.getAttribute(TEXT_COLOR_ATTR)! } : {}),
+        ...(b.getAttribute('style') !== null ? { style: b.getAttribute('style')! } : {}),
         // 🔑 灰色(押せるが理由を出す口。1 行ずつ打つ編集の「番号を振り直す」など)は一覧の項目にも写す
         ...(b.getAttribute('aria-disabled') === 'true' ? { 'aria-disabled': 'true' } : {}),
         ...(b.getAttribute(VARIANT_ATTR) !== null ? { [VARIANT_ATTR]: b.getAttribute(VARIANT_ATTR)! } : {}),
@@ -5641,6 +5683,8 @@ const MENU_OPENERS: ReadonlySet<string> = new Set([
   'open-inspector-more',
   // 🔑 #1982 段 3 ── 書式の帯の「その他 ▾」
   'open-format-more',
+  // 🔑 v4.0 Phase 1 / PR-04 ── 書式の帯の「文字色 ▾」「配置 ▾」
+  'open-format-menu',
   // 🔑 #1982 段 4 ── 色ラベルの一覧(1 枚目の一覧の項目から 2 枚目を開く)
   'note-label-set',
   // 🔑 2026-11-23 ── 左のバー / スマホの帯の「メッセージ」(簡易履歴のポップオーバー)。同じクリックで他の一覧が閉じて何も出ない、を避ける
@@ -17879,7 +17923,12 @@ const ACTIONS: Record<string, ActionHandler> = {
    * ⚠ ショートカットキー・操作を探すと**同じ関数**(`togglePrintLayout`)── 切替の規則を 2 か所に置かない。
    */
   'toggle-print-layout': (_dispatcher, _target, services) => {
-    services.showStatus?.(printLayoutToggledText(togglePrintLayout(document.documentElement)));
+    /**
+     * 🔴 **切り替えは知らせの有無に関係なく走らせる**(PR-04 で判明)。⚠ `showStatus?.(…(togglePrintLayout(…)))` と書くと、
+     *   知らせの口が無いとき `?.` が**引数ごと評価を飛ばし**、切り替えそのものが起きなかった(`.claude/rules/src-invariants.md` §3 の `?.` の罠)。
+     */
+    const on = togglePrintLayout(document.documentElement);
+    services.showStatus?.(printLayoutToggledText(on));
   },
   /** 設定の画面の「印刷レイアウト表示」のチェック(押した後の値をそのまま当てる)。 */
   'set-print-layout': (_dispatcher, target, services) => {
@@ -20091,29 +20140,63 @@ const ACTIONS: Record<string, ActionHandler> = {
    */
   'open-format-more': (_dispatcher, target, _services, root) => {
     const src = target.closest('[data-pkc-region="format-bar"]')?.querySelector('[data-pkc-field="format-more-source"]');
-    const items = exportMenuItemsFrom(src ?? null, 'open-format-more', true);
-    if (items.length === 0) return;
-    const doc = root.ownerDocument;
-    const keep = formatTargetOf(doc.activeElement);
-    const r = target.getBoundingClientRect();
-    const opened = openContextMenu(root, { x: r.left, y: r.bottom }, items, keep ?? target, {}, { keepFocus: keep !== null });
-    if (keep !== null && opened !== null) {
-      // ⚠ 自分が開いた一覧が残っているときだけ閉じる(先に項目を選んで閉じていたら、あとから開いた別の一覧を巻き込まない)
-      // ⚠ `Esc` は閉じる側(`onMenuKey`)に任せる ── ここで先に閉じると、同じ `Esc` が編集を終える側へ流れる
-      /**
-       * ⚠ **修飾キーだけ・変換中のキーでは閉じない**(着地前レビュー)── Shift を押しただけで一覧が消えていた。
-       *   それ以外の 1 打鍵で外す(閉じたあとに聞き耳を残さない)。
-       */
-      const closeOnKey = (ev: KeyboardEvent): void => {
-        if (ev.isComposing || ev.keyCode === 229 || MODIFIER_KEYS.has(ev.key)) return;
-        keep.removeEventListener('keydown', closeOnKey);
-        if (ev.key !== 'Escape' && opened.el.isConnected) closeContextMenu(root);
-      };
-      // ⚠ 張る先は**本文の欄**(欄が消えれば聞き耳も一緒に消える。`root` / 文書へは直に張らない: #876)
-      keep.addEventListener('keydown', closeOnKey);
-      // 🔴 ↑ ↓ Home End で項目を選び、Enter で押せる(欄に居たまま。握ったキーは `closeOnKey` へ届かない ── 一覧は開いたまま)
-      attachKeepFocusNav(root, opened.el, keep);
+    openFormatBarMenu(root, target, src ?? null, 'open-format-more');
+  },
+  /**
+   * 🔴 **書式の帯の「文字色 ▾」「配置 ▾」**(v4.0 Phase 1 / PR-04)。開き方は「その他 ▾」と**同じ 1 本**(`openFormatBarMenu`)──
+   *   本文の欄に居たまま開き(選んだ範囲が消えない)、矢印キーと Enter でも選べる。項目は隠した元(`format-menu-source`)から読む。
+   */
+  'open-format-menu': (_dispatcher, target, _services, root) => {
+    const id = target.getAttribute(FORMAT_MENU_ATTR);
+    if (id === null) return;
+    const src = target
+      .closest('[data-pkc-region="format-bar"]')
+      ?.querySelector(`[data-pkc-field="${FORMAT_MENU_SOURCE_FIELD}"][${FORMAT_MENU_ATTR}="${id}"]`);
+    openFormatBarMenu(root, target, src ?? null, 'open-format-menu');
+  },
+  /**
+   * 🔴 **文字色**(v4.0 Phase 1 / PR-04)。`data-pkc-color` = 見本の id(`''` = 色を解除)。
+   * ⚠ 書き換えの規則は `applyTextColor` の 1 本(もう色が付いていれば色だけ差し替え、解除で囲みを剥がす)。
+   * ⚠ 書く先は書式の帯と同じ `formatTarget`(1 画面編集の行 / 2 ペインの欄)、書き方も同じ `writeBack`(Ctrl+Z で戻せる)。
+   */
+  'apply-text-color': (_dispatcher, target, services, root) => {
+    const id = target.getAttribute(TEXT_COLOR_ATTR);
+    if (id === null) return;
+    const color = id === '' ? null : textColorValue(id);
+    if (id !== '' && color === null) return;
+    const ta = formatTarget(root);
+    if (!ta) {
+      sayNoFormatTarget(services);
+      return;
     }
+    const next = applyTextColor({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, color);
+    // 🔴 描き手が 1 つの囲みとして読めない字(`: red` を含む など)は断って理由を言う(本文は変えない)
+    const why = refusalOf(next);
+    if (why !== null) {
+      services.showStatus?.(why);
+      return;
+    }
+    writeBack(ta, next);
+  },
+  /**
+   * 🔴 **書式の帯の「ページ設定 ▾」**(v4.0 Phase 1 / PR-04)── 情報ペインの「ページ設定」と同じ部品の小さなパネルを開く / 閉じる。
+   * 🔑 開いている間は state が変わるたびに塗り直す(情報ペインと同じ本文から読む = 片方で変えたら即座に一致)。閉じたら購読を外す。
+   * ⚠ 開く前に 1 画面編集の行の打ちかけを state へ届ける(パネルの選択欄へ焦点が移ると行が閉じるので、先に確定させる)。
+   */
+  'open-page-setup': (dispatcher, target, _services, root) => {
+    const anchor =
+      target.closest('[data-pkc-region="format-bar"]') !== null
+        ? target
+        : (root.querySelector<HTMLElement>('[data-pkc-region="format-bar"] button[data-pkc-action="open-page-setup"]') ?? target);
+    if (pageSetupPanelOf(root) === null) settleRowEditor(root);
+    if (!togglePageSetupPanel(root, anchor, dispatcher.getState())) return;
+    const off = dispatcher.onState((st) => {
+      paintPageSetupPanel(root, st);
+      if (pageSetupPanelOf(root) === null) off();
+    });
+  },
+  'close-page-setup': (_dispatcher, _target, _services, root) => {
+    closePageSetupPanel(root, true);
   },
   /** 🔴 **右の列(何も選んでいないとき)の「書き出す ▾」**(#1029 / #501)。コレクション全体の書き出しの一覧。 */
   'open-collection-export-menu': (_dispatcher, target, _services, root) => {
@@ -21336,7 +21419,11 @@ function applyFormatSaying(
   say: ((text: string) => void) | undefined,
 ): TextSelection {
   if (op === 'table' && tableOpMadeSingleColumn(sel)) say?.(SINGLE_COLUMN_TABLE_NOTE);
-  return applyFormat(sel, op);
+  const next = applyFormat(sel, op);
+  // 🔴 断った書き換え(枠の境目をまたぐ / コードブロックの中 など)は理由を言う ── 押して何も起きない、にしない(PR-04)
+  const why = refusalOf(next);
+  if (why !== null) say?.(why);
+  return next;
 }
 
 /**
@@ -21413,6 +21500,8 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
   'sort-tasks',
   // 🔴 #766 D-3: 書式バーの「この行を計算する」── 押した行(caret)を読んで答えを挿すので、押しても焦点を奪わない
   'calc-line',
+  // 🔴 v4.0 Phase 1 / PR-04: 文字色(「文字色 ▾」の一覧の項目)── 選んだ範囲を書き換える
+  'apply-text-color',
 ]);
 
 /**
@@ -21422,7 +21511,10 @@ export const CARET_TOOLS: ReadonlySet<string> = new Set([
  * ⚠ `format-text` は一覧に登記が無い(記法は `FORMAT_OF` の別の道)── 入れない。
  */
 export const CARET_INSERT_TOOLS: ReadonlySet<string> = new Set(
-  [...CARET_TOOLS].filter((id) => id !== 'renumber-lists' && id !== 'sort-tasks' && id !== 'format-text'),
+  // ⚠ 文字色(`apply-text-color`)も一覧に登記が無い(帯の「文字色 ▾」からだけ呼ぶ)── 入れない
+  [...CARET_TOOLS].filter(
+    (id) => id !== 'renumber-lists' && id !== 'sort-tasks' && id !== 'format-text' && id !== 'apply-text-color',
+  ),
 );
 
 
@@ -22124,6 +22216,8 @@ export function bindActions(
       ev.preventDefault();
     // 🔴 書式の帯の「その他 ▾」も(#1982 段 3)。奪うと、1 行ずつ打つ編集の行が確定して閉じ、項目の書き込み先が消える
     if (act === 'open-format-more') ev.preventDefault();
+    // 🔴 「文字色 ▾」「配置 ▾」も同じ(PR-04)。「ページ設定 ▾」は押したときに行を確定させてからパネルへ焦点を移す
+    if (act === 'open-format-menu' || act === 'open-page-setup') ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {

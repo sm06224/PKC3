@@ -53,8 +53,8 @@ import { THEMES } from '../src/adapter/ui/render/theme';
 import { PAGE_FORMATS } from '../src/features/page-format';
 import { EDITOR_MODES } from '../src/features/editor-mode';
 import { SEALED_ARCHETYPES, SEALED_VIEWS } from '../src/features/sealed';
-import { buildFormatBar, formatToolLabel, FORMAT_MORE_MENU_LABEL } from '../src/adapter/ui/render/format-bar';
-import { visibleBarItems, moreBarItems, type BarItem } from '../src/features/markdown/format-bar-layout';
+import { buildFormatBar, colorLabel, formatMenuLabel, formatToolLabel, FORMAT_MORE_MENU_LABEL } from '../src/adapter/ui/render/format-bar';
+import { visibleBarItems, menuBarItems, moreBarItems, type BarItem } from '../src/features/markdown/format-bar-layout';
 import { BAR_FORMAT_OPS, FORMAT_OPS } from '../src/features/markdown/text-ops';
 import { APPENDABLE_ARCHETYPES } from '../src/features/flavor/append-spec';
 import { buildOfficePackPanel } from '../src/adapter/ui/render/office-pack-panel';
@@ -690,13 +690,26 @@ describe('マニュアルと実装の突合', () => {
      * 🔴 #1982 段 3: 並びと「その他 ▾」の中身は `format-bar-layout.ts` が正本。**帯の並びは、直接出す塊 → 「その他 ▾」→ 隠した元(一覧の項目)**。
      * ⚠ 字は表(`BAR_FORMAT_OPS`)と道具の登録(`formatToolLabel`)から引き直し、描いた帯と等値で突き合わせる(書き写さない)。
      */
+    /**
+     * 🔴 v4.0 Phase 1 / PR-04: ▾ の一覧(文字色 / 配置)の元が「その他 ▾」の元の後ろに並ぶ。▾ と見本の字も描く側の表から引く。
+     */
     const labelOfItem = (i: BarItem): string =>
-      'op' in i ? BAR_FORMAT_OPS.find((o) => o.op === i.op)!.label : formatToolLabel(i.action)!;
+      'op' in i
+        ? BAR_FORMAT_OPS.find((o) => o.op === i.op)!.label
+        : 'action' in i
+          ? formatToolLabel(i.action)!
+          : 'menu' in i
+            ? formatMenuLabel(i.menu)
+            : colorLabel(i.color);
     expect(labels).toEqual([
       ...visibleBarItems().map(labelOfItem),
       FORMAT_MORE_MENU_LABEL,
       ...moreBarItems().map(labelOfItem),
+      ...menuBarItems().map(labelOfItem),
     ]);
+    for (const l of ['取り消し線', '下線', 'ハイライト', '文字色 ▾', '配置 ▾', 'ページ設定 ▾', '改ページ', '中央揃え', '字下げを増やす', '色を解除']) {
+      expect(labels, `「${l}」が帯(▾ の一覧の元を含む)に無い`).toContain(l);
+    }
     // 帯の「図」「日付」「置換」など、これまで直接出していた道具が 1 つも落ちていない(一覧の側へ移っただけ)
     for (const l of ['図を挿入', '日付を挿入', 'ノートリンクを挿入', '添付を挿入', 'テンプレートを挿入', 'アイコンを挿入', '番号を振り直す', '完了項目を末尾へ', 'ノート内を探す', '置換の欄を開く / 閉じる', '注意書き', 'この行を計算する']) {
       expect(labels, `「${l}」が帯(その他 ▾ の元を含む)から消えた`).toContain(l);
@@ -1984,7 +1997,8 @@ describe('執筆規約 条 8 ── ガイドの表にキーを並べない(#779
     const body = sectionBody(GUIDE);
     const rows = body.split('\n').filter((l) => l.startsWith('|'));
     // 🔑 読めていなければ、下の「キーが無い」は**必ず**成り立ってしまう
-    expect(rows.length, 'ガイドの表を拾えていない').toBeGreaterThanOrEqual(6);
+    // ⚠ v4.0 Phase 1 / PR-04: ハイライト・取り消し線が書式バーへ移り、表は 3 行(+ 見出しの 2 行)になった
+    expect(rows.length, 'ガイドの表を拾えていない').toBeGreaterThanOrEqual(5);
     expect(body, '書式の名前が読めていない').toContain('ハイライト');
   });
 
@@ -2396,6 +2410,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-11-26(#2085)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-11-21 の節に原本
+     */
+    '画面の境目が、どのモニターでも見えやすくなりました',
     /**
      * ⚠ **2026-11-26(v4.0-PR-03)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-11-21 の節に原本

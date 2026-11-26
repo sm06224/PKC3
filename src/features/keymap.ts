@@ -1958,7 +1958,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
   },
   {
     id: 'format-strike',
-    label: '打ち消し',
+    label: '取り消し線',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Alt+Shift+X'],
     note: '選んだ字に取り消し線を引きます(~~ で囲みます)',

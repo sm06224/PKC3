@@ -2957,8 +2957,22 @@ export class DetailRenderer {
       foldedNow = isAttachment ? foldAttachmentHead(text) : null;
       if (foldedNow === null) ta.removeAttribute(HIDDEN_HEAD_ATTR);
       else ta.setAttribute(HIDDEN_HEAD_ATTR, foldedNow.head);
+      /**
+       * 🔴 **ページ設定の選択欄から来た書き換えは、焦点をその欄へ返す**(v4.0 Phase 1 / PR-04 の着地前レビュー)。
+       * ⚠ `insertText` のために欄へ焦点を入れると、「ページ設定 ▾」のポップオーバー / 情報ペインの選択欄を操作した瞬間に
+       *   焦点が本文の欄へ奪われ、キーボードで続けて選べず、ポップオーバーの `Esc` も効かなくなる。
+       *   返すのはページ設定の部品だけ(「すべて置換」などの従来の焦点の動きは変えない)。
+       */
+      const back = ta.ownerDocument.activeElement;
       ta.focus();
       replaceChanged(ta, foldedNow === null ? text : foldedNow.rest);
+      if (
+        back instanceof HTMLElement &&
+        back !== ta &&
+        back.isConnected &&
+        back.closest('[data-pkc-region="page-setup-panel"], [data-pkc-field="inspector-page-layout"]') !== null
+      )
+        back.focus();
       follow.push(parseFrontmatter(text).body, withVars(previewOpts, text));
       follow.flush();
     };
