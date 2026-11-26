@@ -9,8 +9,14 @@ import {
   buildGraphView,
   clampGraphDepth,
   GRAPH_DEFAULT_DEPTH,
+  GRAPH_GPU_MAX_NODES,
   GRAPH_MAX_DEPTH,
+  GRAPH_MAX_NODES,
 } from '../../src/features/relation/graph-view';
+
+/** PR-13 の前の `graph-view.ts`(origin/main 07d4fb7)で取った座標の指紋。 */
+const GOLDEN_60 = '94e364ce';
+const GOLDEN_23 = '5d07e497';
 
 const titles = (lids: string[]) => {
   const m = new Map(lids.map((l) => [l, `題:${l}`]));
@@ -113,5 +119,74 @@ describe('全体の配置', () => {
     const v = buildGraphView({ center: null, depth: 2, edges: [e('a', 'b')], titles: titles(['a', 'b']) });
     expect(v.nodes).toHaveLength(2);
     expect(v.nodes[0]!.x === v.nodes[1]!.x && v.nodes[0]!.y === v.nodes[1]!.y).toBe(false);
+  });
+});
+
+/** 決まった形の大きな図(n 節点の環 + 弦)。乱数を使わない。 */
+function bigGraph(n: number) {
+  const lids = Array.from({ length: n }, (_, i) => `n${String(i).padStart(4, '0')}`);
+  const edges = lids.flatMap((l, i) => [e(l, lids[(i + 1) % n]!), ...(i % 7 === 0 ? [e(l, lids[(i * 13 + 5) % n]!)] : [])]);
+  return { lids, edges, t: titles(lids) };
+}
+
+/** 座標の指紋(FNV-1a。小数 9 桁で丸める)。 */
+function digest(view: { nodes: readonly { lid: string; x: number; y: number }[] }): string {
+  let h = 0x811c9dc5;
+  for (const c of view.nodes.map((p) => `${p.lid}:${p.x.toFixed(9)},${p.y.toFixed(9)}`).join('|')) {
+    h ^= c.charCodeAt(0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16);
+}
+
+describe('🔴 大規模表示の上限(v4.0 PR-13)', () => {
+  it('GRAPH_GPU_MAX_NODES は 1000、既定の上限は 60 のまま', () => {
+    expect(GRAPH_GPU_MAX_NODES).toBe(1000);
+    expect(GRAPH_MAX_NODES).toBe(60);
+  });
+  it('既定では 60 件で切り、maxNodes = GRAPH_GPU_MAX_NODES なら 1000 件まで描く(切った旨も言う)', () => {
+    const { edges, t } = bigGraph(1200);
+    const small = buildGraphView({ center: null, depth: 2, edges, titles: t });
+    expect(small.nodes).toHaveLength(60);
+    expect(small.truncated).toBe(true);
+    const big = buildGraphView({ center: null, depth: 2, edges, titles: t, maxNodes: GRAPH_GPU_MAX_NODES });
+    expect(big.nodes).toHaveLength(1000);
+    expect(big.truncated).toBe(true);
+    expect(big.total).toBe(1200);
+  });
+  it('🔴 60 件以下の配置は従来の力学配置のまま(origin/main の座標の指紋と一致)', () => {
+    // ⚠ 指紋は PR-13 の前の graph-view.ts で取った値 ── 1 バイトでも配置が変われば落ちる
+    const { edges, t } = bigGraph(60);
+    expect(digest(buildGraphView({ center: null, depth: 2, edges, titles: t }))).toBe(GOLDEN_60);
+    const { edges: e2, t: t2 } = bigGraph(23);
+    expect(digest(buildGraphView({ center: null, depth: 2, edges: e2, titles: t2 }))).toBe(GOLDEN_23);
+  });
+  it('61 件以上は格子の配置: 1000 件でも速く、決定的、枠に収まり、1 点に潰れない', () => {
+    const { edges, t } = bigGraph(1000);
+    const t0 = performance.now();
+    const a = buildGraphView({ center: null, depth: 2, edges, titles: t, maxNodes: GRAPH_GPU_MAX_NODES });
+    const ms = performance.now() - t0;
+    const b = buildGraphView({ center: null, depth: 2, edges, titles: t, maxNodes: GRAPH_GPU_MAX_NODES });
+    expect(a.nodes).toHaveLength(1000);
+    expect(digest(a)).toBe(digest(b));
+    // ⚠ CI の遅い箱でも通る上限(手元の実測は 10ms 前後)。O(N²)×120 の力学配置なら数秒かかる
+    expect(ms).toBeLessThan(400);
+    for (const p of a.nodes) {
+      expect(p.x).toBeGreaterThanOrEqual(0.05);
+      expect(p.x).toBeLessThanOrEqual(0.95);
+      expect(p.y).toBeGreaterThanOrEqual(0.05);
+      expect(p.y).toBeLessThanOrEqual(0.95);
+    }
+    const distinct = new Set(a.nodes.map((p) => `${p.x.toFixed(4)},${p.y.toFixed(4)}`));
+    expect(distinct.size).toBeGreaterThan(990);
+  });
+  it('中心ありの 1000 件も環の配置で枠に収まる', () => {
+    const { lids, edges, t } = bigGraph(1000);
+    const v = buildGraphView({ center: lids[0]!, depth: 6, edges, titles: t, maxNodes: GRAPH_GPU_MAX_NODES });
+    expect(v.nodes.length).toBeGreaterThan(10);
+    for (const p of v.nodes) {
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.x).toBeLessThanOrEqual(1);
+    }
   });
 });
