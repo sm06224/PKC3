@@ -115,4 +115,24 @@ describe('canOpenAssetWindow', () => {
     expect(assetWindowKind(null)).toBeNull();
     expect(assetWindowKind('')).toBeNull();
   });
+  /**
+   * 🔴 **3D モデル(v4.0 PR-12)は `text` より先に見る**。ブラウザは `.obj` / ASCII の `.stl` を `text/plain`、
+   *   `.gltf` を `application/json`、`.glb` を種類なしで渡す ── 名前を渡せば 3D と分かる。
+   */
+  it('🔴 3D モデルは model3d(名前でも分かる)・別窓にはしない', () => {
+    expect(assetPreviewKind('model/gltf-binary')).toBe('model3d');
+    expect(assetPreviewKind('model/stl')).toBe('model3d');
+    expect(assetPreviewKind('text/plain', 'cube.obj')).toBe('model3d');
+    expect(assetPreviewKind('application/json', 'scene.gltf')).toBe('model3d');
+    expect(assetPreviewKind('application/octet-stream', 'a.GLB')).toBe('model3d');
+    expect(assetPreviewKind('', 'a.stl')).toBe('model3d');
+    // 対照群: 名前を渡さない既存の呼び出しは今までと同じ答え
+    expect(assetPreviewKind('text/plain')).toBe('text');
+    expect(assetPreviewKind('application/json')).toBe('text');
+    expect(assetPreviewKind('text/plain', 'memo.txt')).toBe('text');
+    expect(assetPreviewKind('image/png', 'a.png')).toBe('image');
+    // 別窓は画像と PDF だけのまま
+    expect(assetWindowKind('model/gltf-binary')).toBeNull();
+    expect(canOpenAssetWindow('model/stl')).toBe(false);
+  });
 });

@@ -121,6 +121,8 @@ const CORPUS: ReadonlyArray<readonly [string, string]> = [
   ],
   // 🔴 plotly / React(#528)── 器と原文の受け皿の CSS が誰にも出されなくならないように
   ['plotly fence', '```plotly\n{"data":[{"type":"bar","y":[1,2]}]}\n```\n'],
+  // 🔴 3D シーン(v4.0 PR-12)── 器と原文の受け皿の CSS が誰にも出されなくならないように
+  ['3d fence', '```3d\n{"objects":[{"type":"box"}]}\n```\n'],
   ['react fence', '```react\nexport default function App(){ return <b>x</b>; }\n```\n'],
   ['カード埋め込み', '@[card](entry:abc)\n'],
   // 🔴 本文の中に書いたタグ行(#550 段③)── バッジの CSS が誰にも当たらないと、
@@ -217,6 +219,18 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // ウィジェットの箱と「状態を初期化」のバー(PR-07)。見えたときに adapter が器へ置く
   'pkc-widget-frame': 'src/adapter/ui/render/widget-bridge.ts',
   'pkc-widget-bar': 'src/adapter/ui/render/widget-bridge.ts',
+  // 3D ビューア(v4.0 PR-12)。` ```3d ` の器と添付の 3D モデルの面に、adapter が描いた後に置く(markdown は placeholder まで)
+  'pkc-3d-viewer': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-toolbar': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-info': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-spacer': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-btn': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-stage': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-labels': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-label': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-card': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-note': 'src/adapter/ui/render/viewer-3d.ts',
+  'pkc-3d-canvas2d': 'src/adapter/ui/render/viewer-3d.ts',
   // 保存つきの器の原文の受け皿(本体の読む面だけ ── `liveWidgets`。既定の描画では出ない)
   'pkc-widget-source': 'src/features/markdown/widget-bridge.ts',
   // 表のセルを押したときに binder が差し込む入力欄(#418 段①)
@@ -364,6 +378,7 @@ const NO_STYLE_NEEDED: Readonly<Record<string, string>> = {
   'pkc-chart-placeholder': '器。状態は data-pkc-chart-state で見る(#188)',
   'pkc-plotly-placeholder': '器。状態は data-pkc-plotly-state で見る(#528)',
   'pkc-react-placeholder': '器。状態は data-pkc-react-state で見る(#528)',
+  'pkc-3d-placeholder': '器。状態は data-pkc-3d-state で見る(v4.0 PR-12)',
   'pkc-md-block': '器。中の切替や操作子に当てる起点',
   'pkc-render-slot': '描画面の器。隠す規則は切替側(:checked ~)に在る',
 };

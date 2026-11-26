@@ -8,6 +8,7 @@
  *
  * ⚠ **pure module**。browser API を使わない(要素を作るのは adapter)。
  */
+import { detect3dModelFormat } from '../viewer3d/model-format';
 
 /**
  * 🔴 **本文の中に置く再生機の印**(#413 段②)。
@@ -28,16 +29,27 @@ export const BODY_MEDIA_FIELD = 'body-media';
  */
 export const BODY_MEDIA_CLASS = 'pkc-body-media';
 
-/** 添付の見せ方。`null` = 画面には出せない(ダウンロードで開いてもらう)。 */
-export type AssetPreviewKind = 'text' | 'image' | 'video' | 'audio' | 'pdf' | null;
+/**
+ * 添付の見せ方。`null` = 画面には出せない(ダウンロードで開いてもらう)。
+ * 🔑 `'model3d'` = 3D モデル(GLB / glTF / STL / OBJ)── 詳細の添付の面でだけ 3D ビューアで出す
+ *   (v4.0 PR-12)。⚠ 別窓(`assetWindowKind`)・板の絵・書き出し HTML では出さない(保存の導線を残す)。
+ */
+export type AssetPreviewKind = 'text' | 'image' | 'video' | 'audio' | 'pdf' | 'model3d' | null;
 
 /**
- * MIME から見せ方を決める。
+ * MIME(と、渡されれば名前)から見せ方を決める。
  * ⚠ `text/*` と `application/json` は**中身を読んで出す**ので別扱い
  * (呼び側が `blob.slice` で先頭だけ読む)。
+ * 🔴 **3D モデルは `text` より先に見る**(PR-12)── ブラウザは `.obj` / ASCII の `.stl` を `text/plain`、
+ *   `.gltf` を `application/json` で渡すので、後に見ると字として出てしまう。判定は `detect3dModelFormat` の 1 本。
+ * ⚠ `fileName` は任意 ── 渡さない呼び出しは今までと同じ答え(3D の MIME を名乗った物だけ `model3d`)。
  */
-export function assetPreviewKind(mime: string | null | undefined): AssetPreviewKind {
+export function assetPreviewKind(
+  mime: string | null | undefined,
+  fileName?: string | null,
+): AssetPreviewKind {
   const m = mime ?? '';
+  if (detect3dModelFormat(m, fileName) !== null) return 'model3d';
   if (m.startsWith('text/') || m === 'application/json') return 'text';
   if (m.startsWith('image/')) return 'image';
   if (m.startsWith('video/')) return 'video';

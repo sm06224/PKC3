@@ -4785,6 +4785,131 @@ dd[data-pkc-field='inspector-toc'] {
   border: 0;
   display: block;
 }
+/* 3D シーン(` ```3d `。v4.0 PR-12)。⚠ 図と同じ扱い ── 原文はビューアを置けなかったときの受け皿として残す */
+.pkc-md-rendered .pkc-3d-source {
+  margin: 0;
+  font-size: 0.9em;
+}
+.pkc-md-rendered [data-pkc-3d-state='ready'] .pkc-3d-source,
+.pkc-md-rendered [data-pkc-3d-state='loading'] .pkc-3d-source {
+  display: none;
+}
+/* ⚠ 3D で描かない面(書き出した HTML など)では、なぜ原文なのかを 1 行で言う */
+.pkc-md-rendered [data-pkc-3d-src]:not([data-pkc-3d-state])::before {
+  content: '3D シーン(PKC3 で開くと 3D で表示します)';
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 4px;
+}
+/* ⚠ 読めなかったときは**理由を見せる**(黙って原文だけ出さない) */
+.pkc-md-rendered [data-pkc-3d-state='failed']::before {
+  content: attr(data-pkc-3d-error);
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 4px;
+}
+/* 3D ビューア(添付の 3D モデルと ` ```3d ` の共通)。⚠ 1 単位の情報 = カード(紙の地・角丸・ヘアライン) */
+.pkc-3d-viewer {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin: var(--s2) 0;
+}
+.pkc-3d-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  padding: var(--s1) var(--s2);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+.pkc-3d-info {
+  color: var(--muted);
+}
+.pkc-3d-info[data-pkc-3d-info='format'] {
+  color: var(--fg);
+  font-weight: 600;
+}
+.pkc-3d-spacer {
+  flex: 1 1 auto;
+}
+.pkc-3d-btn {
+  font-size: var(--btn-fs-sm);
+}
+/* 切替の入は形(太字)で示す ── 色は意味にだけ使う */
+.pkc-3d-btn[aria-pressed='true'] {
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--fg);
+}
+.pkc-3d-stage {
+  position: relative;
+  width: 100%;
+  min-height: 160px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.pkc-3d-stage:active {
+  cursor: grabbing;
+}
+.pkc-3d-stage:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* ポスター(畳んだときの静止画)・2D の簡易表示も描画面いっぱいに */
+.pkc-3d-stage > canvas,
+.pkc-3d-stage > .pkc-3d-canvas2d,
+.pkc-3d-stage > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.pkc-3d-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.pkc-3d-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.pkc-3d-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s1);
+  padding: var(--s3);
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.pkc-3d-card > strong {
+  color: var(--fg);
+  font-size: var(--fs-md);
+}
+.pkc-3d-note {
+  margin: 0;
+  padding: var(--s1) var(--s2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
 /* ウィジェット(` ```html id="…" `。PR-07)。⚠ 原文は箱を置けなかった面(書き出し等)の受け皿として残す */
 .pkc-md-rendered .pkc-widget-source {
   margin: 0;

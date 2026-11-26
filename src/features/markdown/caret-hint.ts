@@ -40,6 +40,7 @@ const FENCE_NAMES: Readonly<Record<RenderableFenceLang, string>> = {
   chart: 'グラフ(chart)',
   plotly: 'グラフ(plotly)',
   react: 'React コンポーネント',
+  '3d': '3D シーン(3d)',
   html: 'html の埋め込み',
   svg: 'svg の図',
 };

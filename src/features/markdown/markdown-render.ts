@@ -328,12 +328,12 @@ const defaultFence = md.renderer.rules.fence ??
 //    の無い独立 document のため、JS 配線ゼロで全 surface に効く方式を正とする。
 
 export type RenderableFenceLang =
-  | 'html' | 'svg' | 'mermaid' | 'chart' | 'plotly' | 'react' | 'csv' | 'tsv' | 'psv';
+  | 'html' | 'svg' | 'mermaid' | 'chart' | 'plotly' | 'react' | '3d' | 'csv' | 'tsv' | 'psv';
 export type RenderableFenceMode = 'both' | 'render' | 'norender';
 
 /** ⚠ 公開しているのは `tests/docs-parity.test.ts` がマニュアルと突合するため。 */
 export const RENDERABLE_FENCE_LANGS: ReadonlySet<string> = new Set([
-  'html', 'svg', 'mermaid', 'chart', 'plotly', 'react', 'csv', 'tsv', 'psv',
+  'html', 'svg', 'mermaid', 'chart', 'plotly', 'react', '3d', 'csv', 'tsv', 'psv',
 ]);
 
 export interface RenderableFence {
@@ -378,8 +378,8 @@ export function parseRenderableFence(info: string | null | undefined): Renderabl
 
 /** norender / render-失敗 fallback 用のソース表示(base lang で highlight)。 */
 function renderFenceSourceHtml(content: string, lang: RenderableFenceLang): string {
-  // 🔑 react は JSX として彩色する(highlight の言語名は jsx)
-  const hl = lang === 'react' ? 'jsx' : lang;
+  // 🔑 react は JSX、3d は JSON として彩色する(highlight の言語名は jsx / json)
+  const hl = lang === 'react' ? 'jsx' : lang === '3d' ? 'json' : lang;
   return `<pre><code class="language-${hl}">${highlightCode(content, hl)}</code></pre>`;
 }
 
@@ -503,6 +503,16 @@ function buildRenderableSlotHtml(
        */
       const escapedPlotly = md.utils.escapeHtml(content);
       return `<div class="pkc-plotly-placeholder" data-pkc-plotly-src="${escapedPlotly}" data-pkc-md-block-kind="plotly"><pre class="pkc-plotly-source"><code class="language-plotly">${escapedPlotly}</code></pre></div>`;
+    }
+    case '3d': {
+      /**
+       * 🔴 **3D シーン(v4.0 PR-12)── mermaid / chart と同じ形**。placeholder だけを出し、描くのは adapter
+       * (`viewer-3d.ts` の `hydrate3d`。Three.js は見えてから遅延で読む)。features 層は DOM も three も持たない。
+       * ⚠ 原文は属性に持つ ── 同じ塊の HTML が変わらないことが、動いている 3D ビューアを無関係な編集で
+       *   作り直さないための条件である。
+       */
+      const escaped3d = md.utils.escapeHtml(content);
+      return `<div class="pkc-3d-placeholder" data-pkc-3d-src="${escaped3d}" data-pkc-md-block-kind="3d"><pre class="pkc-3d-source"><code class="language-json">${escaped3d}</code></pre></div>`;
     }
     case 'react': {
       /**
