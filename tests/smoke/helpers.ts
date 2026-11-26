@@ -194,6 +194,10 @@ export async function useSplitEditor(page: Page): Promise<void> {
     // ⚠ init script は**全 frame**で走る ── sandbox 化された html fence の
     //   iframe(allow-same-origin 無し)では localStorage を**読むだけで throw**
     //   し、pageerror として計上される(fence-render smoke で実際に踏んだ)
+    // 🔴 **トップの frame だけで書く**(PR-07)── `id=` の在るウィジェットの箱は `localStorage` を差し替えて
+    //   親へ保存を渡すので、ここで書くと**アプリの設定の鍵がウィジェットの保存に入る**(実測:
+    //   `pkc3.widget.<lid>.counter.pkc3.editor-mode` が出来て「状態を初期化」が最初から押せた)
+    if (window !== window.top) return;
     try {
       localStorage.setItem('pkc3.editor-mode', 'split');
     } catch {

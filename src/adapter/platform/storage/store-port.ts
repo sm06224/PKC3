@@ -11,6 +11,7 @@ import type { EntryMetaRow } from './schema';
 import type { RelationRow } from './protocol';
 import type { StoreClientLike } from './store-proxy';
 import { clearAppStorage } from '@adapter/platform/app-storage';
+import { clearEntryWidgetStorage } from '@adapter/platform/widget-storage';
 
 export function relationFromRow(row: RelationRow): Relation {
   return {
@@ -273,7 +274,11 @@ export function createStorePort(client: StoreClientLike, cid: string): StorePort
       const res = await client.request({ op: 'purgeTrash', cid, ...(only === undefined ? {} : { lid: only }) });
       // 🔴 1 件だけ消した回は、その lid の保存領域だけ畳む(ほかのゴミ箱のノートは戻せるまま)
       for (const lid of new Set(trash.map((r) => r.entry_lid)))
-        if (only === undefined || lid === only) clearAppStorage(lid);
+        if (only === undefined || lid === only) {
+          clearAppStorage(lid);
+          // 🔑 ノートに埋め込んだウィジェットの保存も同じ不可逆点で畳む(PR-07 ── ゴミを残さない)
+          clearEntryWidgetStorage(lid);
+        }
       return res;
     },
   };

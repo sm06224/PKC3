@@ -392,6 +392,14 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '保存のキーではない。組み込みアプリとのやりとりに使う合図の名前',
   },
   {
+    key: 'pkc3.widget.',
+    why: 'ノートに埋め込んだウィジェットが保存した値の置き場(前置き)。ノートごとに付き、その端末だけのデータなので運ばない',
+  },
+  {
+    key: 'pkc3.widget.storage',
+    why: '保存のキーではない。ノートに埋め込んだウィジェットとのやりとりに使う合図の名前(保存そのものはノートごとに付くので運ばない)',
+  },
+  {
     key: 'pkc3.ext.port',
     why: '保存のキーではない。拡張とのやりとりに使う合図の名前',
   },

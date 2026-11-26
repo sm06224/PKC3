@@ -214,6 +214,11 @@ function styled(): { classes: Set<string>; attrs: Set<string> } {
 const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // React の囲みを描く隔離した枠(#528 ②)。描いた後に、見えたときに adapter が器へ置く(markdown は placeholder まで)
   'pkc-react-frame': 'src/adapter/ui/render/react-sandbox.ts',
+  // ウィジェットの箱と「状態を初期化」のバー(PR-07)。見えたときに adapter が器へ置く
+  'pkc-widget-frame': 'src/adapter/ui/render/widget-bridge.ts',
+  'pkc-widget-bar': 'src/adapter/ui/render/widget-bridge.ts',
+  // 保存つきの器の原文の受け皿(本体の読む面だけ ── `liveWidgets`。既定の描画では出ない)
+  'pkc-widget-source': 'src/features/markdown/widget-bridge.ts',
   // 表のセルを押したときに binder が差し込む入力欄(#418 段①)
   'pkc-csv-cell-input': 'src/adapter/ui/actions/binder.ts',
   // 表のセルを打っている間だけ、升の右上に binder が差し込むセルの名前(B2 など。#1662 の 4)

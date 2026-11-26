@@ -1,5 +1,6 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
+import { installWidgetBridge } from '@adapter/ui/render/widget-bridge';
 import { errorText, diagramExportErrorText } from '@features/error-text';
 import { APP_GROUP_REORDER_OK_LABEL, FOLDER_EXPORT_NOTE } from '@features/entry-actions';
 import { bootFailureText } from '@features/boot-failure-text';
@@ -6986,6 +6987,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // ⚠ 別 document の surface(Viewer popup 等、P3-8)には効かない ── その
   // document ごとに再結線が要る(PKC2 で entry-window が高さ 0 のままだった教訓)
   installHtmlSandboxResizer();
+  // 🔑 ノートに埋め込んだウィジェットのテーマ配信と保存の受け口(PR-07)。配色の見張りは箱が来てから付く
+  installWidgetBridge();
   /**
    * 🔴 **箱が「外部画像を止めた」と言ってきたら帯を出す**(2026-08-06)。
    *
