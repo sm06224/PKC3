@@ -284,6 +284,14 @@ describe('🔴 選択同期(#2066 段 5-A)の設定の行', () => {
       full.close();
     }
     expect(await syncScopesIn((await w.request({ op: 'exportImage', withoutMessages: true })).image), '選択の行が人に渡る画像に入った').toEqual([]);
+    // 既定に戻すと行そのものが消える(読みの既定値の補完で同じ値に見えても、行が残っていれば落ちる)
+    await w.request({ op: 'syncSetSelectiveScope', cid: 'c1', mode: 'all', related: '1hop', remove: ['a'] });
+    const back = await openRaw((await w.request({ op: 'exportImage' })).image);
+    try {
+      expect(back.selectObjects(`SELECT k FROM settings WHERE scope = '__sync__:c1'`).map((r) => String(r.k)), '既定値の行が残った').toEqual([]);
+    } finally {
+      back.close();
+    }
   }, 60_000);
 
   it('ワークスペースの削除で、そのワークスペースの選択の行も消える(他のワークスペースは残る)', async () => {

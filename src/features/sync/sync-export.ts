@@ -59,7 +59,8 @@ export function selectiveStates<T extends { key: string }>(states: readonly T[],
 
 /**
  * 運んでよい削除の記録(選択同期のとき)。🔴 S の外の私的なノートを消した記録は漏らさない ──
- * 運ぶのは、相手との記録に在った物(= 相手も持っていた)・S / 直接指定に関わる物だけ。いま生きているキーの記録は運ばない。
+ * 運ぶのは、相手との記録に在った物(= 相手も持っていた)・直接指定していた物・選択のフォルダの中で消した物だけ。
+ * いま生きているキーの記録は運ばない(⚠ S は生きているノートだけなので、消したノートの lid は S に居ない ── S では判定しない)。
  */
 function selectiveTombstones(tombs: readonly Tombstone[], sel: SelectiveExport, peerKeys: ReadonlySet<string>): Tombstone[] {
   const places = new Set<string>();
@@ -68,7 +69,6 @@ function selectiveTombstones(tombs: readonly Tombstone[], sel: SelectiveExport, 
     (t) =>
       !sel.allLiveKeys.has(t.key) &&
       (peerKeys.has(t.key) ||
-        sel.selectedLids.has(t.key) ||
         sel.sharedKeys?.has(t.key) === true ||
         (t.lastFp.place !== undefined && places.has(t.lastFp.place))),
   );
