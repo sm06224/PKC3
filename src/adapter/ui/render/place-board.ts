@@ -47,7 +47,9 @@ import {
   parsePlaceColor,
   parsePlaceWidth,
   PLACE_ARROWS,
+  placeFillOf,
   placeInkOf,
+  placeStrokeOf,
   type PlaceArrow,
 } from '@features/markdown/place-color';
 // 🔑 名前に使える字は 1 か所から読む(#530、§7 ── 綴りを写して増やさない)
@@ -66,6 +68,8 @@ const PLACE_FALLBACK_H = 40;
 /** 枠がこの高さ(px)より低いとき、題名の帯の余白を詰める印(`app.css` の `[data-pkc-place-compact]`)。 */
 export const PLACE_COMPACT_BELOW_H = 64;
 const PLACE_COMPACT_ATTR = 'data-pkc-place-compact';
+/** 地も枠も無い付箋の印(手書きを焼いた付箋。v4.0 Phase 2 / PR-10)。 */
+const PLACE_BARE_ATTR = 'data-pkc-place-bare';
 
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
 
@@ -712,9 +716,10 @@ export function applyPlaceLayout(
 
     const useW = w ?? (sized ? PLACE_ENTRY_DEFAULT_W : null);
     const useH = h ?? (sized ? PLACE_ENTRY_DEFAULT_H : null);
-    const fill = parsePlaceColor(el.getAttribute('data-pkc-fill'));
-    const ink = fill === null ? null : placeInkOf(fill);
-    const stroke = parsePlaceColor(el.getAttribute('data-pkc-stroke'));
+    // 🔑 `fill=transparent` / `stroke=none` は「なし」(手書きを焼いた付箋。v4.0 Phase 2 / PR-10)
+    const fill = placeFillOf(el.getAttribute('data-pkc-fill'));
+    const ink = fill === null || fill === 'transparent' ? null : placeInkOf(fill);
+    const stroke = placeStrokeOf(el.getAttribute('data-pkc-stroke'));
     const rot = placeRotateOf(el.getAttribute('data-pkc-rotate'));
     const src = intAttr(el, 'data-pkc-source-line');
     const line = src !== null ? String(src + lineOffset) : null;
@@ -764,6 +769,8 @@ export function applyPlaceLayout(
     setStyleVar(el, '--pkc-place-fill', fill);
     setStyleVar(el, '--pkc-place-ink', ink);
     setStyleVar(el, '--pkc-place-stroke', stroke);
+    // 🔴 地も枠も無い付箋(焼いた絵)は余白も外し、絵を枠いっぱいに出す(`app.css`)
+    el.toggleAttribute(PLACE_BARE_ATTR, fill === 'transparent' && stroke === 'transparent');
     // 🔴 回転(#530 段⑤d)── 中心の周りに回す(`transform-origin` は既定の中心)。`left` / `top` / `width` / `height` は変えない
     if (rot !== 0) el.style.transform = `rotate(${rot}deg)`;
     else el.style.removeProperty('transform');

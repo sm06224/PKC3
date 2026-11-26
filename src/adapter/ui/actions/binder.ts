@@ -90,6 +90,8 @@ import {
 import { parsePlaceRotate } from '@features/markdown/place-rotate';
 import { isPlacePosition, PLACE_RECT_MAX } from '@features/markdown/place-rect';
 import { boardPointOf, canvasBackgroundTarget, isCanvasHost } from '@adapter/ui/render/canvas-viewport';
+import { graphViewOf } from '@adapter/ui/render/graph';
+import { GRAPH_BOARD_DEFAULT_TITLE, graphViewToBoardMarkdown } from '@features/canvas/graph-to-board';
 import {
   parsePlaceColor,
   parseArrowSpell,
@@ -3625,6 +3627,8 @@ const BODY_WRITE_ACTIONS: ReadonlySet<string> = new Set([
   // 🔑 **行の右クリックからフォルダの中に作る**(#215)── `create-entry` と同じ
   //    `CREATE_ENTRY` を撃つので、同じ門をくぐらせる
   'create-in-folder',
+  // 🔑 **関係グラフをボードで開く**(v4.0 Phase 2 / PR-10)── `CREATE_ENTRY` でボードのノートを作るので同じ門
+  'graph-open-board',
   // 🔑 **右クリックから入る編集も同じ門**(#426 段②。着地前レビュー 🔴1)──
   //    載せ忘れると「取り込み中は帯からは断られ、メニューからは通る」になる
   'edit-from-heading',
@@ -10678,6 +10682,35 @@ const ACTIONS: Record<string, ActionHandler> = {
   'graph-depth': (dispatcher, target) => {
     const n = Number(target.getAttribute('data-pkc-graph-depth'));
     if (Number.isFinite(n)) dispatcher.dispatch({ type: 'SET_GRAPH_VIEW', depth: n });
+  },
+  /**
+   * 🔴 **関係グラフをボードで開く**(v4.0 Phase 2 / PR-10、ビジョン 2-B)── いま見ている図を、`layout: canvas` の
+   *   ボード(`entry=` の付箋 + `.pkc-line`)の新しいノートにして開く。図は描画と同じ `graphViewOf` の 1 本から組む。
+   * ⚠ 新しいデータ形式は作らない(本文は PKC-Markdown)。編集中は作らない(理由を出す)。
+   */
+  'graph-open-board': (dispatcher) => {
+    const st = dispatcher.getState();
+    if (st.phase !== 'ready') {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: `${phaseBlockReason(st.phase)}ボードを作ってください` });
+      return;
+    }
+    const view = graphViewOf(st);
+    if (view === null || view.nodes.length === 0) {
+      dispatcher.dispatch({ type: 'OP_FAILED', error: 'ボードにするつながりがありません' });
+      return;
+    }
+    const lid = generateLid();
+    dispatcher.dispatch({
+      type: 'CREATE_ENTRY',
+      archetype: 'text',
+      lid,
+      title: GRAPH_BOARD_DEFAULT_TITLE,
+      body: graphViewToBoardMarkdown(view),
+      edit: false,
+    });
+    // 🔑 作れたときだけ本文の画面へ切り替える(作れなかったのに画面だけ動かさない)
+    const now = dispatcher.getState();
+    if (now.entryMetas.has(lid) && now.viewMode !== 'detail') dispatcher.dispatch({ type: 'SET_VIEW_MODE', mode: 'detail' });
   },
   /** 🔴 **やめる**(#683 段①)── 器へ返すのは描画器の `syncBorrow` が引き取る。 */
   'capture-stop': (dispatcher) => {
@@ -22046,6 +22079,11 @@ export function bindActions(
        *   閉じていた(保存しても、手書きを置く先の板が無くなる)。
        */
       if ((ev.target as HTMLElement | null)?.closest('[data-pkc-browse-pane="draw"]')) return;
+      /**
+       * 🔴 **「グラフ」のタブの中も、「何も無い所」ではない**(v4.0 Phase 2 / PR-10)。⚠ ズームのボタン・図の背景を押した
+       *   だけで読んでいるノートが閉じると、「選んだノートから」の図がその場で消える(実ブラウザで踏んだ)。
+       */
+      if ((ev.target as HTMLElement | null)?.closest('[data-pkc-browse-pane="graph"]')) return;
       const host = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
         '[data-pkc-region="browse-host"]',
       );

@@ -25,6 +25,8 @@ import {
   CANVAS_ATTR,
   canvasBackgroundTarget,
   canvasCameraOf,
+  canvasDrawSession,
+  canvasSelectionCount,
   canvasZoomOf,
   CULLED_ATTR,
   flushCanvasFrame,
@@ -493,5 +495,463 @@ describe('カメラの記憶(本文は汚さない)', () => {
     const again = board();
     expect(syncBoardView(again, 'n1', BOARD)).toBe(true);
     expect(canvasCameraOf(again)).toEqual(cam);
+  });
+});
+
+/* ───────────────── v4.0 Phase 2 / PR-10(ビジョン 2-B): 複数選択・整列・手書き ───────────────── */
+
+/**
+ * 器の外形を、実物と同じくカメラ込みで返す(happy-dom は transform を測らない)。
+ * 枠の左上 = 画面の (0, 0) としたとき、器の左上 = (−cam.x·zoom, −cam.y·zoom)。
+ */
+function liveHostRect(host: HTMLElement, offsetTop = 0): void {
+  host.getBoundingClientRect = () => {
+    const cam = canvasCameraOf(host) ?? { x: 0, y: 0, zoom: 1 };
+    const left = -cam.x * cam.zoom;
+    const top = -cam.y * cam.zoom + offsetTop;
+    return { left, top, right: left, bottom: top, width: 0, height: 0, x: left, y: top, toJSON: () => ({}) } as DOMRect;
+  };
+}
+
+describe('🔴 複数選択(Shift + クリック / 範囲選択)→ 一括移動・整列・グループ', () => {
+  function canvasWithPorts() {
+    const host = board();
+    const { d, events } = booted();
+    const moves: Array<{ lid: string; moves: ReadonlyArray<{ line: number; x: number; y: number }> }> = [];
+    const groups: Array<{ lid: string; lines: readonly number[] }> = [];
+    offs.push(
+      installCanvasViewport(document.body, {
+        setDefault: () => {},
+        movePlaces: (lid, m) => {
+          moves.push({ lid, moves: m });
+          d.dispatch({ type: 'MOVE_PLACES', lid, moves: m });
+        },
+        groupPlaces: (lid, lines) => groups.push({ lid, lines }),
+      }),
+    );
+    offs.push(installPlaceDrag(document.body, d));
+    syncBoardView(host, 'n1', BOARD);
+    cmd('mode').click();
+    const vp = sizeViewport(800, 600);
+    cmd('zoom-reset').click();
+    // 枠の左上を画面の (0, 0)、カメラを原点へ(ワールド = 画面)
+    vp.getBoundingClientRect = () => ({ left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, x: 0, y: 0, toJSON: () => ({}) });
+    cmd('fit').click();
+    liveHostRect(host);
+    events.length = 0;
+    return { host, vp, d, events, moves, groups };
+  }
+  const p1 = (host: HTMLElement) => host.querySelector<HTMLElement>('#p1')!;
+  const p2 = (host: HTMLElement) => host.querySelector<HTMLElement>('#p2')!;
+  function shiftClick(el: HTMLElement, id = 21): void {
+    const o = { bubbles: true, pointerId: id, button: 0, shiftKey: true, clientX: 5, clientY: 5 };
+    el.dispatchEvent(new PointerEvent('pointerdown', o));
+    el.dispatchEvent(new PointerEvent('pointerup', o));
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+  }
+
+  it('付箋が 1 枚も選ばれていない間は「整列 ▾」「グループにする」を出さない(1 段奥)', () => {
+    const { host } = canvasWithPorts();
+    expect(cmd('align').hidden).toBe(true);
+    expect(cmd('group').hidden).toBe(true);
+    expect(host.querySelectorAll('[data-pkc-canvas-selected]')).toHaveLength(0);
+  });
+
+  it('🔴 Shift + クリックで足す・外す。2 枚選ぶと「整列 ▾」が出る', () => {
+    const { host } = canvasWithPorts();
+    shiftClick(p1(host).querySelector('h3')!);
+    expect(p1(host).getAttribute('data-pkc-canvas-selected')).toBe('1');
+    expect(cmd('align').hidden).toBe(true);
+    shiftClick(p2(host));
+    expect(p2(host).getAttribute('data-pkc-canvas-selected')).toBe('1');
+    expect(cmd('align').hidden).toBe(false);
+    expect(cmd('group').hidden).toBe(false);
+    shiftClick(p1(host));
+    expect(p1(host).hasAttribute('data-pkc-canvas-selected')).toBe(false);
+    expect(cmd('align').hidden).toBe(true);
+  });
+
+  it('🔴 Shift + 背景のドラッグで範囲選択(重なる付箋だけ)。背景のクリックで外す', () => {
+    const { host, vp } = canvasWithPorts();
+    const cam = canvasCameraOf(host)!;
+    // ワールド (100, 30)〜(500, 300) ── p1(120..440)だけに重なる
+    const s = { x: (100 - cam.x) * cam.zoom, y: (30 - cam.y) * cam.zoom };
+    const e = { x: (500 - cam.x) * cam.zoom, y: (300 - cam.y) * cam.zoom };
+    const o = { bubbles: true, pointerId: 31, button: 0, shiftKey: true };
+    vp.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: s.x, clientY: s.y }));
+    vp.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: e.x, clientY: e.y }));
+    expect(vp.querySelector('[data-pkc-field="canvas-marquee"]')).not.toBeNull();
+    vp.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: e.x, clientY: e.y }));
+    expect(vp.querySelector('[data-pkc-field="canvas-marquee"]')).toBeNull();
+    expect(p1(host).getAttribute('data-pkc-canvas-selected')).toBe('1');
+    expect(p2(host).hasAttribute('data-pkc-canvas-selected')).toBe(false);
+    // 背景を押しただけ(動かさない)で外れる
+    const c = { bubbles: true, pointerId: 32, button: 0 };
+    vp.dispatchEvent(new PointerEvent('pointerdown', { ...c, clientX: 700, clientY: 590 }));
+    vp.dispatchEvent(new PointerEvent('pointerup', { ...c, clientX: 700, clientY: 590 }));
+    expect(host.querySelectorAll('[data-pkc-canvas-selected]')).toHaveLength(0);
+  });
+
+  it('「選択」を押している間は、Shift なしの背景のドラッグも範囲選択(パンしない)', () => {
+    const { host, vp } = canvasWithPorts();
+    cmd('select').click();
+    expect(cmd('select').getAttribute('aria-pressed')).toBe('true');
+    const before = canvasCameraOf(host)!;
+    const o = { bubbles: true, pointerId: 33, button: 0 };
+    vp.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: 1, clientY: 1 }));
+    vp.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: 799, clientY: 599 }));
+    vp.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: 799, clientY: 599 }));
+    expect(canvasCameraOf(host)).toEqual(before);
+    expect(host.querySelectorAll('[data-pkc-canvas-selected="1"]')).toHaveLength(2);
+    cmd('select').click();
+    expect(cmd('select').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('Esc で選択を外す(何も選んでいなければ Esc を素通しにする)', () => {
+    const { host, vp } = canvasWithPorts();
+    shiftClick(p1(host));
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    vp.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect(host.querySelectorAll('[data-pkc-canvas-selected]')).toHaveLength(0);
+    const esc2 = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    vp.dispatchEvent(esc2);
+    expect(esc2.defaultPrevented).toBe(false);
+  });
+
+  it('🔴 選んだ 1 枚の ⠿ を掴むと全員が動き、書くのは MOVE_PLACES 1 回(place-move-group)', () => {
+    const { host, events } = canvasWithPorts();
+    shiftClick(p1(host));
+    shiftClick(p2(host));
+    const z = canvasZoomOf(host);
+    const grip = p1(host).querySelector<HTMLElement>('[data-pkc-field="place-grip"]')!;
+    const o = { bubbles: true, pointerId: 41, button: 0 };
+    grip.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: 0, clientY: 0 }));
+    document.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: 50 * z, clientY: 20 * z }));
+    expect(p2(host).style.left).toBe('650px');
+    document.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: 50 * z, clientY: 20 * z }));
+    const rewrites = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(rewrites).toHaveLength(1);
+    expect(rewrites[0]).toMatchObject({
+      rewrite: {
+        kind: 'place-move-group',
+        moves: [
+          { line: 0, x: 170, y: 60 },
+          { line: 4, x: 650, y: 60 },
+        ],
+      },
+    });
+  });
+
+  it('対照群: 選んでいない付箋を掴んでも 1 枚だけ動く(MOVE_PLACE)', () => {
+    const { host, events } = canvasWithPorts();
+    shiftClick(p2(host));
+    const z = canvasZoomOf(host);
+    const grip = p1(host).querySelector<HTMLElement>('[data-pkc-field="place-grip"]')!;
+    const o = { bubbles: true, pointerId: 42, button: 0 };
+    grip.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: 0, clientY: 0 }));
+    document.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: 50 * z, clientY: 0 }));
+    document.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: 50 * z, clientY: 0 }));
+    expect(events.find((e) => e.type === 'REQUEST_BODY_REWRITE')).toMatchObject({
+      rewrite: { kind: 'place-move', line: 0, x: 170, y: 40 },
+    });
+  });
+
+  it('🔴 「整列 ▾ → 左揃え」は MOVE_PLACES 1 回。2 枚では等間隔が押せない', () => {
+    const { host, events, moves } = canvasWithPorts();
+    shiftClick(p1(host));
+    shiftClick(p2(host));
+    cmd('align').click();
+    const menu = bar().querySelector('[data-pkc-field="canvas-align-menu"]')!;
+    expect(menu).not.toBeNull();
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('[data-pkc-canvas-align]')];
+    expect(items.map((b) => b.textContent)).toEqual([
+      '左揃え',
+      '左右中央揃え',
+      '右揃え',
+      '上揃え',
+      '上下中央揃え',
+      '下揃え',
+      '左右に等間隔',
+      '上下に等間隔',
+    ]);
+    expect(items.filter((b) => b.disabled).map((b) => b.getAttribute('data-pkc-canvas-align'))).toEqual([
+      'distribute-x',
+      'distribute-y',
+    ]);
+    items[0]!.click();
+    expect(bar().querySelector('[data-pkc-field="canvas-align-menu"]')).toBeNull();
+    // 動くのは p2 だけ(p1 はもう左端)
+    expect(moves).toEqual([{ lid: 'n1', moves: [{ line: 4, x: 120, y: 40 }] }]);
+    const rewrites = events.filter((e) => e.type === 'REQUEST_BODY_REWRITE');
+    expect(rewrites).toHaveLength(1);
+    expect(rewrites[0]).toMatchObject({ rewrite: { kind: 'place-move-group', moves: [{ line: 4, x: 120, y: 40 }] } });
+  });
+
+  it('上揃えはすでに揃っていれば何も書かない(空の書込を出さない)', () => {
+    const { host, moves } = canvasWithPorts();
+    shiftClick(p1(host));
+    shiftClick(p2(host));
+    cmd('align').click();
+    bar().querySelector<HTMLButtonElement>('[data-pkc-canvas-align="top"]')!.click();
+    expect(moves).toEqual([]);
+  });
+
+  it('「グループにする」は選んだ付箋の開き行で GROUP_PLACES の口を呼ぶ', () => {
+    const { host, groups } = canvasWithPorts();
+    shiftClick(p1(host));
+    shiftClick(p2(host));
+    cmd('group').click();
+    expect(groups).toEqual([{ lid: 'n1', lines: [0, 4] }]);
+  });
+
+  it('🔴 回した付箋は回した外接四角で揃え、本文の x= には同じだけずらした値を書く', () => {
+    const rot = RENDERED.replace('id="p2"', 'id="p2" data-pkc-rotate="90"');
+    const host = board(rot);
+    const moves: Array<ReadonlyArray<{ line: number; x: number; y: number }>> = [];
+    offs.push(installCanvasViewport(document.body, { setDefault: () => {}, movePlaces: (_l, m) => moves.push(m) }));
+    syncBoardView(host, 'n1', BOARD);
+    cmd('mode').click();
+    sizeViewport(800, 600);
+    liveHostRect(host);
+    shiftClick(p1(host));
+    shiftClick(p2(host));
+    cmd('align').click();
+    bar().querySelector<HTMLButtonElement>('[data-pkc-canvas-align="left"]')!.click();
+    // p2: 200 × 100 を 90° 回すと外接四角は x 650..750(中心 700)。左端を 120 へ → 本文の x= は 600 − 530 = 70
+    expect(moves).toEqual([[{ line: 4, x: 70, y: 40 }]]);
+  });
+
+  it('🔴 本文の行の数が変わったら、開き行で覚えた選択は捨てる(別の付箋を指さない)/ id で覚えた選択は残す', () => {
+    const noId = RENDERED.replace(' id="p2"', '');
+    const host = board(noId);
+    offs.push(installCanvasViewport(document.body, { setDefault: () => {} }));
+    syncBoardView(host, 'n1', BOARD);
+    cmd('mode').click();
+    sizeViewport(800, 600);
+    shiftClick(p1(host));
+    const second = host.querySelectorAll<HTMLElement>('.pkc-place')[1]!;
+    shiftClick(second);
+    expect(canvasSelectionCount(host)).toBe(2);
+    // 動かした(行の数は同じ)→ 残る
+    syncBoardView(host, 'n1', BOARD.replace('x=600', 'x=640'));
+    expect(canvasSelectionCount(host)).toBe(2);
+    // 上に 1 行足した(行がずれた)→ 開き行の選択だけ捨てる
+    syncBoardView(host, 'n1', `メモ\n${BOARD.replace('x=600', 'x=640')}`);
+    expect(canvasSelectionCount(host)).toBe(1);
+    expect(p1(host).getAttribute('data-pkc-canvas-selected')).toBe('1');
+    expect(second.hasAttribute('data-pkc-canvas-selected')).toBe(false);
+  });
+
+  it('開き行の印が無い付箋は、グループにしない(行 0 の別の付箋を巻き込まない)', () => {
+    const { host, groups } = canvasWithPorts();
+    shiftClick(p1(host));
+    shiftClick(p2(host));
+    p2(host).removeAttribute('data-pkc-place-line');
+    cmd('group').click();
+    expect(groups).toEqual([]);
+  });
+
+  it('選択は描き直し(syncBoardView)の後も保ち、通常表示へ戻すと外れる', () => {
+    const { host } = canvasWithPorts();
+    shiftClick(p1(host));
+    syncBoardView(host, 'n1', BOARD);
+    expect(p1(host).getAttribute('data-pkc-canvas-selected')).toBe('1');
+    cmd('mode').click();
+    expect(host.querySelectorAll('[data-pkc-canvas-selected]')).toHaveLength(0);
+  });
+});
+
+describe('🔴 手書き(描く面の生成・置く・終了時の破棄)', () => {
+  function drawCanvas(opts: { blocked?: string | null; place?: (png: Blob, rect: unknown) => Promise<boolean> } = {}) {
+    const host = board();
+    const placed: Array<{ lid: string; png: Blob; rect: unknown }> = [];
+    offs.push(
+      installCanvasViewport(document.body, {
+        setDefault: () => {},
+        writeBlocked: () => opts.blocked ?? null,
+        placeDrawing: async (lid, png, rect) => {
+          placed.push({ lid, png, rect });
+          return opts.place ? opts.place(png, rect) : true;
+        },
+      }),
+    );
+    syncBoardView(host, 'n1', BOARD);
+    cmd('mode').click();
+    const vp = sizeViewport(800, 600);
+    vp.getBoundingClientRect = () => ({ left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, x: 0, y: 0, toJSON: () => ({}) });
+    cmd('zoom-reset').click();
+    liveHostRect(host);
+    return { host, vp, placed };
+  }
+  const surfaceOf = (vp: HTMLElement) => vp.querySelector<HTMLCanvasElement>('[data-pkc-field="canvas-draw-surface"]');
+  function stroke(el: HTMLElement, pts: Array<[number, number]>, id = 51): void {
+    const o = { bubbles: true, pointerId: id, button: 0 };
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: pts[0]![0], clientY: pts[0]![1] }));
+    for (const [x, y] of pts.slice(1)) el.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: x, clientY: y }));
+    el.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: pts.at(-1)![0], clientY: pts.at(-1)![1] }));
+  }
+  /** happy-dom は 2D の描画も PNG 化も持たない ── 呼ばれたことだけ記録する偽物を当てる。 */
+  function fakeCanvas2d(): () => void {
+    const proto = HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
+    const had = { getContext: proto.getContext, toBlob: proto.toBlob };
+    const ctx = new Proxy({}, { get: () => () => {}, set: () => true });
+    proto.getContext = function () {
+      return ctx;
+    };
+    proto.toBlob = function (cb: (b: Blob | null) => void) {
+      cb(new Blob(['png'], { type: 'image/png' }));
+    };
+    return () => {
+      proto.getContext = had.getContext;
+      proto.toBlob = had.toBlob;
+    };
+  }
+
+  it('🔴 押すまで <canvas> は DOM に無い(定常コスト 0)', () => {
+    const { vp } = drawCanvas();
+    expect(vp.querySelector('canvas')).toBeNull();
+    expect(cmd('draw').hidden).toBe(false);
+    expect(cmd('draw').disabled).toBe(false);
+  });
+
+  it('書けないノート(編集中など)では押せず、理由を題に出す', () => {
+    const { vp } = drawCanvas({ blocked: '編集中です' });
+    expect(cmd('draw').disabled).toBe(true);
+    expect(cmd('draw').title).toContain('編集中です');
+    cmd('draw').click();
+    expect(vp.querySelector('canvas')).toBeNull();
+  });
+
+  it('🔴 描いて「やめる」と、保存せずに <canvas> ごと DOM から外す', () => {
+    const { host, vp, placed } = drawCanvas();
+    cmd('draw').click();
+    expect(cmd('draw').getAttribute('aria-pressed')).toBe('true');
+    const surface = surfaceOf(vp)!;
+    expect(surface).not.toBeNull();
+    const bar2 = vp.querySelector('[data-pkc-field="canvas-draw-bar"]')!;
+    expect(bar2.querySelectorAll('[data-pkc-draw-color]')).toHaveLength(4);
+    expect(bar2.querySelectorAll('[data-pkc-draw-width]')).toHaveLength(3);
+    stroke(surface, [[10, 10], [60, 40]]);
+    expect(canvasDrawSession(host)!.strokes).toHaveLength(1);
+    bar2.querySelector<HTMLButtonElement>('[data-pkc-draw-cmd="cancel"]')!.click();
+    expect(vp.querySelector('canvas')).toBeNull();
+    expect(vp.querySelector('[data-pkc-field="canvas-draw"]')).toBeNull();
+    expect(canvasDrawSession(host)).toBeNull();
+    expect(placed).toEqual([]);
+    expect(cmd('draw').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('Esc でも保存せずに閉じる(開いているノートへ Esc を渡さない)', () => {
+    const { vp, placed } = drawCanvas();
+    cmd('draw').click();
+    let leaked = false;
+    const spy = (): void => {
+      leaked = true;
+    };
+    document.addEventListener('keydown', spy);
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    document.removeEventListener('keydown', spy);
+    expect(leaked).toBe(false);
+    expect(vp.querySelector('canvas')).toBeNull();
+    expect(placed).toEqual([]);
+  });
+
+  it('1 手戻す: 最後の線だけ消す。線が無ければ「ボードに置く」は押せない', () => {
+    const { host, vp } = drawCanvas();
+    cmd('draw').click();
+    const bar2 = vp.querySelector('[data-pkc-field="canvas-draw-bar"]')!;
+    const place = bar2.querySelector<HTMLButtonElement>('[data-pkc-draw-cmd="place"]')!;
+    expect(place.disabled).toBe(true);
+    stroke(surfaceOf(vp)!, [[10, 10], [20, 20]], 61);
+    stroke(surfaceOf(vp)!, [[30, 30], [40, 40]], 62);
+    expect(place.disabled).toBe(false);
+    bar2.querySelector<HTMLButtonElement>('[data-pkc-draw-cmd="undo"]')!.click();
+    expect(canvasDrawSession(host)!.strokes).toHaveLength(1);
+  });
+
+  it('🔴 「ボードに置く」: 描いた場所のワールド座標の四角と PNG を渡し、置けたら <canvas> を破棄する', async () => {
+    const restore = fakeCanvas2d();
+    try {
+      const { host, vp, placed } = drawCanvas();
+      // 倍率 2、カメラ (−100, −50)── 画面 (100, 100) はワールド (−50, 0)
+      for (let i = 0; i < 3; i += 1) cmd('zoom-in').click();
+      cmd('zoom-reset').click();
+      cmd('draw').click();
+      const session = canvasDrawSession(host)!;
+      const bar2 = vp.querySelector('[data-pkc-field="canvas-draw-bar"]')!;
+      bar2.querySelector<HTMLButtonElement>('[data-pkc-draw-width="8"]')!.click();
+      bar2.querySelector<HTMLButtonElement>('[data-pkc-draw-color="#dc2626"]')!.click();
+      const cam = canvasCameraOf(host)!;
+      stroke(surfaceOf(vp)!, [[100, 100], [300, 200]]);
+      expect(session.strokes[0]).toMatchObject({ color: '#dc2626', width: 8 });
+      expect(session.strokes[0]!.points[0]).toEqual({ x: cam.x + 100 / cam.zoom, y: cam.y + 100 / cam.zoom });
+      await session.place();
+      expect(placed).toHaveLength(1);
+      expect(placed[0]!.lid).toBe('n1');
+      expect(placed[0]!.png.type).toBe('image/png');
+      const wx = cam.x + 100 / cam.zoom;
+      const wy = cam.y + 100 / cam.zoom;
+      expect(placed[0]!.rect).toEqual({
+        x: Math.floor(wx - 4 - 12),
+        y: Math.floor(wy - 4 - 12),
+        w: Math.ceil(wx + 200 / cam.zoom + 4 + 12) - Math.floor(wx - 4 - 12),
+        h: Math.ceil(wy + 100 / cam.zoom + 4 + 12) - Math.floor(wy - 4 - 12),
+      });
+      expect(vp.querySelector('canvas')).toBeNull();
+      expect(canvasDrawSession(host)).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('🔴 器が枠の左上からずれていても(外から余白が当たる)、描いた所のワールド座標で置く(実ブラウザで踏んだ 16px のずれ)', async () => {
+    const restore = fakeCanvas2d();
+    try {
+      const { host, vp, placed } = drawCanvas();
+      liveHostRect(host, 16); // 器だけが 16px 下にある(カメラの式では見えないずれ)
+      cmd('draw').click();
+      stroke(surfaceOf(vp)!, [[200, 216], [260, 266]]);
+      await canvasDrawSession(host)!.place();
+      const cam = canvasCameraOf(host)!;
+      // 器の実際の位置から引く: ワールド y = (216 − 器の上端) / 倍率
+      const wy = (216 - (-cam.y * cam.zoom + 16)) / cam.zoom;
+      expect((placed[0]!.rect as { y: number }).y).toBe(Math.floor(wy - 2 - 12));
+    } finally {
+      restore();
+    }
+  });
+
+  it('🔴 枠ごと DOM から外れた後は、手書きが Esc を握らない(開いているノートの Esc へ通す)', () => {
+    const { vp } = drawCanvas();
+    cmd('draw').click();
+    vp.remove();
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    document.body.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(false);
+    expect(vp.querySelector('canvas')).toBeNull();
+  });
+
+  it('置けなかった(口が false)なら面を閉じない(描いた線を失わせない)', async () => {
+    const restore = fakeCanvas2d();
+    try {
+      const { host, vp } = drawCanvas({ place: async () => false });
+      cmd('draw').click();
+      stroke(surfaceOf(vp)!, [[10, 10], [50, 50]]);
+      await canvasDrawSession(host)!.place();
+      expect(surfaceOf(vp)).not.toBeNull();
+      expect(canvasDrawSession(host)!.strokes).toHaveLength(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it('🔴 キャンバスを閉じる(通常表示へ戻す)と、手書きの面も <canvas> ごと外す', () => {
+    const { vp } = drawCanvas();
+    cmd('draw').click();
+    expect(vp.querySelector('canvas')).not.toBeNull();
+    cmd('mode').click();
+    expect(document.querySelector('[data-pkc-field="canvas-draw-surface"]')).toBeNull();
+    expect(document.querySelector('canvas')).toBeNull();
   });
 });

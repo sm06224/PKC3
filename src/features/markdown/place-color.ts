@@ -49,6 +49,22 @@ export function parsePlaceColor(raw: unknown): string | null {
   return h.length === 3 ? `#${h[0]}${h[0]}${h[1]}${h[1]}${h[2]}${h[2]}` : `#${h}`;
 }
 
+/**
+ * 🔴 **付箋の塗り・枠の「なし」**(v4.0 Phase 2 / PR-10 ── 手書きを焼いた付箋)。
+ * 塗りは `fill=transparent`、枠は `stroke=none` だけを「なし」と読む(ほかの字は `parsePlaceColor` と同じ)。
+ * 返す値は CSS へ渡せる字(`#rrggbb` か `transparent`)か `null`(札が無いのと同じ)。
+ * ⚠ 読むのは画面(`place-board.ts`)だけ ── 書き出し(PowerPoint)は今までどおり `parsePlaceColor` を通る
+ *   (「なし」は既定の見た目になる。字は本文から消さない)。
+ */
+export function placeFillOf(raw: unknown): string | null {
+  if (typeof raw === 'string' && raw.trim() === 'transparent') return 'transparent';
+  return parsePlaceColor(raw);
+}
+export function placeStrokeOf(raw: unknown): string | null {
+  if (typeof raw === 'string' && raw.trim() === 'none') return 'transparent';
+  return parsePlaceColor(raw);
+}
+
 /** 線の太さの上限(px)。⚠ これより太い線は図の字を覆うので受けない。 */
 export const PLACE_LINE_WIDTH_MAX = 16;
 

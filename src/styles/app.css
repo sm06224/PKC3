@@ -5663,6 +5663,116 @@ dd[data-pkc-field='inspector-toc'] {
   stroke: var(--accent);
   stroke-width: 1.5;
 }
+/* 🔴 **複数選択・整列・手書き**(v4.0 Phase 2 / PR-10。`canvas-viewport.ts` / `canvas-draw.ts`)。
+ * ⚠ 選んだ付箋は**形**(アクセント 1 色の輪郭)で示す ── 地の色は変えない(業務画面)。 */
+[data-pkc-field='canvas-bar'] {
+  position: relative;
+}
+.pkc-board-host .pkc-format-block.pkc-place[data-pkc-canvas-selected='1'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+[data-pkc-field='canvas-viewport'][data-pkc-canvas-select] {
+  cursor: crosshair;
+}
+[data-pkc-field='canvas-marquee'] {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+[data-pkc-field='canvas-align-menu'] {
+  position: absolute;
+  top: 100%;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 12em;
+  padding: var(--s1);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+[data-pkc-field='canvas-bar'] [data-pkc-field='canvas-align-menu'] button {
+  border: 0;
+  text-align: left;
+  background: transparent;
+  padding: var(--s1) var(--s3);
+}
+[data-pkc-field='canvas-bar'] [data-pkc-field='canvas-align-menu'] button:hover:not([disabled]) {
+  background: var(--bg);
+}
+[data-pkc-field='canvas-bar'] button[disabled] {
+  cursor: default;
+  opacity: 0.5;
+}
+/* 手書きの面 ── 枠いっぱいに重ねる(閉じたら DOM から外す) */
+[data-pkc-field='canvas-draw'] {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+}
+[data-pkc-field='canvas-draw-surface'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+[data-pkc-field='canvas-draw-bar'] {
+  position: absolute;
+  top: var(--s2);
+  left: var(--s2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  align-items: center;
+  padding: var(--s1) var(--s2);
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+[data-pkc-field='canvas-draw-bar'] button {
+  font: inherit;
+  font-size: var(--btn-fs-sm);
+  cursor: pointer;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1px var(--s2);
+}
+[data-pkc-field='canvas-draw-bar'] button[disabled] {
+  cursor: default;
+  opacity: 0.5;
+}
+[data-pkc-field='canvas-draw-bar'] button[aria-pressed='true'] {
+  background: var(--fg);
+  color: var(--surface);
+  font-weight: 600;
+}
+/* ペンの色の見本 ── 押している色は輪郭で示す */
+[data-pkc-field='canvas-draw-bar'] button[data-pkc-draw-color] {
+  width: 1.5em;
+  height: 1.5em;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--pkc-draw-swatch, currentColor);
+}
+[data-pkc-field='canvas-draw-bar'] button[data-pkc-draw-color][aria-pressed='true'] {
+  background: var(--pkc-draw-swatch, currentColor);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+[data-pkc-field='canvas-draw-bar'] button[data-pkc-variant='primary'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
 /* 🔴 **通常表示で負の位置の付箋を画面の中へ寄せる**(`canvas-viewport.ts` の `applyNormalShift`)。
  * ⚠ 正の位置だけのボードには印が付かない(1px も変わらない)。ずらした分だけ下に余白を足す。 */
 .pkc-board-host[data-pkc-board-shift] {
@@ -13490,7 +13600,9 @@ h3[data-pkc-section] {
 @media print {
   /* 🔴 無限キャンバス(PR-09)── 枠・バー・ミニマップを外し、今までどおりの板として刷る */
   [data-pkc-field='canvas-bar'],
-  [data-pkc-field='canvas-minimap'] {
+  [data-pkc-field='canvas-minimap'],
+  [data-pkc-field='canvas-draw'],
+  [data-pkc-field='canvas-marquee'] {
     display: none !important;
   }
   [data-pkc-field='canvas-viewport'] {
@@ -15427,6 +15539,26 @@ h6:hover > .pkc-heading-anchor,
   gap: var(--s2);
   min-height: 0;
 }
+/* 🔴 関係グラフのズーム・パン(v4.0 Phase 2 / PR-10)── 枠がはみ出しを切り、図(`graph-map`)だけを transform で動かす */
+[data-pkc-field='graph-viewport'] {
+  position: relative;
+  overflow: hidden;
+  touch-action: pan-y;
+}
+[data-pkc-field='graph-body'][data-pkc-graph-panning] {
+  cursor: grabbing;
+  user-select: none;
+}
+[data-pkc-field='graph-tools'] {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s1);
+  margin-left: auto;
+}
+[data-pkc-field='graph-tools'] [data-pkc-graph-zoom='reset'] {
+  min-width: 4.5em;
+  font-variant-numeric: tabular-nums;
+}
 [data-pkc-field='graph-map'] {
   border: 1px solid var(--border);
   background: var(--surface);
@@ -17145,4 +17277,22 @@ h6:hover > .pkc-heading-anchor,
   html[data-pkc-shell] {
     overflow: hidden;
   }
+}
+
+/* 🔴 **地も枠も無い付箋**(v4.0 Phase 2 / PR-10 ── 手書きを焼いた付箋。`fill=transparent stroke=none`)。
+ *   余白を外し、焼いた絵を枠いっぱいに出す(絵は付箋と同じ大きさで焼いてある)。⚠ 影も付けない。 */
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-place-bare] {
+  padding: 0;
+  overflow: hidden;
+  box-shadow: none;
+}
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-place-bare] p {
+  margin: 0;
+}
+.pkc-md-rendered .pkc-format-block.pkc-place[data-pkc-place-bare] img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: contain;
 }
