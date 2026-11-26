@@ -26,8 +26,7 @@ import { getAncestorFolders, listSiblings } from '@features/relation/tree';
 import { CRUMB_INPUT_FIELD, captureCrumbInput, restoreCrumbInput } from './crumb-path-input';
 import { stampChanges } from '@features/relation/meta-stamps';
 import { filerRows, flatParentNames } from '@features/relation/filer-list';
-import { SELECTIVE_REASON_HINTS, SELECTIVE_REASON_LABELS, selectiveActive } from '@features/sync/selective-view';
-import type { SelectiveReason } from '@features/sync/selective-sync';
+import { syncReasonOf, syncScopeMark } from './sync-scope-mark';
 import {
   SMART_ARCHETYPE,
   SMART_FIELDS,
@@ -2193,22 +2192,3 @@ export function mountFilerRow(root: ParentNode, lid: string): HTMLElement | null
   return req.row;
 }
 
-/** 🔴 選択同期の理由(#2066 段 5-B)。効いていない(同期が切・ワークスペース全体)・対象外は `undefined`。 */
-export function syncReasonOf(state: Pick<AppState, 'syncScope'>, lid: string): SelectiveReason | undefined {
-  const view = state.syncScope;
-  return selectiveActive(view) ? view.reasons.get(lid) : undefined;
-}
-
-/**
- * 🔴 **選択同期の印**(#2066 段 5-B)── 題名の右の小さな無彩色の印。形で理由を分ける(CSS。色は使わない)。
- * ⚠ 字は持たない(題名の文字列・読み上げを汚さない)── 理由は `title` と `aria-label` で読む。
- */
-export function syncScopeMark(reason: SelectiveReason): HTMLSpanElement {
-  const mark = document.createElement('span');
-  mark.setAttribute('data-pkc-field', 'sync-scope-mark');
-  mark.setAttribute('data-pkc-sync-scope', reason);
-  mark.setAttribute('role', 'img');
-  mark.setAttribute('aria-label', SELECTIVE_REASON_LABELS[reason]);
-  mark.title = `${SELECTIVE_REASON_LABELS[reason]}: ${SELECTIVE_REASON_HINTS[reason]}`;
-  return mark;
-}

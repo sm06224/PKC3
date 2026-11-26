@@ -3,7 +3,7 @@
  * worker は偽物(呼ばれた op を数える)。実物の worker は `storage-worker-sync-selective-view.test.ts`。
  */
 import { describe, expect, it } from 'vitest';
-import { SyncScopeKeeper, SELECTIVE_CLEAR_CONFIRM, type SyncScopeDeps } from '../../src/adapter/ui/actions/sync-scope';
+import { SyncScopeKeeper, SELECTIVE_CLEAR_CONFIRM, wireSyncScope, type SyncScopeDeps } from '../../src/adapter/ui/actions/sync-scope';
 import type { SyncScopeView } from '../../src/features/sync/selective-view';
 
 type Raw = {
@@ -182,5 +182,68 @@ describe('SyncScopeKeeper', () => {
     expect(await f.keeper.setMode('all')).toBe(false);
     expect(f.problems[0]).toContain('同期対象の設定を保存できませんでした');
     expect(f.published.length).toBe(2);
+  });
+});
+
+describe('SyncScopeKeeper ── 回復と画面に戻ったとき(#2066 段 5-B レビュー)', () => {
+  it('前の読みが失敗して写しが無いときは、エントリの変化で読み直す(回復の契機)/ 同期が切なら待ちを作らない', async () => {
+    const f = fake();
+    // 起動の読みがまだ / 失敗 = 写しは null
+    f.keeper.onEntriesChanged();
+    expect(f.timers.length, '写しが無いのに読み直さない').toBe(1);
+    const g = fake({ on: false });
+    g.keeper.onEntriesChanged();
+    expect(g.timers.length).toBe(0);
+  });
+
+  it('🔴 画面に戻ったら、ワークスペース全体のときも 1 回読み直す(別のタブで選択同期へ切り替えた分を拾う)/ 切なら聞かない', async () => {
+    const f = fake();
+    await f.keeper.refresh();
+    expect(f.current()?.mode).toBe('all');
+    f.setRaw(selRaw(['F']));
+    f.keeper.onVisible();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(f.current()?.mode, '別のタブの切り替えを拾わない').toBe('selective');
+    expect(f.current()?.reasons.get('n')).toBe('descendant');
+    const g = fake({ on: false });
+    g.keeper.onVisible();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(g.calls).toEqual([]);
+  });
+});
+
+describe('wireSyncScope(main.ts の配線)', () => {
+  it('🔴 エントリかつながりの参照が変わったときだけ onEntriesChanged、画面に戻ったら onVisible / 外す口で止まる', () => {
+    const calls: string[] = [];
+    let listener: ((st: { entryMetas: unknown; relations: unknown }) => void) | null = null;
+    let visible: (() => void) | null = null;
+    let st = { entryMetas: new Map(), relations: [] as unknown[], other: 0 };
+    const off = wireSyncScope(
+      { onEntriesChanged: () => void calls.push('entries'), onVisible: () => void calls.push('visible') },
+      {
+        getState: () => st,
+        onState: (cb) => {
+          listener = cb;
+          return () => void (listener = null);
+        },
+        onVisible: (cb) => {
+          visible = cb;
+          return () => void (visible = null);
+        },
+      },
+    );
+    st = { ...st, other: 1 };
+    listener!(st);
+    expect(calls, 'エントリ以外の変化で読み直した').toEqual([]);
+    st = { ...st, entryMetas: new Map([['a', 1]]) };
+    listener!(st);
+    st = { ...st, relations: [] };
+    listener!(st);
+    listener!(st);
+    visible!();
+    expect(calls).toEqual(['entries', 'entries', 'visible']);
+    off();
+    expect(listener).toBeNull();
+    expect(visible).toBeNull();
   });
 });

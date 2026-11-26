@@ -17,6 +17,7 @@ import { initialState, type AppState } from '../../src/adapter/state/app-state';
 import { buildShell } from '../../src/adapter/ui/render/shell';
 import { BrowseRouter } from '../../src/adapter/ui/render/browse';
 import { InspectorRenderer } from '../../src/adapter/ui/render/inspector';
+import { DualFilerRenderer } from '../../src/adapter/ui/render/dual-filer';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { resetAppDialogForTest } from '../../src/adapter/ui/render/app-dialog';
 import { SyncScopeKeeper, type SyncScopeDeps } from '../../src/adapter/ui/actions/sync-scope';
@@ -332,5 +333,35 @@ describe('設定の「同期の範囲」', () => {
     root.querySelector<HTMLElement>('[data-pkc-action="clear-sync-selection"]')!.click();
     await flush();
     expect(calls).toEqual(['mode:selective', 'related:recursive', 'clear']);
+  });
+});
+
+describe('2 ペインの行(#2066 段 5-B レビュー)', () => {
+  it('🔴 選択同期のときだけ、左の一覧と同じ属性と印を付け、付け外しで描き直る / 全体・切では付けない', () => {
+    const root = document.createElement('div');
+    document.body.replaceChildren(root);
+    const d = new Dispatcher();
+    const regions = buildShell(root);
+    const dual = new DualFilerRenderer(regions.center);
+    d.onState((s) => dual.render(s));
+    d.dispatch({ type: 'SYS_BOOTED', cid: 'c1', metas: [...METAS], relations: [...RELS] });
+    d.dispatch({ type: 'SET_VIEW_MODE', mode: 'dual' });
+    const tr = (lid: string): HTMLElement | null =>
+      regions.center.querySelector<HTMLElement>(`[data-pkc-region="dual-pane"][data-pkc-side="left"] tr[data-pkc-entry="${lid}"]`);
+    expect(tr('F'), '前提: 2 ペインに F の行が無い').not.toBeNull();
+    const view = (mode: 'all' | 'selective', direct: string[]) =>
+      buildSyncScopeView({ selective: { mode, related: 'off', directLids: direct }, notes: RAW_NOTES, relations: [], bodyRefs: {} });
+    d.dispatch({ type: 'SET_SYNC_SCOPE', scope: view('selective', ['F']) });
+    expect(tr('F')!.getAttribute('data-pkc-sync-scope')).toBe('direct');
+    expect(tr('F')!.querySelector('[data-pkc-field="sync-scope-mark"]')?.getAttribute('data-pkc-sync-scope')).toBe('direct');
+    expect(tr('p')!.hasAttribute('data-pkc-sync-scope')).toBe(false);
+    expect(tr('p')!.querySelector('[data-pkc-field="sync-scope-mark"]')).toBeNull();
+    d.dispatch({ type: 'SET_SYNC_SCOPE', scope: view('all', ['F']) });
+    expect(tr('F')!.hasAttribute('data-pkc-sync-scope'), '全体へ戻しても属性が残った').toBe(false);
+    expect(regions.center.querySelectorAll('[data-pkc-field="sync-scope-mark"]').length).toBe(0);
+    d.dispatch({ type: 'SET_SYNC_SCOPE', scope: view('selective', ['p']) });
+    expect(tr('p')!.getAttribute('data-pkc-sync-scope')).toBe('direct');
+    d.dispatch({ type: 'SET_SYNC_SCOPE', scope: null });
+    expect(regions.center.querySelectorAll('[data-pkc-sync-scope]').length).toBe(0);
   });
 });

@@ -135,12 +135,17 @@ test('🔴 選択同期: フォルダを同期対象にすると配下だけが�
   // ── 同期をオフにすると「同期の範囲」は見出しごと隠れる(確認: オフにする → 同期の記録は残す)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   await expect(sec).toBeVisible();
+  // 選択同期へ戻すと、直接指定(共有フォルダ)の印がまた出る ── この状態から同期をオフにする
+  await clickReal(page, '[data-pkc-sync-scope-mode="selective"]');
+  await expect(row(page, '共有フォルダ')).toHaveAttribute('data-pkc-sync-scope', 'direct');
   await clickReal(page, '[data-pkc-field="sync-enabled"]');
   await clickReal(page, '[data-pkc-field="dialog-ok"]');
   await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeVisible();
   await clickReal(page, '[data-pkc-field="dialog-cancel"]');
   await expect(sec).toBeHidden();
   await expect(page.locator('[data-pkc-field="sync-selective-term"]')).toBeHidden();
+  await expect(page.locator(`${ROW}[data-pkc-sync-scope]`), '同期をオフにしたのに印が残った').toHaveCount(0);
+  await expect(page.locator('[data-pkc-field="sync-scope-mark"]')).toHaveCount(0);
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
   await ctx.close();

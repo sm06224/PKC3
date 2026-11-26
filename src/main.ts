@@ -245,7 +245,7 @@ import { applySyncDiff, backupSyncSeed, buildSyncDiff, exportSyncDiff, importSyn
 import { idbSyncFolderStore, SyncFolder, type SyncFolderPicker } from '@adapter/platform/sync-folder';
 import { windowSyncRemoteAndE2E } from '@adapter/platform/sync-remote';
 import { appSyncFolderView } from '@adapter/ui/render/sync-folder-view';
-import { SyncScopeKeeper } from '@adapter/ui/actions/sync-scope';
+import { SyncScopeKeeper, wireSyncScope } from '@adapter/ui/actions/sync-scope';
 import { readDiffZip } from '@features/sync/diff-file';
 import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-sync';
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
@@ -3862,21 +3862,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   });
   // 起動時(同期がオンのときだけ worker に聞く)
   void syncScope.refresh();
-  {
-    // 🔴 エントリの作成・削除・移動・つながり・本文の保存 ── 選んだエントリだけ同期しているときだけ、束ねて読み直す
-    let seenMetas = dispatcher.getState().entryMetas;
-    let seenRelations = dispatcher.getState().relations;
-    dispatcher.onState((st) => {
-      if (st.entryMetas === seenMetas && st.relations === seenRelations) return;
-      seenMetas = st.entryMetas;
-      seenRelations = st.relations;
-      syncScope.onEntriesChanged();
-    });
-    // 別のタブで付け外ししたかもしれない ── 画面に戻ったときに読み直す(選択同期のときだけ)
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') syncScope.onEntriesChanged();
-    });
-  }
+  // 🔴 エントリ・つながりの変化(選んだエントリだけ同期のときだけ束ねて読み直す)と、画面に戻ったとき(別のタブの付け外し)
+  wireSyncScope(syncScope, {
+    getState: () => dispatcher.getState(),
+    onState: (cb) => dispatcher.onState(cb),
+    onVisible: (cb) => {
+      const h = (): void => {
+        if (document.visibilityState === 'visible') cb();
+      };
+      document.addEventListener('visibilitychange', h);
+      return () => document.removeEventListener('visibilitychange', h);
+    },
+  });
   const syncDeps = async (): Promise<SyncDeps> => {
     const ws = await client.request({ op: 'listWorkspaces' }).catch(() => null);
     const wsTitle = ws?.workspaces.find((w) => w.cid === cid)?.title ?? CONTAINER_TITLE;

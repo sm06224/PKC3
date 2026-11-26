@@ -64,6 +64,7 @@ import { markTab, markTablist } from './tabs-a11y';
 // 🔴 表を送って見てから離れ、戻ると同じ所(C10 / #1045)。左右で**別々に**覚える
 import { ScrollMemory } from './scroll-memory';
 import { setTipTitle } from './tooltip';
+import { syncReasonOf, syncScopeMark } from './sync-scope-mark';
 
 function setDateTitle(cell: HTMLElement, updatedAt: string | null): void {
   const full = formatStoredDate(updatedAt, '');
@@ -432,6 +433,7 @@ export class DualFilerRenderer {
   private lastKinds: ReadonlySet<string> | null = null;
   /** 🔴 色ラベルの写し(#1982 段 4)── 行の左の線を描くので、変わったら表を組み直す。 */
   private lastLabels: ReadonlyMap<string, number> | null = null;
+  private lastSyncScope: AppState['syncScope'] = null;
   private lastSort: AppState['entrySort'] | null = null;
   private lastOpenedShown: AppState['openedAtShown'] | null = null;
   /**
@@ -561,6 +563,8 @@ export class DualFilerRenderer {
       // 🔴 **種類の絞りも指紋**(#411)── 上と同じ理由
       state.kindFilter === this.lastKinds &&
       state.noteLabels === this.lastLabels &&
+      // 🔴 選択同期の写し(#2066 段 5-B)── 入れないと付け外ししても行の印が描き直らない
+      state.syncScope === this.lastSyncScope &&
       state.entrySort === this.lastSort &&
       state.entrySortDesc === this.lastSortDesc &&
       // 🔴 「最近開いた順」の材料の写し(依頼 274 / 334)
@@ -584,6 +588,7 @@ export class DualFilerRenderer {
     this.lastFilter = state.filterQuery;
     this.lastKinds = state.kindFilter;
     this.lastLabels = state.noteLabels;
+    this.lastSyncScope = state.syncScope;
     this.lastSort = state.entrySort;
     this.lastSortDesc = state.entrySortDesc;
     this.lastOpenedShown = state.openedAtShown;
@@ -1160,6 +1165,8 @@ export class DualFilerRenderer {
           formatBodyChars(m.bodyChars),
           // 🔴 色ラベルも指紋(#1982 段 4)── 入れないと、色を付け外ししても 2 ペインの行が描き直らない
           String(state.noteLabels.get(m.lid) ?? ''),
+          // 🔴 選択同期の印も指紋(#2066 段 5-B)── 入れないと、付け外ししても 2 ペインの行が描き直らない
+          syncReasonOf(state, m.lid) ?? '',
         ].join(SEP),
       ),
     ].join(SEP);
@@ -1207,7 +1214,7 @@ export class DualFilerRenderer {
        *   入力欄は古い題名で作り直される。組み直す直前に、同じ行の入力欄の字とキャレットを採り、後で戻す。
        */
       const typed = this.readRenameInput(frame, renaming);
-      this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc, smartText, state.noteLabels);
+      this.renderTable(frame, side, rows, filtered, renaming, state.entrySort, state.entrySortDesc, smartText, state.noteLabels, state);
       if (typed !== null) {
         const input = frame.table.querySelector<HTMLInputElement>('[data-pkc-field="dual-rename"]');
         if (input !== null) {
@@ -1479,6 +1486,8 @@ export class DualFilerRenderer {
     /** スマートフォルダが 0 行のときに言う字(`null` = ふつうの空の字)。 */
     smartText: string | null,
     noteLabels: ReadonlyMap<string, number>,
+    /** 選択同期の写し(#2066 段 5-B)を読むためだけ。 */
+    scope: Pick<AppState, 'syncScope'>,
   ): void {
     const dayStamp = listDayStamp(new Date());
     frame.rows.clear();
@@ -1559,6 +1568,9 @@ export class DualFilerRenderer {
       // 🔴 色ラベル(#1982 段 4)── 左の列の行と同じ印
       const noteLabel = noteLabels.get(m.lid);
       if (noteLabel !== undefined) tr.setAttribute('data-pkc-note-label', String(noteLabel));
+      // 🔴 選択同期(#2066 段 5-B)── 左の列の行と同じ属性と印(同期が入 かつ 選んだエントリだけ同期のときだけ)
+      const syncReason = syncReasonOf(scope, m.lid);
+      if (syncReason !== undefined) tr.setAttribute('data-pkc-sync-scope', syncReason);
       tr.setAttribute('data-pkc-side', side);
       tr.setAttribute('data-pkc-action', 'dual-row');
       /**
@@ -1601,6 +1613,7 @@ export class DualFilerRenderer {
           kindIcon(m.archetype),
           document.createTextNode(m.title),
         );
+        if (syncReason !== undefined) name.append(syncScopeMark(syncReason));
         // 🔴 色ラベルは色だけの手がかりにしない(#1982 段 4)── 題名の hover / 読み上げに「色ラベル: 緑」を添える
         const hint = noteLabel === undefined ? '' : noteLabelHint(noteLabel);
         if (hint !== '') name.title = `${m.title}(${hint})`;

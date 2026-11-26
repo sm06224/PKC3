@@ -80,7 +80,10 @@ export class SyncScopeKeeper {
    * 同期が切・ワークスペース全体のときは何もしない(定常の手間ゼロ)。
    */
   onEntriesChanged(): void {
-    if (!selectiveActive(this.deps.current())) return;
+    if (!this.deps.enabled()) return;
+    const cur = this.deps.current();
+    // ⚠ 写しが無い(前の読みが失敗した)ときは読み直す ── 回復の契機を残す。ワークスペース全体なら何もしない
+    if (cur !== null && !selectiveActive(cur)) return;
     if (this.cancelPending !== null) return;
     const later = this.deps.later ?? ((fn: () => void, ms: number) => {
       const t = setTimeout(fn, ms);
@@ -90,6 +93,15 @@ export class SyncScopeKeeper {
       this.cancelPending = null;
       void this.refresh();
     }, SCOPE_REFRESH_DELAY_MS);
+  }
+
+  /**
+   * 画面に戻った(別のタブで範囲・直接指定を変えたかもしれない)。⚠ 同期が入なら範囲によらず 1 回読み直す
+   * (ワークスペース全体のときの worker は設定の行だけを読む)。切なら何もしない。
+   */
+  onVisible(): void {
+    if (!this.deps.enabled()) return;
+    void this.refresh();
   }
 
   private async write(change: { mode?: SyncScopeMode; related?: SyncRelatedMode; add?: string[]; remove?: string[] }): Promise<boolean> {
@@ -128,4 +140,33 @@ export class SyncScopeKeeper {
     if (!ok) return false;
     return this.write({ remove: [...cur.directLids] });
   }
+}
+
+/**
+ * 🔴 **係の配線**(#2066 段 5-B。`main.ts` から呼ぶ ── `main.ts` は test から実行されないので、判断はここに置く)。
+ * - エントリ・つながりが変わったら(参照で見る)`onEntriesChanged`(選択同期のときだけ束ねて読み直す)
+ * - 画面に戻ったら `onVisible`
+ * 戻り = 外す口。
+ */
+export function wireSyncScope(
+  keeper: Pick<SyncScopeKeeper, 'onEntriesChanged' | 'onVisible'>,
+  src: {
+    getState(): { readonly entryMetas: unknown; readonly relations: unknown };
+    onState(cb: (st: { readonly entryMetas: unknown; readonly relations: unknown }) => void): () => void;
+    onVisible(cb: () => void): () => void;
+  },
+): () => void {
+  let seenMetas = src.getState().entryMetas;
+  let seenRelations = src.getState().relations;
+  const offState = src.onState((st) => {
+    if (st.entryMetas === seenMetas && st.relations === seenRelations) return;
+    seenMetas = st.entryMetas;
+    seenRelations = st.relations;
+    keeper.onEntriesChanged();
+  });
+  const offVisible = src.onVisible(() => keeper.onVisible());
+  return () => {
+    offState();
+    offVisible();
+  };
 }

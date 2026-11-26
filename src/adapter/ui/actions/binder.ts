@@ -25282,6 +25282,8 @@ export function bindActions(
         ...(archetype !== null && st.cid !== null && !canEnterScope(archetype)
           ? { bookmarked: appDualPrefs.getBookmarks().includes(noteBookmarkKey(st.cid, lid)) }
           : {}),
+        // 🔴 選択同期(#2066 段 5-B)── 左の列の行と同じ(同期が入 かつ 選んだエントリだけ同期・user 領域だけ)
+        ...selectiveMenuCtx(st.syncScope, lid),
       };
       /**
        * 🔴 **3 つだけ、この行からは出さない**の中身(下の長い注記を参照)。⚠ 編集中の枝も同じ並びにする。
