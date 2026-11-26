@@ -179,10 +179,16 @@ async function setColumns(page: Page, value: string): Promise<void> {
 async function setTextScale(page: Page, value: string): Promise<void> {
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
   // ⚠ #1038 段J でプルダウン → ボタンの列に置き換え(選択肢はそのまま)
-  await clickReal(
-    page,
-    page.locator(`[data-pkc-field="text-scale-select"] button[data-pkc-text-scale-value="${value}"]`),
-  );
+  const btn = page.locator(`[data-pkc-field="text-scale-select"] button[data-pkc-text-scale-value="${value}"]`);
+  /**
+   * 🔴 **押す前に、ボタンを画面の中ほどへ送る**(user が見える所まで送ってから押すのと同じ)。
+   * ⚠ 設定の画面は前の訪問(`setColumns`)の巻き位置を戻す ── その位置は、最初の訪問のときに出ていた
+   *   起動時のお知らせのカードの高さ(= **最新のお知らせの文面の長さ**)で変わる。2026-11-26 のお知らせで
+   *   カードが 161px → 199px になり、戻した位置でこのボタンが上端の「× 画面を閉じる」のバーの下に入って
+   *   押せなかった(main のビルドとの突き合わせで確認)。測りたいのは文字の大きさの効き方で、巻き位置ではない。
+   */
+  await btn.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await clickReal(page, btn);
   await page.locator('[data-pkc-region="filer-table"] tbody tr').first().click();
   await expect(page.locator('[data-pkc-field="detail-body"]')).toBeVisible();
   // ⚠ 当たったことを**画面から**確かめる(選んだ = 効いた、にしない)
