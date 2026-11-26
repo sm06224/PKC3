@@ -31,7 +31,38 @@ import { classifyDirectiveOpen, isSimpleInlineAttrs, isTextColorToken, splitAttr
 import { indentLines } from './indent-assist';
 import { lineStart } from './line-start';
 import { fenceStep, LIST_LEAD, THEMATIC_BREAK } from './list-renumber';
+import { frontmatterLineCount } from './frontmatter';
 import type { TextSelection } from './text-ops';
+
+/**
+ * 🔴 **断った書き換え**(本文は 1 字も変えず、理由を添えて返す)。⚠ 黙って何もしない形にしない ──
+ *   帯の受け手(binder の `applyFormatSaying` / `apply-text-color`)が `refusal` を知らせに出す。
+ */
+export interface RefusedSelection extends TextSelection {
+  readonly refusal: string;
+}
+
+/** 断った書き換えか(本文は元のまま)。 */
+export function refusalOf(sel: TextSelection): string | null {
+  return 'refusal' in sel && typeof (sel as RefusedSelection).refusal === 'string' ? (sel as RefusedSelection).refusal : null;
+}
+
+function refuse(sel: TextSelection, refusal: string): RefusedSelection {
+  return { text: sel.text, start: sel.start, end: sel.end, refusal };
+}
+
+/** 囲んだ字を描き手が 1 つの囲みとして読めないとき(中身に `: red` のような「:」+ 書式の語が並ぶ)。 */
+export const INLINE_MARK_REFUSAL =
+  '選んだ字の中に「:」と色・書式の名前が続く所があるため、文字色・下線を付けられません(その字を外して選んでください)';
+/** 段落の枠(`:::`)の境目をまたぐ選択。 */
+export const BLOCK_CROSS_REFUSAL =
+  'ブロック(::: の行)の境目をまたいで選んでいるため、揃え・字下げを付けられません(1 つのブロックの中の段落だけを選んでください)';
+/** コードブロックの中。 */
+export const IN_CODE_REFUSAL = 'コードブロックの中には、揃え・字下げ・改ページを入れられません';
+/** 本文の先頭の情報(`---` 〜 `---`)の中。 */
+export const IN_FRONTMATTER_REFUSAL = '本文の先頭の情報(--- の間)の中には、揃え・字下げ・改ページを入れられません';
+/** 表の行の中。 */
+export const IN_TABLE_REFUSAL = '表の行の中には改ページを入れられません(表の前か後ろの行で押してください)';
 
 // ── 文字色の見本 ──────────────────────────────────────────────
 
@@ -228,6 +259,7 @@ function applyInline(sel: TextSelection, edit: InlineEdit): TextSelection {
       const want = edit.kind === 'underline' ? !enc.tokens.includes('underline') : false;
       const r = editSegment(text, { start: enc.contentStart, end: enc.contentEnd }, marks, edit, want)!;
       const next = text.slice(0, r.from) + r.insert + text.slice(r.to);
+      if (!markReadsBack(next, r.from, r.insert, r.contentAt, r.contentLen)) return refuse(sel, INLINE_MARK_REFUSAL);
       const caret = r.from + r.contentAt + (sel.start - enc.contentStart);
       return { text: next, start: caret, end: caret };
     }
@@ -268,11 +300,29 @@ function applyInline(sel: TextSelection, edit: InlineEdit): TextSelection {
   }
   for (const a of applied) {
     const at = a.from + shiftAfter;
+    // 🔴 描き手が同じ 1 つの囲みとして読み戻せるか(中身の `: red` などで境目がずれるなら断る)
+    if (!markReadsBack(out, at, a.insert, a.contentAt, a.contentLen)) return refuse(sel, INLINE_MARK_REFUSAL);
     if (firstStart === -1) firstStart = at + a.contentAt;
     lastEnd = at + a.contentAt + a.contentLen;
     shiftAfter += a.delta;
   }
   return { text: out, start: firstStart, end: lastEnd };
+}
+
+/**
+ * 🔴 **書いた囲みを、描き手と同じ読み方で読み戻せるか**(着地前レビュー)。
+ * ⚠ 描き手は先頭の `:` から**最初の**有効な `:属性:` を境目にする ── 中身に `Note: red` のような
+ *   「`:` + 書式の語」が在ると、そこで切れて残りが字のまま出る。帯の再読(`inlineMarksIn`)も同じ誤読をする。
+ *   行ぜんたいを読み直し、書いた位置にちょうど 1 つの囲みが在ることを確かめる(前の行の字に食われる形も拾う)。
+ */
+function markReadsBack(text: string, at: number, insert: string, contentAt: number, contentLen: number): boolean {
+  if (contentAt === 0 || contentLen === 0) return true; // 囲みを剥がした / 中身が空(まだ打っていない)
+  const from = lineStart(text, at);
+  const nl = text.indexOf('\n', at);
+  const to = nl === -1 ? text.length : nl;
+  return inlineMarksIn(text, from, to).some(
+    (m) => m.start === at && m.end === at + insert.length && m.contentEnd - m.contentStart === contentLen,
+  );
 }
 
 /** 🔴 **下線**(トグル)。`:字:underline:` ── 既に色の付いた `:字:#…:` の中なら、属性に足す / 外す。 */
@@ -440,6 +490,33 @@ function rewriteFormat(sel: TextSelection, ls: Lines, pair: { open: number; clos
   return { text: out, start: map(sel.start), end: map(sel.end) };
 }
 
+/** 各行の前の時点で、コードブロックの中か(`fenceStep` ── 記号の種類と長さを見る正本)。 */
+function fenceInsideBefore(ls: Lines): boolean[] {
+  const out: boolean[] = [];
+  let fence = '';
+  for (const line of ls.lines) {
+    out.push(fence !== '');
+    fence = fenceStep(fence, line).next;
+  }
+  out.push(fence !== '');
+  return out;
+}
+
+/**
+ * 🔴 **段落を囲む / 改ページを入れる前の構造の検査**(着地前レビュー)。断るなら理由、入れてよいなら `null`。
+ * - 本文の先頭の情報(`---` 〜 `---`)の中 ── 前に `:::format` を入れると先頭の情報として読まれなくなる
+ * - コードブロックの中 ── 字としてコードに混ざる(空行を挟んだコードの 2 つ目の塊も、ここで拾う)
+ * - 囲む範囲に `:::` の行が在る ── 枠の境目をまたぐと、閉じの `:::` が別の枠を閉じて無関係な段落の配置が変わる
+ */
+function structureRefusal(ls: Lines, from: number, to: number, crossCheck: boolean): string | null {
+  const fm = frontmatterLineCount(ls.lines.join('\n'));
+  if (fm > 0 && from < fm) return IN_FRONTMATTER_REFUSAL;
+  const inside = fenceInsideBefore(ls);
+  if (inside[from] === true || inside[to + 1] === true) return IN_CODE_REFUSAL;
+  if (crossCheck && ls.lines.slice(from, to + 1).some((l) => /^\s*:::/.test(l))) return BLOCK_CROSS_REFUSAL;
+  return null;
+}
+
 /** 段落の境(空行・`:::` の行・見出し)。 */
 function isParagraphBoundary(line: string): boolean {
   return line.trim() === '' || /^\s*:::/.test(line) || /^#{1,6}[ \t]/.test(line);
@@ -453,6 +530,8 @@ function wrapParagraph(sel: TextSelection, ls: Lines, first: number, last: numbe
   const openLine = `:::format{${tokens.join(' ')}}`;
   const blank = ls.lines.slice(first, last + 1).every((l) => l.trim() === '');
   if (blank) {
+    const why = structureRefusal(ls, first, last, false);
+    if (why !== null) return refuse(sel, why);
     const from = ls.starts[first]!;
     const to = from + ls.lines[first]!.length;
     const insert = `${openLine}\n\n:::`;
@@ -462,8 +541,12 @@ function wrapParagraph(sel: TextSelection, ls: Lines, first: number, last: numbe
   }
   let a = first;
   let b = last;
-  while (a > 0 && !/^#{1,6}[ \t]/.test(ls.lines[a]!) && !isParagraphBoundary(ls.lines[a - 1]!)) a -= 1;
+  // ⚠ 先頭の情報(--- の間)は段落ではない ── その直後の行から上へは広げない
+  const fmEnd = frontmatterLineCount(sel.text);
+  while (a > fmEnd && !/^#{1,6}[ \t]/.test(ls.lines[a]!) && !isParagraphBoundary(ls.lines[a - 1]!)) a -= 1;
   while (b + 1 < ls.lines.length && !/^#{1,6}[ \t]/.test(ls.lines[b]!) && !isParagraphBoundary(ls.lines[b + 1]!)) b += 1;
+  const why = structureRefusal(ls, a, b, true);
+  if (why !== null) return refuse(sel, why);
   const from = ls.starts[a]!;
   const to = ls.starts[b]! + ls.lines[b]!.length;
   const out = `${text.slice(0, from)}${openLine}\n${text.slice(from, to)}\n:::${text.slice(to)}`;
@@ -535,6 +618,14 @@ export const PAGE_BREAK_LINE = '+++';
 export function insertPageBreak(sel: TextSelection): TextSelection {
   const { text } = sel;
   const at = Math.min(sel.start, sel.end);
+  // 🔴 先頭の情報・コードブロック・表の行の中には入れない(着地前レビュー)
+  const ls = splitWithStarts(text);
+  const li = lineIndexAt(ls, at);
+  const why = structureRefusal(ls, li, li, false);
+  if (why !== null) return refuse(sel, why);
+  const lineHere = ls.lines[li]!;
+  const col = at - ls.starts[li]!;
+  if (/^\s*\|/.test(lineHere) && col > lineHere.search(/\S|$/) && col < lineHere.length) return refuse(sel, IN_TABLE_REFUSAL);
   const before = text.slice(0, at);
   const after = text.slice(at);
   const lead = before === '' || before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';

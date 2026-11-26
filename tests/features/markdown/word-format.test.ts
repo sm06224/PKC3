@@ -12,8 +12,14 @@ import { describe, expect, it } from 'vitest';
 import { applyFormat, type TextSelection } from '../../../src/features/markdown/text-ops';
 import {
   applyTextColor,
+  BLOCK_CROSS_REFUSAL,
+  IN_CODE_REFUSAL,
+  IN_FRONTMATTER_REFUSAL,
+  IN_TABLE_REFUSAL,
+  INLINE_MARK_REFUSAL,
   inlineMarksIn,
   insertPageBreak,
+  refusalOf,
   TEXT_COLORS,
   textColorValue,
 } from '../../../src/features/markdown/word-format';
@@ -316,6 +322,68 @@ describe('改ページ(`+++`)', () => {
   it('選んでいる字は消さない', () => {
     const r = applyFormat(pick('残す字', '残す'), 'pagebreak');
     expect(r.text).toContain('残す字');
+  });
+});
+
+describe('🔴 構造を壊す書き換えは断る(本文は 1 字も変えず、理由を返す ── 着地前レビュー)', () => {
+  it('🔴 枠の内側から外側へまたぐ選択で揃えても、無関係な段落の配置を変えない', () => {
+    const text = ':::format{align=center}\nA\n:::\n\nB';
+    const sel = at(text, text.indexOf('A'), text.length);
+    for (const op of ['align-right', 'indent-more'] as const) {
+      const r = applyFormat(sel, op);
+      expect(r.text, `${op} が本文を変えた`).toBe(text);
+      expect(refusalOf(r)).toBe(BLOCK_CROSS_REFUSAL);
+    }
+    // 描画も元のまま(B は中央揃えの枠に入らない)
+    expect(renderMarkdown(text)).toMatch(/<\/div>\s*<p>B<\/p>/);
+  });
+
+  it('対照群: 枠の外の段落だけを選べば囲める', () => {
+    const text = ':::format{align=center}\nA\n:::\n\nB';
+    const r = applyFormat(at(text, text.length), 'align-right');
+    expect(refusalOf(r)).toBeNull();
+    expect(r.text).toBe(':::format{align=center}\nA\n:::\n\n:::format{align=right}\nB\n:::');
+  });
+
+  it('🔴 中身に「: 書式の語」が並ぶ字は、下線・色で囲まない(描き手が別の境目で切る)', () => {
+    const text = 'Note: red';
+    const u = applyFormat(at(text, 0, text.length), 'underline');
+    expect(u.text).toBe(text);
+    expect(refusalOf(u)).toBe(INLINE_MARK_REFUSAL);
+    const c = applyTextColor(at(text, 0, text.length), RED);
+    expect(c.text).toBe(text);
+    expect(refusalOf(c)).toBe(INLINE_MARK_REFUSAL);
+    // 対照群: 「:」があっても書式の語が続かなければ囲める(時刻)
+    const ok = applyTextColor(at('12:30 です', 0, 5), RED);
+    expect(refusalOf(ok)).toBeNull();
+    expect(renderMarkdown(ok.text)).toContain('>12:30</span>');
+  });
+
+  it('🔴 空行を挟んだコードブロックの 2 つ目の塊・コードの中には、揃え・改ページを入れない', () => {
+    const text = '```\na\n\nb\n```';
+    const inB = at(text, text.indexOf('b'));
+    expect(refusalOf(applyFormat(inB, 'align-center'))).toBe(IN_CODE_REFUSAL);
+    expect(applyFormat(inB, 'align-center').text).toBe(text);
+    expect(refusalOf(insertPageBreak(inB))).toBe(IN_CODE_REFUSAL);
+    // 対照群: 空行の無いコードブロックは丸ごと囲める(fence の外で閉じる)
+    const whole = '```\na\n```';
+    expect(applyFormat(at(whole, 5), 'align-center').text).toBe(':::format{align=center}\n```\na\n```\n:::');
+  });
+
+  it('🔴 本文の先頭の情報(--- の間)には、揃え・改ページを入れない', () => {
+    const text = '---\npage_format: a4-landscape\n---\n本文';
+    const inFm = at(text, 6);
+    expect(refusalOf(applyFormat(inFm, 'align-center'))).toBe(IN_FRONTMATTER_REFUSAL);
+    expect(refusalOf(insertPageBreak(inFm))).toBe(IN_FRONTMATTER_REFUSAL);
+    // 対照群: 本文の段落は囲める(先頭の情報は残る)
+    const r = applyFormat(at(text, text.length), 'align-center');
+    expect(r.text).toBe('---\npage_format: a4-landscape\n---\n:::format{align=center}\n本文\n:::');
+  });
+
+  it('🔴 表の行の途中には改ページを入れない(行の頭・終わりなら入る)', () => {
+    const text = '| a | b |\n|---|---|';
+    expect(refusalOf(insertPageBreak(at(text, 3)))).toBe(IN_TABLE_REFUSAL);
+    expect(refusalOf(insertPageBreak(at(text, text.length)))).toBeNull();
   });
 });
 

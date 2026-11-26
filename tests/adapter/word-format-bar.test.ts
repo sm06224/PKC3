@@ -200,8 +200,12 @@ describe('「ページ設定 ▾」', () => {
   it('🔴 ポップオーバーで変える → 下書きの前書き・編集欄・情報ペインがそろう / 情報ペインで変える → ポップオーバーもそろう', () => {
     const { root, d, ta, bar } = editing('本文');
     bar.querySelector<HTMLElement>('button[data-pkc-action="open-page-setup"]')!.click();
-    choose(panelSelect(root, 'pageFormat'), 'a4-landscape');
+    const fmt = panelSelect(root, 'pageFormat');
+    fmt.focus();
+    choose(fmt, 'a4-landscape');
     expect(readNoteLayout(d.getState().openBody!.body).pageFormat).toBe('a4-landscape');
+    // 🔴 着地前レビュー: 本文の欄へ映しても、焦点は選択欄に残る(キーボードで続けて選べる / Esc が効く)
+    expect(document.activeElement, '本文の欄へ焦点を奪われた').toBe(fmt);
     expect(d.getState().phase, '保存して編集が終わった').toBe('editing');
     expect(ta.value, '編集欄に映らない(次の打鍵で消える)').toBe(d.getState().openBody!.body);
     expect(paneSelect(root, 'pageFormat').value, '情報ペインが一致しない').toBe('a4-landscape');

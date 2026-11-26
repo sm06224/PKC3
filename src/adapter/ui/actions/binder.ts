@@ -554,7 +554,7 @@ import {
   TEXT_COLOR_ATTR,
 } from '../render/format-bar';
 import { closePageSetupPanel, paintPageSetupPanel, pageSetupPanelOf, togglePageSetupPanel } from '../render/page-setup-panel';
-import { applyTextColor, textColorValue } from '@features/markdown/word-format';
+import { applyTextColor, refusalOf, textColorValue } from '@features/markdown/word-format';
 import { bindInlineComplete, type CompleteItem } from '../render/inline-complete';
 import { bindCurrentLine } from '../render/current-line';
 import { appCurrentLine } from '../render/current-line-setting';
@@ -20169,7 +20169,14 @@ const ACTIONS: Record<string, ActionHandler> = {
       sayNoFormatTarget(services);
       return;
     }
-    writeBack(ta, applyTextColor({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, color));
+    const next = applyTextColor({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }, color);
+    // 🔴 描き手が 1 つの囲みとして読めない字(`: red` を含む など)は断って理由を言う(本文は変えない)
+    const why = refusalOf(next);
+    if (why !== null) {
+      services.showStatus?.(why);
+      return;
+    }
+    writeBack(ta, next);
   },
   /**
    * 🔴 **書式の帯の「ページ設定 ▾」**(v4.0 Phase 1 / PR-04)── 情報ペインの「ページ設定」と同じ部品の小さなパネルを開く / 閉じる。
@@ -21412,7 +21419,11 @@ function applyFormatSaying(
   say: ((text: string) => void) | undefined,
 ): TextSelection {
   if (op === 'table' && tableOpMadeSingleColumn(sel)) say?.(SINGLE_COLUMN_TABLE_NOTE);
-  return applyFormat(sel, op);
+  const next = applyFormat(sel, op);
+  // 🔴 断った書き換え(枠の境目をまたぐ / コードブロックの中 など)は理由を言う ── 押して何も起きない、にしない(PR-04)
+  const why = refusalOf(next);
+  if (why !== null) say?.(why);
+  return next;
 }
 
 /**
