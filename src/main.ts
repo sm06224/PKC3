@@ -259,6 +259,7 @@ import { connectMessageSync, MESSAGES_CHANNEL } from '@adapter/platform/message-
 import { appStorageVacuum } from '@adapter/platform/storage/vacuum-run';
 import { appWorkspaces } from '@adapter/platform/storage/workspace-run';
 import { fixedHeadForLabels, markName, SYSTEM_MESSAGE_LID } from '@features/message/message-log';
+import { fixedPartsOfAppText, LAUNCH_GRANT_REVOKED_NOTICE, SYNC_ON_NOTICE } from '@features/message/app-fixed-text';
 import {
   purgeBlockReason,
   runExplicitPurge,
@@ -3145,12 +3146,16 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       lastPostedError = state.error;
       // ⚠ 種類は文で決まる(別のタブが編集中 = 「注意」/ それ以外 = 「問題」)。
       //   判断は `caution-events.ts` に在る ── ここに分岐を書かない
+      const errorText = messageTextOfOpError(state.error);
+      // 🔴 文の終わりの固定の案内(「(「使われていない添付を消す」で消えた可能性があります)」等)も残す(#2084)
+      const tableParts = fixedPartsOfAppText(errorText);
       appMessagePost.post({
         kind: messageKindForOpError(state.error),
         source: 'app',
-        text: messageTextOfOpError(state.error),
+        text: errorText,
         // 🔴 アプリが書いた固定の断り文は括弧も字数も潰さない(案内のボタン名と次の一手を残す。#1087)
-        fixedHead: fixedHeadOfOpError(state.error),
+        fixedHead: fixedHeadOfOpError(state.error) || (tableParts.fixedHead ?? ''),
+        ...(tableParts.fixedTail !== undefined ? { fixedTail: tableParts.fixedTail } : {}),
       });
     } else if (state.error === null) {
       lastPostedError = null;
@@ -3169,7 +3174,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       // ⚠ **空の字と進行中の字は積まない**(#1017 C5)── 進行中を消す `notify('')` や
       //   「別のウィンドウを開いています…」が結果として残っていた。判定は `status-notice.ts`。
       if (shouldPostNotice(state.notice))
-        appMessagePost.post({ kind: 'result', source: 'app', text: state.notice });
+        appMessagePost.post({ kind: 'result', source: 'app', text: state.notice, ...fixedPartsOfAppText(state.notice) });
       // ⚠ 上で積んだので、`showStatus` は積まない(二重にしない)
       showStatus(state.notice, { post: false });
       return; // `showStatus` が `paint` を呼ぶ
@@ -5167,7 +5172,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       void syncScope.refresh();
       // 🔴 同期フォルダも入 / 切に合わせる(切の間は回らない。handle は憶えたまま)
       void syncFolder.onEnabledChanged();
-      showStatus(on ? '端末間の同期をオンにしました。コレクションの「書き出す ▾」に「差分を書き出す」が出ます' : '端末間の同期をオフにしました');
+      showStatus(on ? SYNC_ON_NOTICE : '端末間の同期をオフにしました');
       if (!on) {
         // 🔴 切にするときに、同期の記録も消せる(残すと、次にオンにしたときに古い記録で判定される)
         if (await ask(SYNC_FORGET_CONFIRM_ON_OFF, { okLabel: SYNC_FORGET_LABEL, cancelLabel: '残す' })) await forgetSyncRecords();
@@ -6032,7 +6037,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       //    届かない。押しても一覧が消えず「効いていない」に見える(実際に踏んだ)。
       //    `setExternalImages` と同じ倒し方に揃える。
       center.render(dispatcher.getState());
-      showStatus('「ノートを渡して開く」の許可を取り消しました');
+      showStatus(LAUNCH_GRANT_REVOKED_NOTICE);
     },
     /**
      * 🔴 **目次を見せる許可を取り消す**(#195 / C-5 段①)。

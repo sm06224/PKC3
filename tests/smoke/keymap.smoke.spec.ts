@@ -337,6 +337,13 @@ test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page 
   await page.keyboard.press('Alt+Shift+X');
   await expect(body, 'Alt+Shift+X で打ち消しが入らない').toHaveValue('~~あいう~~');
 
+  // 🔴 **いまも帯に無い記法**(圏点)が鍵で入る ── v4.0 PR-04(#2085)でハイライト・取り消し線は帯へ出たので、
+  //    「帯に無い記法の入口が鍵」という本題は、帯に残っていない圏点で見る
+  await body.fill('あいう');
+  await body.selectText();
+  await page.keyboard.press('Alt+Shift+E');
+  await expect(body, 'Alt+Shift+E で圏点が入らない').toHaveValue('^^あいう^^');
+
   /**
    * 🔴 **いまの日時を 1 打鍵で入れる**(#1966 2-C)── 実機の打鍵で欄に入り、ブラウザの既定(Ctrl+D のブックマーク)が走らない。
    * ⚠ 字は時刻で変わるので形で見る(`yy/MM/dd 曜` / `yyyy/MM/dd HH:mm:ss`)。
@@ -352,15 +359,23 @@ test('🔴 帯に無い記法が、鍵で本文に入る (#425)', async ({ page 
   await body.fill('~~あいう~~');
 
   /**
-   * ⚠ **帯には出ていない**こと ── 出したら「横に長くしない」という前提が崩れる。
+   * ⚠ **圏点・ルビは帯に出ていない**こと(入口は鍵)── 帯を横に長くしない前提。
+   * 🔴 ハイライトは v4.0 PR-04(#2085「Word のような書式ツールバー」)で**意図して帯へ出した**
+   *   (`FORMAT_BAR_GROUPS` の文字装飾の塊)── 帯に在ることを見る(鍵と帯の両方が入口)。
    * 🔑 空振り防止に、帯そのものは在ることを先に見る。
    */
-  const bar = page.locator('[data-pkc-action="format-text"]');
+  const bar = page.locator('[data-pkc-region="format-bar"] [data-pkc-action="format-text"]');
   await expect(bar.first(), '書式の帯が出ていない').toBeVisible();
+  for (const f of ['emdot', 'ruby']) {
+    await expect(
+      page.locator(`[data-pkc-action="format-text"][data-pkc-format="${f}"]`),
+      `${f} が帯に出てしまっている`,
+    ).toHaveCount(0);
+  }
   await expect(
-    page.locator('[data-pkc-action="format-text"][data-pkc-format="highlight"]'),
-    'ハイライトが帯に出てしまっている',
-  ).toHaveCount(0);
+    page.locator('[data-pkc-region="format-bar"] [data-pkc-action="format-text"][data-pkc-format="highlight"]'),
+    'ハイライトが帯に無い(#2085 で帯へ出したはず)',
+  ).toBeVisible();
 
   // 🔴 D1(依頼 180)の対照群: 欄の外(確定した後)の Alt+← は、前のノートへ戻る
   await clickReal(page, '[data-pkc-action="commit-edit"]');

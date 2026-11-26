@@ -7,6 +7,7 @@
  * ⚠ 履歴・2 ペインの掃除・バックリンクは `reduceWithHistory` の 1 か所で見る(ここでは見ない)。
  */
 
+import { TRASH_PURGE_TAIL } from '@features/message/app-fixed-text';
 import {
   type AppState,
   type Dispatchable,
@@ -256,7 +257,8 @@ export function reduceRestore(state: AppState, action: RestoreAction): ReduceRes
        */
       const items = state.trashPanel?.items ?? null;
       const only = action.lid;
-      const tail = '添付ファイルの分の容量は、システムの「使われていない添付を消す」で空きます';
+      // 🔑 字は表(`app-fixed-text.ts`)が持つ ── メッセージ履歴でボタン名を伏せないため(#2084)
+      const tail = TRASH_PURGE_TAIL;
       const notice =
         only !== undefined
           ? `「${items?.find((t) => t.entryLid === only)?.title ?? '(無題)'}」を完全に消しました(${tail})`
