@@ -176,8 +176,12 @@ import { join } from 'node:path';
  * - 2026-11-26(v4.0 Phase 2 / PR-09): **660**(そのときの実数 660)。`canvas-board.smoke.spec.ts` を新設(起動 1 つ)。⚠ 既存の道中には載せられない ──
  *   キャンバスの記憶(見え方・カメラ)はタブの中で持ち越すので、`place-board.smoke.spec.ts` の道中に足すと後の assert が座標の前提を失う。
  *   切替・ズーム・パン・倍率を割り戻した掴み・負の位置・通常表示へ戻す・付箋の無いノートを 1 本の道中にまとめた。
+ * - 2026-11-26(v4.0 Phase 3 / PR-12): **662**(そのときの実数 662)。`viewer-3d.smoke.spec.ts` を新設(起動 2 つ)。⚠ 既存の道中には載せられない ──
+ *   見る相手は「3D の無いノート・外部 URL の図では Three.js の chunk を**一度も**取りに行かない」で、他の spec の道中では
+ *   既に読まれた chunk が混ざる。3D の無いノート → 外部 URL → 3D の図(-norender / -render / -both・操作・切替)を 1 本にまとめ、
+ *   添付の 3D モデルは何も開いていない状態から添付する(添付がその場で開く)もう 1 つの起動で見る。
  */
-export const BOOT_BUDGET = 660;
+export const BOOT_BUDGET = 662;
 // 2026-11-25(Stage 4): **650**(実数 650)。⚠ main が 649 > 641 で赤だった(#2069 / #2071 / #2073 で上げ忘れ。PR の CI は test-pr の選択でこの test を回さず、
 //   main への push の全量でだけ鳴っていた)── 事実に合わせた。足した起動は次の 9 つ:
 //   - #2069(#1442 S3-1)`builtin-apps.smoke.spec.ts` に 2 本(起動 2 つ)── 広い別ウィンドウの予定表の 2 ペインで本体の › が左の小さな月も送る / 900px で縦に積む。
@@ -232,7 +236,7 @@ export const BOOT_BUDGET = 660;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 330; // v4.0 Phase 2 / PR-07: 実数 659 の半分(切り上げ)(下限は実数の半分以上 ── smoke-budget.test)
+export const BOOT_FLOOR = 331; // v4.0 Phase 3 / PR-12: 実数 662 の半分(下限は実数の半分以上 ── smoke-budget.test)
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {

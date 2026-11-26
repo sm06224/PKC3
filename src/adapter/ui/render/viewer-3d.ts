@@ -124,26 +124,45 @@ export function setViewer3dTestHooks(
  * 集合へ足す。⚠ 複数の読み込みが重なっても、包むのは 1 回・外すのは最後の 1 つが終わったとき。
  */
 const urlTrackers = new Set<Set<string>>();
-let originalCreateObjectURL: ((obj: Blob | MediaSource) => string) | null = null;
+/** 包む前の本物(⚠ bind した写しではなく、元の関数そのもの ── 外すときに同じ物へ戻す)。 */
+let originalCreateObjectURL: typeof URL.createObjectURL | null = null;
+let trackingWrapper: typeof URL.createObjectURL | null = null;
 
-async function withTrackedObjectUrls<T>(allowed: Set<string>, fn: () => Promise<T>): Promise<T> {
+/**
+ * @param allowed 読んでいる間に作られた `blob:` を入れる集合(`localManager` の許可)。
+ * 🔴 **失敗したら、その間に作られた URL を返す**(着地前レビュー R1)── GLTFLoader が自分で revoke するのは
+ *   成功した経路だけなので、途中で断った・壊れていた回の埋め込み画像の URL が残る。成功した回の二重の revoke は害が無い。
+ */
+export async function withTrackedObjectUrls<T>(allowed: Set<string>, fn: () => Promise<T>): Promise<T> {
   if (urlTrackers.size === 0 && typeof URL.createObjectURL === 'function') {
-    const orig = URL.createObjectURL.bind(URL);
-    originalCreateObjectURL = orig;
-    URL.createObjectURL = (obj: Blob | MediaSource): string => {
-      const u = orig(obj);
+    const original = URL.createObjectURL;
+    originalCreateObjectURL = original;
+    trackingWrapper = (obj: Blob | MediaSource): string => {
+      const u = original.call(URL, obj);
       for (const t of urlTrackers) t.add(u);
       return u;
     };
+    URL.createObjectURL = trackingWrapper;
   }
   urlTrackers.add(allowed);
   try {
     return await fn();
+  } catch (e) {
+    for (const u of allowed) {
+      try {
+        URL.revokeObjectURL(u);
+      } catch {
+        /* 続けて返す */
+      }
+    }
+    throw e;
   } finally {
     urlTrackers.delete(allowed);
     if (urlTrackers.size === 0 && originalCreateObjectURL !== null) {
-      URL.createObjectURL = originalCreateObjectURL;
+      // ⚠ 包んでいる間に他が差し替えていたら、そちらを壊さない(戻すのは自分の包みのままのときだけ)
+      if (URL.createObjectURL === trackingWrapper) URL.createObjectURL = originalCreateObjectURL;
       originalCreateObjectURL = null;
+      trackingWrapper = null;
     }
   }
 }
@@ -151,7 +170,7 @@ async function withTrackedObjectUrls<T>(allowed: Set<string>, fn: () => Promise<
 /** 断った参照の理由文。 */
 export const VIEWER3D_BLOCKED_PREFIX = '外部の参照は読み込みません';
 
-function localManager(T: Three, allowed: Set<string>): ThreeModule.LoadingManager {
+export function localManager(T: Three, allowed: Set<string>): ThreeModule.LoadingManager {
   const manager = new T.LoadingManager();
   manager.setURLModifier((url: string) => {
     if (isAllowedLocal3dUrl(url, allowed)) return url;
@@ -174,7 +193,11 @@ export interface Model3dInput {
  */
 export async function precheckModel(model: Model3dInput): Promise<string | null> {
   if (model.format === 'glb') {
-    const head = new Uint8Array(await model.blob.slice(0, Math.min(model.blob.size, 4 * 1024 * 1024)).arrayBuffer());
+    // 🔑 JSON 塊の長さを先に読み、その分だけ読む(固定の上限で切ると、data: を埋め込んだ大きな JSON を誤って断る)
+    const header = new Uint8Array(await model.blob.slice(0, 20).arrayBuffer());
+    if (header.length < 20) return 'GLB の形式が正しくないため読めません';
+    const chunkLen = new DataView(header.buffer, header.byteOffset, 20).getUint32(12, true);
+    const head = new Uint8Array(await model.blob.slice(0, Math.min(model.blob.size, 20 + chunkLen)).arrayBuffer());
     const json = extractGlbJson(head);
     if (json === null) return 'GLB の形式が正しくないため読めません';
     const v = validateLocalGltfJson(json);
@@ -597,7 +620,20 @@ class Viewer {
     // 大きさが変わったら描き直す(最初の報告で最初の 1 コマも頼む)
     const RO = (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
     if (RO !== undefined) {
-      const ro = new RO(() => this.requestDraw());
+      // ⚠ 大きさが本当に変わったときだけ(観測を始めた直後の報告や、同じ大きさの報告で畳んだ GPU を借り直さない)
+      let lastW = -1;
+      let lastH = -1;
+      const ro = new RO((entries) => {
+        const r = entries[entries.length - 1]?.contentRect;
+        const w = Math.round(r?.width ?? stage.clientWidth);
+        const h = Math.round(r?.height ?? stage.clientHeight);
+        if (w === lastW && h === lastH) return;
+        const first = lastW < 0;
+        lastW = w;
+        lastH = h;
+        // 最初の報告は `start()` の 1 コマで足りる(2D の簡易表示は大きさが分かってから描き直す)
+        if (!first || this.mode === '2d') this.requestDraw();
+      });
       ro.observe(stage);
       this.cleanups.push(() => ro.disconnect());
     }
@@ -606,7 +642,8 @@ class Viewer {
     const MO = (globalThis as { MutationObserver?: typeof MutationObserver }).MutationObserver;
     if (MO !== undefined && html !== null) {
       const mo = new MO(() => this.requestDraw());
-      mo.observe(html, { attributes: true });
+      // ⚠ 配色の属性だけを見る(ほかの属性の変化で畳んだ GPU を借り直さない ── `widget-bridge.ts` と同じ 3 つ)
+      mo.observe(html, { attributes: true, attributeFilter: ['data-pkc-theme', 'data-pkc-tone', 'data-pkc-accent'] });
       this.cleanups.push(() => mo.disconnect());
     }
   }

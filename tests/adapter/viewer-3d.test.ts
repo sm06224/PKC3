@@ -16,9 +16,12 @@ import * as THREE from 'three';
 import {
   VIEWER3D_BLOCKED_PREFIX,
   hydrate3d,
+  localManager,
   mount3dViewer,
   parseModel,
+  precheckModel,
   setViewer3dTestHooks,
+  withTrackedObjectUrls,
 } from '../../src/adapter/ui/render/viewer-3d';
 import type { GpuContext, GpuFrameSize, GpuSession, GpuSurface, GpuSurfaceOptions } from '../../src/adapter/platform/render/gpu-lease';
 import { parse3dSceneSpec, type SceneSpec } from '../../src/features/viewer3d/scene-spec';
@@ -225,6 +228,20 @@ describe('mount3dViewer(` ```3d ` のシーン)', () => {
     expect(renderer.calls.at(-1)!.camera.position.distanceTo(home)).toBeLessThan(1e-9);
   });
 
+  it('🔴 配色が変わったら描き直しを頼む・無関係な属性の変化では頼まない(畳んだ GPU を借り直さない)', async () => {
+    mount3dViewer(host, { kind: 'scene', spec: spec('{"objects":[{"type":"box"}]}') });
+    const s = surfaces[0]!;
+    const html = document.documentElement;
+    const n0 = s.invalidates;
+    html.setAttribute('data-pkc-unrelated', String(Math.random()));
+    await flush();
+    expect(s.invalidates, '無関係な属性で描き直した').toBe(n0);
+    html.setAttribute('data-pkc-theme', html.getAttribute('data-pkc-theme') === 'dark' ? 'light' : 'dark');
+    await flush();
+    expect(s.invalidates).toBe(n0 + 1);
+    html.removeAttribute('data-pkc-unrelated');
+  });
+
   it('🔴 ポスター: 1 コマ描いてから PNG に焼く', async () => {
     mount3dViewer(host, { kind: 'scene', spec: spec('{"objects":[{"type":"box"}]}') });
     const { ctx, renderer, canvas } = fakeCtx();
@@ -257,10 +274,22 @@ describe('mount3dViewer(` ```3d ` のシーン)', () => {
   });
 
   it('🔴 dispose で描画面を返し、listener も外れる(以後の操作は何も頼まない)', () => {
+    const moDisconnect = vi.spyOn(MutationObserver.prototype, 'disconnect');
     const v = mount3dViewer(host, { kind: 'scene', spec: spec('{"objects":[{"type":"box"}]}') });
     const s = surfaces[0]!;
     const stage = host.querySelector<HTMLElement>('[data-pkc-3d-stage]')!;
+    const removed: string[] = [];
+    const rm = stage.removeEventListener.bind(stage);
+    stage.removeEventListener = ((type: string, fn: EventListenerOrEventListenerObject, o?: EventListenerOptions | boolean) => {
+      removed.push(type);
+      rm(type, fn, o);
+    }) as typeof stage.removeEventListener;
     v.dispose();
+    // 描画面の上の listener は全部外れる・テーマの見張りも外れる
+    for (const t of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'wheel', 'keydown', 'contextmenu', 'dblclick']) {
+      expect(removed, t).toContain(t);
+    }
+    expect(moDisconnect).toHaveBeenCalled();
     expect(s.disposed).toBe(1);
     expect(host.querySelector('[data-pkc-3d-viewer]')).toBeNull();
     const n = s.invalidates;
@@ -440,5 +469,140 @@ describe('hydrate3d(` ```3d ` の器)', () => {
     const hosts = [...div.querySelectorAll('[data-pkc-3d-src]')];
     expect(hosts[0]!.getAttribute('data-pkc-3d-state')).toBe('failed');
     expect(hosts[1]!.getAttribute('data-pkc-3d-state')).toBe('ready');
+  });
+});
+
+describe('読んでいる間に作られた blob: だけを許す(着地前レビュー R1 / R2 / W4)', () => {
+  it('🔴 包んでいる間に作られた URL は許可に入り、URL の検問を通る。外の blob: は止まる', async () => {
+    const allowed = new Set<string>();
+    const manager = localManager(THREE, allowed);
+    let made = '';
+    await withTrackedObjectUrls(allowed, async () => {
+      made = URL.createObjectURL(new Blob(['img']));
+    });
+    expect(allowed.has(made)).toBe(true);
+    expect(manager.resolveURL(made)).toBe(made);
+    const outside = URL.createObjectURL(new Blob(['x']));
+    expect(allowed.has(outside), '包みの外で作った URL まで許した').toBe(false);
+    expect(() => manager.resolveURL(outside)).toThrow(VIEWER3D_BLOCKED_PREFIX);
+    expect(() => manager.resolveURL('https://example.com/a.png')).toThrow(VIEWER3D_BLOCKED_PREFIX);
+    URL.revokeObjectURL(made);
+    URL.revokeObjectURL(outside);
+  });
+
+  it('🔴 2 本同時に読んでも両方が自分の URL を許し、終われば元の関数そのものへ戻る', async () => {
+    const original = URL.createObjectURL;
+    const a = new Set<string>();
+    const b = new Set<string>();
+    let releaseA!: () => void;
+    const pa = withTrackedObjectUrls(a, () => new Promise<void>((r) => (releaseA = r)));
+    let inB = '';
+    let afterA = '';
+    const pb = withTrackedObjectUrls(b, async () => {
+      inB = URL.createObjectURL(new Blob(['b']));
+      releaseA();
+      await pa;
+      // A が先に終わっても、B の許可は生きている
+      afterA = URL.createObjectURL(new Blob(['b2']));
+    });
+    await pb;
+    expect(b.has(inB)).toBe(true);
+    expect(b.has(afterA), 'A が終わった時点で B の見張りが外れた').toBe(true);
+    expect(URL.createObjectURL, '元の関数へ戻っていない').toBe(original);
+    for (const u of [inB, afterA]) URL.revokeObjectURL(u);
+  });
+
+  it('🔴 失敗したら、その間に作った URL を返す(GLTFLoader は失敗の経路で revoke しない)', async () => {
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    const allowed = new Set<string>();
+    let made = '';
+    await expect(
+      withTrackedObjectUrls(allowed, async () => {
+        made = URL.createObjectURL(new Blob(['img']));
+        throw new Error('壊れた');
+      }),
+    ).rejects.toThrow('壊れた');
+    expect(revoke).toHaveBeenCalledWith(made);
+  });
+
+  it('包んでいる間に他が差し替えた関数は壊さない', async () => {
+    const original = URL.createObjectURL;
+    const other = ((o: Blob) => original.call(URL, o)) as typeof URL.createObjectURL;
+    await withTrackedObjectUrls(new Set(), async () => {
+      URL.createObjectURL = other;
+    });
+    expect(URL.createObjectURL).toBe(other);
+    URL.createObjectURL = original;
+  });
+});
+
+describe('飛んでいる間に外したら、描画面を作らない(着地前レビュー W1)', () => {
+  it('🔴 モデルの検めの途中で dispose → 描画面を作らない', async () => {
+    const v = mount3dViewer(host, { kind: 'model', model: { blob: stlBlob(), format: 'stl' } });
+    v.dispose();
+    await flush();
+    expect(surfaces).toHaveLength(0);
+  });
+
+  it('🔴 添付を引いている途中で畳む → 描画面を作らない', async () => {
+    let resolve!: (v: { blob: Blob }) => void;
+    const getAssetBlob = vi.fn(() => new Promise<{ blob: Blob }>((r) => (resolve = r)));
+    const div = document.createElement('div');
+    div.innerHTML = renderMarkdown('```3d\n{"model":"asset:k"}\n```\n');
+    host.append(div);
+    const scope = hydrate3d(div, { getAssetBlob });
+    expect(getAssetBlob).toHaveBeenCalledTimes(1);
+    scope.dispose();
+    resolve({ blob: stlBlob() });
+    await flush();
+    expect(surfaces).toHaveLength(0);
+    expect(div.querySelector('[data-pkc-3d-viewer]')).toBeNull();
+  });
+});
+
+describe('静止時の rAF = 0(描き直しは gpu-lease に頼むだけ)', () => {
+  it('🔴 ビューアは自分で requestAnimationFrame を呼ばない(置く・操作・切替・2D 退避)', async () => {
+    const raf = vi.spyOn(globalThis, 'requestAnimationFrame');
+    mount3dViewer(host, { kind: 'scene', spec: spec('{"objects":[{"type":"box"}]}') });
+    const s = surfaces[0]!;
+    const { ctx } = fakeCtx();
+    const session = await s.opts.onAcquire(ctx);
+    session.render(SIZE);
+    const stage = host.querySelector<HTMLElement>('[data-pkc-3d-stage]')!;
+    stage.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 0, clientY: 0, buttons: 1, bubbles: true }));
+    stage.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 30, clientY: 0, buttons: 1, bubbles: true }));
+    stage.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true }));
+    host.querySelector<HTMLButtonElement>('[data-pkc-3d-op="wireframe"]')!.click();
+    s.opts.onFallback2d(s.opts.host, '理由');
+    stage.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }));
+    await flush();
+    expect(raf).not.toHaveBeenCalled();
+  });
+});
+
+describe('GLB の検め(着地前レビュー W3)', () => {
+  function glbWithJson(json: string): Blob {
+    let body = new TextEncoder().encode(json);
+    const pad = (4 - (body.length % 4)) % 4;
+    if (pad) body = new Uint8Array([...body, ...new Array<number>(pad).fill(0x20)]);
+    const out = new Uint8Array(20 + body.length);
+    const v = new DataView(out.buffer);
+    out.set(new TextEncoder().encode('glTF'), 0);
+    v.setUint32(4, 2, true);
+    v.setUint32(8, out.length, true);
+    v.setUint32(12, body.length, true);
+    v.setUint32(16, 0x4e4f534a, true);
+    out.set(body, 20);
+    return new Blob([out]);
+  }
+  it('🔴 JSON 塊が 4MB を超える(data: を埋め込んだ)GLB も、壊れていると言わずに通す', async () => {
+    const big = 'A'.repeat(5 * 1024 * 1024);
+    const blob = glbWithJson(JSON.stringify({ asset: { version: '2.0' }, buffers: [{ uri: `data:application/octet-stream;base64,${big}` }] }));
+    expect(blob.size).toBeGreaterThan(5 * 1024 * 1024);
+    expect(await precheckModel({ blob, format: 'glb' })).toBeNull();
+  });
+  it('外部を指す GLB・短すぎる GLB は断る', async () => {
+    expect(await precheckModel({ blob: glbWithJson('{"buffers":[{"uri":"x.bin"}]}'), format: 'glb' })).toContain('外部');
+    expect(await precheckModel({ blob: new Blob(['glTF']), format: 'glb' })).toContain('正しくない');
   });
 });
