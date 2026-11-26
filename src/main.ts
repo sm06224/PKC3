@@ -1,6 +1,7 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
 import { installWidgetBridge, setWidgetNoteHost } from '@adapter/ui/render/widget-bridge';
+import { hasWidgetStateBlock } from '@features/markdown/widget-state-block';
 import { errorText, diagramExportErrorText } from '@features/error-text';
 import { APP_GROUP_REORDER_OK_LABEL, FOLDER_EXPORT_NOTE } from '@features/entry-actions';
 import { bootFailureText } from '@features/boot-failure-text';
@@ -6996,16 +6997,18 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    * ⚠ 読ませる本文は**読む面で開いているノート 1 件**(`openBody`)だけ。書込は `SET_WIDGET_STATE` → `REQUEST_BODY_REWRITE`
    *   の 1 本で、別のタブ・ウィンドウがそのノートを編集中なら断る(他の本文の書換と同じ門)。
    */
-  const widgetWrite = (lid: string, act: () => void): void => {
+  const widgetWrite = (lid: string, act: () => void, refused: () => void = () => undefined): void => {
     void editedElsewhereReason(dispatcher, editLockPort, lid)
       .then((why) => {
         if (why !== null) {
           dispatcher.dispatch({ type: 'OP_FAILED', error: why });
+          refused();
           return;
         }
         act();
       })
       .catch(() => {
+        refused();
         dispatcher.dispatch({
           type: 'OP_FAILED',
           error: 'ウィジェットの状態を書けませんでした(別のタブの編集を確かめられませんでした)。もう一度押してください',
@@ -7023,8 +7026,43 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     },
     saveState: (lid, widgetId, state) =>
       widgetWrite(lid, () => dispatcher.dispatch({ type: 'SET_WIDGET_STATE', lid, widgetId, state })),
+    /**
+     * 🔴 消せたかを返す(レビュー指摘)── 断られた・書けなかった回は、端末の保存を元に戻させる
+     *   (端末だけ消えて、本文のブロックが残る食い違いを作らない)。
+     * 消せた = 開いている本文からブロックが無くなった。断った = 別のタブの編集中 / 書込の失敗の知らせ(`error` が変わった)。
+     * ⚠ どちらも見えないまま時間が過ぎた回(別のノートへ移った等)は「消せた」扱い ── 書けた本文に古い値を戻さない。
+     */
     removeState: (lid, widgetId) =>
-      widgetWrite(lid, () => dispatcher.dispatch({ type: 'SET_WIDGET_STATE', lid, widgetId, state: null })),
+      new Promise<boolean>((resolve) => {
+        let done = false;
+        let off: () => void = () => undefined;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        const finish = (ok: boolean): void => {
+          if (done) return;
+          done = true;
+          off();
+          if (timer !== null) clearTimeout(timer);
+          resolve(ok);
+        };
+        const gone = (): boolean => {
+          const ob = dispatcher.getState().openBody;
+          return ob !== null && ob.lid === lid && !hasWidgetStateBlock(ob.body, widgetId);
+        };
+        widgetWrite(
+          lid,
+          () => {
+            const errBefore = dispatcher.getState().error;
+            off = dispatcher.onState((st) => {
+              if (gone()) finish(true);
+              else if (st.error !== null && st.error !== errBefore) finish(false);
+            });
+            timer = setTimeout(() => finish(true), 10_000);
+            dispatcher.dispatch({ type: 'SET_WIDGET_STATE', lid, widgetId, state: null });
+            if (gone()) finish(true);
+          },
+          () => finish(false),
+        );
+      }),
     fail: (message) => dispatcher.dispatch({ type: 'OP_FAILED', error: message }),
   });
   /**

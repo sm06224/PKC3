@@ -83,6 +83,33 @@ describe('read / upsert / remove の往復', () => {
     expect(back).toBe(body);
   });
 
+  it('🔴 改行が混ざった本文で、他の行の改行コードを変えない(レビュー指摘)', () => {
+    // 大半が LF、1 行だけ CRLF
+    const body = `前の段落\r\nもう 1 行\n\n${TOOL}\n\n後ろ\n`;
+    const saved = ok(upsertWidgetStateBlock(body, 'tracker', { v: '1' }));
+    expect(saved.startsWith('前の段落\r\nもう 1 行\n\n'), '前の行の改行が変わった').toBe(true);
+    expect(saved.endsWith('\n\n後ろ\n')).toBe(true);
+    expect((saved.match(/\r\n/g) ?? []).length, 'CRLF の数が増えた').toBe(1);
+    expect(removeWidgetStateBlock(saved, 'tracker')).toBe(body);
+    // 差し替えでも同じ
+    const again = ok(upsertWidgetStateBlock(saved, 'tracker', { v: '2' }));
+    expect((again.match(/\r\n/g) ?? []).length).toBe(1);
+  });
+
+  it('本体が最後の行(改行なし)でも壊さず、消すと元に戻る', () => {
+    const body = TOOL;
+    const saved = ok(upsertWidgetStateBlock(body, 'tracker', { v: '1' }));
+    expect(saved).toBe(`${TOOL}\n\n\`\`\`json widget-state="tracker"\n{\n  "v": "1"\n}\n\`\`\``);
+    expect(readWidgetStateBlock(saved, 'tracker')).toEqual({ v: '1' });
+    expect(removeWidgetStateBlock(saved, 'tracker')).toBe(body);
+  });
+
+  it('鍵が __proto__ でも黙って落とさない', () => {
+    const saved = ok(upsertWidgetStateBlock('', 'a', JSON.parse('{"__proto__":"x","b":"y"}') as Record<string, string>));
+    expect(saved).toContain('"__proto__": "x"');
+    expect(Object.keys(readWidgetStateBlock(saved, 'a')!).sort()).toEqual(['__proto__', 'b']);
+  });
+
   it('同じ id が 2 つあれば read は最初の 1 つ、remove は全部', () => {
     const b = '```json widget-state="a"\n{"v":"1"}\n```\n\nx\n\n```json widget-state="a"\n{"v":"2"}\n```\n';
     expect(readWidgetStateBlock(b, 'a')).toEqual({ v: '1' });
@@ -127,7 +154,7 @@ describe('安全に無視・断る', () => {
     const big = { v: 'x'.repeat(WIDGET_STATE_BLOCK_LIMIT) };
     const r = upsertWidgetStateBlock(`${TOOL}\n`, 'tracker', big);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toContain('64 KB');
+    if (!r.ok) expect(r.reason).toContain('64.0 KB');
     // 境界のすぐ内側は通る
     const near = { v: 'x'.repeat(WIDGET_STATE_BLOCK_LIMIT - 20) };
     expect(upsertWidgetStateBlock(`${TOOL}\n`, 'tracker', near).ok).toBe(true);

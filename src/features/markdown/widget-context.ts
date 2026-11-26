@@ -27,6 +27,8 @@ export const WIDGET_CONTEXT_MAX_TABLES = 50;
 export const WIDGET_CONTEXT_MAX_ROWS = 2000;
 /** 1 行の列の上限(極端に横長な表で箱を詰まらせない)。 */
 export const WIDGET_CONTEXT_MAX_COLS = 200;
+/** 1 つの升の字数の上限(超えた分は切り詰める)。 */
+export const WIDGET_CONTEXT_MAX_CELL = 4096;
 
 export type WidgetTableKind = 'markdown' | 'csv' | 'tsv' | 'psv';
 
@@ -144,12 +146,14 @@ function csvTables(body: string, lines: readonly string[]): Found[] {
 
 function clip(t: Found, index: number): WidgetNoteTable {
   let truncated = false;
+  const cell = (c: string): string => {
+    if (c.length <= WIDGET_CONTEXT_MAX_CELL) return c;
+    truncated = true;
+    return c.slice(0, WIDGET_CONTEXT_MAX_CELL);
+  };
   const cut = (r: readonly string[]): string[] => {
-    if (r.length > WIDGET_CONTEXT_MAX_COLS) {
-      truncated = true;
-      return r.slice(0, WIDGET_CONTEXT_MAX_COLS);
-    }
-    return [...r];
+    if (r.length > WIDGET_CONTEXT_MAX_COLS) truncated = true;
+    return r.slice(0, WIDGET_CONTEXT_MAX_COLS).map(cell);
   };
   let rows = t.rows;
   if (rows.length > WIDGET_CONTEXT_MAX_ROWS) {

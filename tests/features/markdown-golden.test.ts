@@ -55,6 +55,9 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *        prelude(親の配色を `--pkc-*` で受ける)が入り、既定の文字色が `color:var(--pkc-fg,#222)` になり、
  *        iframe に印 `data-pkc-widget-frame` が付いた。PKC2 の箱は暗い配色でも `#222` 固定で、
  *        **暗い地の上に暗い字**になっていた。⚠ 門は 1 つも開けていない(sandbox / CSP は同じ)。
+ *      ⚠ **2026-11-26(v4.0 Phase 2 / PR-08)にもう一度動いた**:箱の prelude に `window.pkcWidget.readNoteContext` /
+ *        `readTables` / `readFrontmatter`(親へ問い合わせて同じノートの前書きと表を受け取る口)が入った。
+ *        ⚠ 門は 1 つも開けていない(sandbox / CSP は同じ。答えるのは親が登録した箱だけ)。
  *   4. **行頭アラインの属性値を `end` → `opposite` にした**(2026-08-08、user 指摘)。
  *      裁定で `|>` の意味が「グローバルの寄せを反対にする」になった以上、logical end を
  *      表す `end` と同じ値にしておけない ── 説明的な形 `:::paragraph{align=end}` と

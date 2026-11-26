@@ -93,8 +93,8 @@ export interface WidgetNoteHost {
   writeBlockReason(lid: string): string | null;
   /** 状態ブロックを書く(「ノートへ保存」)。 */
   saveState(lid: string, widgetId: string, state: Readonly<Record<string, string>>): void;
-  /** 状態ブロックを消す(「状態を初期化」)。 */
-  removeState(lid: string, widgetId: string): void;
+  /** 状態ブロックを消す(「状態を初期化」)。消せたら `true`、断られた・書けなかったら `false`。 */
+  removeState(lid: string, widgetId: string): Promise<boolean>;
   /** 断りを知らせる。 */
   fail(message: string): void;
 }
@@ -227,8 +227,46 @@ export function widgetContextFor(frame: HTMLIFrameElement): WidgetNoteContext {
   if (contextCache === null || contextCache.body !== body) {
     contextCache = { body, context: extractWidgetNoteContext(body) };
   }
-  // ⚠ 写しを返す(postMessage が複製するが、呼び手に共有の物を渡さない)
-  return JSON.parse(JSON.stringify(contextCache.context)) as WidgetNoteContext;
+  // ⚠ 共有の物を返す(書き換えない)── 箱へは postMessage が複製して渡すので、ここで写しを作らない(レビュー指摘:毎回の深い写しが重い)
+  return contextCache.context;
+}
+
+/**
+ * 🔴 **問い合わせの流量の上限**(レビュー指摘)── 箱が `readTables()` を休みなく呼んでも、親の画面を塞がせない。
+ * 1 つの箱につき {@link CONTEXT_MIN_INTERVAL_MS} に 1 回だけ答えを組んで送る。間に来た問い合わせはまとめて次の回に答え、
+ * 待たせる数は {@link CONTEXT_MAX_PENDING} まで(超えた分は答えない ── 箱の側の待ち時間で空の答えになる)。
+ */
+export const CONTEXT_MIN_INTERVAL_MS = 100;
+export const CONTEXT_MAX_PENDING = 16;
+interface ContextThrottle {
+  last: number;
+  pending: number[];
+  timer: ReturnType<typeof setTimeout> | null;
+}
+const throttles = new WeakMap<HTMLIFrameElement, ContextThrottle>();
+
+function answerContext(frame: HTMLIFrameElement, reqId: number): void {
+  let t = throttles.get(frame);
+  if (t === undefined) {
+    t = { last: -Infinity, pending: [], timer: null };
+    throttles.set(frame, t);
+  }
+  const th = t;
+  const flush = (): void => {
+    th.timer = null;
+    th.last = Date.now();
+    const ids = th.pending.splice(0);
+    if (ids.length === 0) return;
+    // 🔑 答えは 1 回だけ組む(同じ回の問い合わせは同じ答え)
+    const ctx = widgetContextFor(frame);
+    for (const id of ids) postContext(frame.contentWindow, id, ctx);
+  };
+  if (th.pending.length >= CONTEXT_MAX_PENDING) return;
+  th.pending.push(reqId);
+  if (th.timer !== null) return;
+  const wait = th.last + CONTEXT_MIN_INTERVAL_MS - Date.now();
+  if (wait <= 0) flush();
+  else th.timer = setTimeout(flush, wait);
 }
 
 function postContext(target: MessageEventSource | null, reqId: number, context: WidgetNoteContext): void {
@@ -302,7 +340,7 @@ export function installWidgetBridge(targetWindow: Window = window): () => void {
         postContext(event.source, reqId, emptyWidgetNoteContext());
         return;
       }
-      postContext(frame.contentWindow, reqId, widgetContextFor(frame));
+      answerContext(frame, reqId);
       return;
     }
 
@@ -428,11 +466,24 @@ export function attachWidgetResetBar(
       danger: true,
     }).then((answer) => {
       if (answer !== 'ok') return;
+      const before = readWidgetStorage(lid, widgetId);
       clearWidgetStorage(lid, widgetId);
-      if (withBlock) {
+      const h = noteHost;
+      if (withBlock && h !== null) {
         // ⚠ 置き直す前に印を付ける(書込が終わる前の本文から古い値を拾わない)
-        blockSuppressed.add(suppressKey(lid, widgetId));
-        noteHost?.removeState(lid, widgetId);
+        const key = suppressKey(lid, widgetId);
+        blockSuppressed.add(key);
+        void h.removeState(lid, widgetId).then((ok) => {
+          blockSuppressed.delete(key);
+          if (ok) return;
+          /**
+           * 🔴 **本文から消せなかった回は、端末の保存も元に戻す**(レビュー指摘)── 端末だけ消えて本文のブロックが残ると、
+           *   次に開いたときに古い値が本文から戻り、何が起きたか分からない。理由は知らせ(`OP_FAILED`)が言う。
+           */
+          for (const [k, v] of Object.entries(before)) applyWidgetStorageOp(lid, widgetId, { op: 'set', key: k, value: v });
+          sync();
+          remount();
+        });
       }
       sync();
       remount();

@@ -48,6 +48,7 @@ describe('書式の帯の並び(1 つの表)', () => {
         'insert',
         [
           'action:insert-diagram',
+          'action:insert-widget-template',
           'op:codeblock',
           'op:math',
           'action:insert-callout',

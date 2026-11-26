@@ -22,6 +22,7 @@
  */
 import { allFences, fenceInfo, splitLines, type FenceSpan } from './source-blocks';
 import { frontmatterLineCount } from './frontmatter';
+import { humanBytes } from '../human-bytes';
 import { WIDGET_ID_RE, parseWidgetId } from './widget-bridge';
 
 /**
@@ -60,7 +61,7 @@ export const WIDGET_STATE_INFO_KEY = 'widget-state';
 /** 囲みの見出しから、状態ブロックの widgetId を読む(状態ブロックでなければ `null`)。 */
 export function widgetStateBlockId(info: string | null | undefined): string | null {
   if (!info) return null;
-  const m = /^json\s+(?:[^\n]*\s)?widget-state\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+))/i.exec(info.trim());
+  const m = /^json\s+(?:[^\n]*?\s)?widget-state\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"']+))/i.exec(info.trim());
   if (m === null) return null;
   const id = m[1] ?? m[2] ?? m[3] ?? '';
   return WIDGET_ID_RE.test(id) ? id : null;
@@ -120,7 +121,8 @@ export function parseWidgetStateJson(text: string): Readonly<Record<string, stri
   const out: Record<string, string> = {};
   for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
     if (typeof val !== 'string') return null;
-    out[k] = val;
+    // ⚠ `__proto__` も自分の鍵として持つ(代入で書くと形が変わり、値が黙って落ちる)
+    Object.defineProperty(out, k, { value: val, enumerable: true, writable: true, configurable: true });
   }
   return out;
 }
@@ -159,23 +161,42 @@ export function hasWidgetStateBlock(body: string, widgetId: string): boolean {
 /** 書く JSON(鍵を並べ替える ── 同じ状態は同じ字。差分が読める)。 */
 export function widgetStateJson(state: Readonly<Record<string, string>>): string {
   const sorted: Record<string, string> = {};
-  for (const k of Object.keys(state).sort()) sorted[k] = String(state[k]);
+  for (const k of Object.keys(state).sort())
+    Object.defineProperty(sorted, k, { value: String(state[k]), enumerable: true, writable: true, configurable: true });
   return JSON.stringify(sorted, null, 2);
 }
 
 /** 断りの字(書く前に先に言う ── 押した後に黙って何も起きない形を作らない)。 */
 export function widgetStateTooLargeNote(size: number): string {
-  return `ウィジェットの状態が大きすぎるため、ノートに保存できません(${String(Math.ceil(size / 1024))} KB。上限は ${String(WIDGET_STATE_BLOCK_LIMIT / 1024)} KB です)`;
+  // 🔑 大きさの綴りは `human-bytes.ts` の 1 本(自前で単位を書かない)
+  return `ウィジェットの状態が大きすぎるため、ノートに保存できません(${humanBytes(size)}。上限は ${humanBytes(WIDGET_STATE_BLOCK_LIMIT)} です)`;
 }
 
 export type UpsertWidgetStateResult =
   | { readonly ok: true; readonly body: string }
   | { readonly ok: false; readonly reason: string };
 
+/** 1 行とその行の改行(最後の行は空文字)。🔑 行ごとに持つ ── 混ざった改行の本文で他の行の改行を変えない。 */
+interface Rec {
+  text: string;
+  eol: string;
+}
+
+function toRecs(body: string): Rec[] {
+  const parts = body.split(/(\r\n|\n)/);
+  const out: Rec[] = [];
+  for (let i = 0; i < parts.length; i += 2) out.push({ text: parts[i] ?? '', eol: parts[i + 1] ?? '' });
+  return out;
+}
+
+const fromRecs = (recs: readonly Rec[]): string => recs.map((r) => r.text + r.eol).join('');
+const isBlank = (r: Rec | undefined): boolean => r !== undefined && r.text.trim() === '';
+
 /**
  * 🔴 **状態ブロックを書く**。在れば中身を差し替え、無ければ**そのウィジェット本体の囲みの直後**
  * (見つからなければ末尾)に空行を整えて入れる。
  * ⚠ 上限を超える状態は断る(`ok: false`)── 本文は 1 バイトも変えない。
+ * ⚠ 書き換えるのは対象の行と、足す行だけ ── 他の行の字も改行コードも変えない(足す行の改行は近くの行に合わせる)。
  */
 export function upsertWidgetStateBlock(
   body: string,
@@ -186,64 +207,77 @@ export function upsertWidgetStateBlock(
   const json = widgetStateJson(state);
   if (json.length > WIDGET_STATE_BLOCK_LIMIT) return { ok: false, reason: widgetStateTooLargeNote(json.length) };
   const fence = fenceMarkerFor(json);
-  const block = [`${fence}json ${WIDGET_STATE_INFO_KEY}="${widgetId}"`, ...json.split('\n'), fence];
-  const eol = body.includes('\r\n') ? '\r\n' : '\n';
+  const blockLines = [`${fence}json ${WIDGET_STATE_INFO_KEY}="${widgetId}"`, ...json.split('\n'), fence];
   const lines = splitLines(body);
+  const recs = toRecs(body);
+  const nlNear = (at: number): string => recs[at]?.eol || recs.find((r) => r.eol !== '')?.eol || '\n';
 
   const hit = stateFences(body, lines).find((f) => f.id === widgetId);
   if (hit !== undefined) {
-    const next = [...lines.slice(0, hit.span.start), ...block, ...lines.slice(hit.span.end + 1)];
-    return { ok: true, body: next.join(eol) };
+    const nl = nlNear(hit.span.start);
+    const lastEol = recs[hit.span.end]?.eol ?? '';
+    const block = blockLines.map((text, i) => ({ text, eol: i === blockLines.length - 1 ? lastEol : nl }));
+    return { ok: true, body: fromRecs([...recs.slice(0, hit.span.start), ...block, ...recs.slice(hit.span.end + 1)]) };
   }
 
   const host = topFences(body, lines).find((f) => widgetFenceId(f.info) === widgetId);
   if (host !== undefined) {
     const at = host.span.end + 1;
-    const after = lines.slice(at);
+    const nl = nlNear(host.span.end);
+    const head = recs.slice(0, at).map((r) => ({ ...r }));
+    const after = recs.slice(at);
+    const closing = head[head.length - 1]!;
+    // 本体が最後の行(改行なし)なら、その形を保つ ── 足した最後の行を改行なしにする
+    const endsHere = closing.eol === '';
+    if (endsHere) closing.eol = nl;
+    const block = blockLines.map((text) => ({ text, eol: nl }));
     // 🔑 前に空行 1 つ、後ろも次の行が空でなければ空行 1 つ(Markdown の段落に貼り付かない)
-    const tail = after.length > 0 && (after[0] ?? '').trim() !== '' ? [''] : [];
-    const next = [...lines.slice(0, at), '', ...block, ...tail, ...after];
-    return { ok: true, body: next.join(eol) };
+    const tail = after.length > 0 && !isBlank(after[0]) && !(after.length === 1 && after[0]!.text === '') ? [{ text: '', eol: nl }] : [];
+    if (endsHere) block[block.length - 1]!.eol = '';
+    return { ok: true, body: fromRecs([...head, { text: '', eol: nl }, ...block, ...tail, ...after]) };
   }
 
   // 末尾へ ── 末尾の空行を整えて(空行 1 つ空けて置き、最後は改行で終える)
-  let end = lines.length;
-  while (end > 0 && (lines[end - 1] ?? '').trim() === '') end -= 1;
-  const head = lines.slice(0, end);
-  const next = head.length === 0 ? [...block, ''] : [...head, '', ...block, ''];
-  return { ok: true, body: next.join(eol) };
+  const nl = nlNear(0);
+  let end = recs.length;
+  while (end > 0 && isBlank(recs[end - 1])) end -= 1;
+  const head = recs.slice(0, end).map((r) => ({ ...r }));
+  if (head.length > 0) head[head.length - 1]!.eol = head[head.length - 1]!.eol || nl;
+  const block = blockLines.map((text) => ({ text, eol: nl }));
+  const lead = head.length === 0 ? [] : [...head, { text: '', eol: nl }];
+  return { ok: true, body: fromRecs([...lead, ...block, { text: '', eol: '' }]) };
 }
 
 /**
  * 🔴 **状態ブロックを消す**(同じ id のものは全部)。前後に余った空行は 1 つに詰める。無ければ本文をそのまま返す。
+ * ⚠ 消すのは対象の行(と、余る空行 1 つ)だけ ── 他の行の字も改行コードも変えない。
  */
 export function removeWidgetStateBlock(body: string, widgetId: string): string {
   if (!body.includes(WIDGET_STATE_INFO_KEY)) return body;
   const lines = splitLines(body);
   const hits = stateFences(body, lines).filter((f) => f.id === widgetId);
   if (hits.length === 0) return body;
-  const eol = body.includes('\r\n') ? '\r\n' : '\n';
-  let next = [...lines];
+  let recs = toRecs(body);
   // ⚠ 後ろから消す(前の範囲の行番号を動かさない)
   for (const h of [...hits].reverse()) {
     let s = h.span.start;
     let e = h.span.end;
-    // 🔑 前後が両方空行なら、片方(後ろ)を一緒に消す ── 空行が 2 つ並ばない
-    const before = s > 0 ? next[s - 1] : undefined;
-    const after = next[e + 1];
-    const blank = (l: string | undefined): boolean => l !== undefined && l.trim() === '';
-    if (blank(before) && (after === undefined || blank(after))) {
-      if (after !== undefined) e += 1;
+    const before = s > 0 ? recs[s - 1] : undefined;
+    const after = recs[e + 1];
+    const atEof = after === undefined || (e + 1 === recs.length - 1 && after.text === '' && after.eol === '');
+    if (isBlank(before) && (atEof || isBlank(after))) {
+      // 🔑 前後が両方空行(または末尾)なら、片方を一緒に消す ── 空行が 2 つ並ばない
+      if (!atEof) e += 1;
       else s -= 1;
-    } else if (before === undefined && blank(after)) {
+    } else if (before === undefined && isBlank(after) && !atEof) {
       // 本文の先頭のブロック ── 後ろの空行も一緒に(先頭に空行を残さない)
       e += 1;
     }
-    next = [...next.slice(0, s), ...next.slice(e + 1)];
+    const tailEol = recs[e]?.eol ?? '';
+    const reachesEnd = e === recs.length - 1;
+    recs = [...recs.slice(0, s), ...recs.slice(e + 1)];
+    // 🔑 最後の行まで消した回は、残った最後の行の改行を消した行の形(改行なし)に合わせる
+    if (reachesEnd && recs.length > 0) recs[recs.length - 1] = { ...recs[recs.length - 1]!, eol: tailEol };
   }
-  // 末尾にぶら下がる空行は、元の本文の末尾の形(改行で終わるか)に揃える
-  if (body.endsWith('\n')) {
-    while (next.length > 1 && (next[next.length - 1] ?? '') === '' && (next[next.length - 2] ?? '').trim() === '') next.pop();
-  }
-  return next.join(eol);
+  return fromRecs(recs);
 }

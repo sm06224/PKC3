@@ -26,6 +26,8 @@ import {
   installWidgetBridge,
   resolveWidgetSeed,
   setWidgetNoteHost,
+  CONTEXT_MAX_PENDING,
+  CONTEXT_MIN_INTERVAL_MS,
   type WidgetNoteHost,
   keepWidgetSeedFresh,
   remountStaleWidgets,
@@ -43,6 +45,7 @@ import { buildHtmlSandboxIframe } from '../../src/features/markdown/html-sandbox
 import {
   WIDGET_CONTEXT_REQ_MSG_TYPE,
   WIDGET_CONTEXT_RES_MSG_TYPE,
+  WIDGET_CONTEXT_TIMEOUT_MS,
   WIDGET_READY_MSG_TYPE,
   WIDGET_STORAGE_LIMIT,
   WIDGET_TOTAL_STORAGE_LIMIT,
@@ -501,9 +504,10 @@ function fakeHost(bodies: Record<string, string>): WidgetNoteHost & { calls: str
       const r = upsertWidgetStateBlock(bodies[lid] ?? '', wid, state);
       if (r.ok) bodies[lid] = r.body;
     },
-    removeState: (lid: string, wid: string) => {
+    removeState: (lid: string, wid: string): Promise<boolean> => {
       h.calls.push(`remove:${lid}:${wid}`);
       bodies[lid] = removeWidgetStateBlock(bodies[lid] ?? '', wid);
+      return Promise.resolve(true);
     },
     fail: (m: string) => {
       h.fails.push(m);
@@ -691,8 +695,12 @@ describe('🔴 ノートへ保存と、状態ブロックからの復元(PR-08)'
     };
     const host = fakeHost(bodies);
     // 書込が遅れる形(removeState は記録だけして本文を変えない)
+    let settle: (ok: boolean) => void = () => undefined;
     host.removeState = (lid, wid) => {
       host.calls.push(`remove:${lid}:${wid}`);
+      return new Promise<boolean>((r) => {
+        settle = r;
+      });
     };
     setWidgetNoteHost(host);
     const { body, scope } = mount('L1', bodies.L1!);
@@ -705,6 +713,31 @@ describe('🔴 ノートへ保存と、状態ブロックからの復元(PR-08)'
     post(set('count', '1', 1), giveWindow(frameOf(body)));
     body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-save"]')!.click();
     expect(host.calls.at(-1)).toBe('save:L1:a');
+    settle(true);
+    scope.dispose();
+  });
+
+  it('🔴 本文から消せなかったら(別のタブの編集中・書込の失敗)、端末の保存も元に戻す(食い違いを残さない)', async () => {
+    const bodies: Record<string, string> = {
+      L1: '```html id="a"\n<p>x</p>\n```\n\n```json widget-state="a"\n{"count":"4"}\n```\n',
+    };
+    const host = fakeHost(bodies);
+    host.removeState = (lid, wid) => {
+      host.calls.push(`remove:${lid}:${wid}`);
+      return Promise.resolve(false);
+    };
+    setWidgetNoteHost(host);
+    applyWidgetStorageOp('L1', 'a', { op: 'set', key: 'count', value: '6' });
+    const { body, scope } = mount('L1', bodies.L1!);
+    body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-reset"]')!.click();
+    document.querySelector<HTMLButtonElement>('[data-pkc-field="dialog-ok"]')!.click();
+    for (let i = 0; i < 5; i += 1) await new Promise((r) => setTimeout(r, 0));
+    expect(host.calls).toEqual(['remove:L1:a']);
+    expect(readWidgetStorage('L1', 'a'), '端末の保存が戻っていない').toEqual({ count: '6' });
+    expect(frameOf(body).srcdoc).toContain('{"count":"6"}');
+    // 印は残さない(次に置くときは、端末 → 本文の順に戻る)
+    localStorage.clear();
+    expect(resolveWidgetSeed('L1', 'a')).toEqual({ count: '4' });
     scope.dispose();
   });
 
@@ -739,7 +772,7 @@ describe('🔴 書込の経路(reducer → REQUEST_BODY_REWRITE。PR-08)', () =>
     ]);
     const del = reduce(withEntry(), { type: 'SET_WIDGET_STATE', lid: 'L1', widgetId: 'a', state: null });
     expect(del.events[0]).toMatchObject({ rewrite: { kind: 'widget-state', widgetId: 'a', state: null } });
-    const busy = reduce({ ...withEntry(), phase: 'exporting' }, { type: 'SET_WIDGET_STATE', lid: 'L1', widgetId: 'a', state: { k: 'v' } });
+    const busy = reduce({ ...withEntry(), phase: 'initializing' }, { type: 'SET_WIDGET_STATE', lid: 'L1', widgetId: 'a', state: { k: 'v' } });
     expect(busy.events).toEqual([]);
     expect(busy.state.error).toContain('ウィジェットの状態をノートに保存してください');
   });
@@ -749,5 +782,107 @@ describe('🔴 書込の経路(reducer → REQUEST_BODY_REWRITE。PR-08)', () =>
     expect(readWidgetStateBlock(saved, 'a')).toEqual({ k: 'v' });
     expect(applyBodyRewrite(saved, { kind: 'widget-state', widgetId: 'a', state: null })).toBe(body);
     expect(applyBodyRewrite(body, { kind: 'widget-state', widgetId: 'a', state: { k: 'x'.repeat(70000) } })).toBeNull();
+  });
+});
+
+describe('🔴 問い合わせの流量の上限(PR-08 レビュー)', () => {
+  it('休みなく問い合わせても、1 つの箱につき 100ms に 1 回だけ組み、待たせるのは 16 件まで', () => {
+    vi.useFakeTimers();
+    try {
+      setWidgetNoteHost(fakeHost({ L1: NOTE_L1 }));
+      const { body, scope } = mount('L1', NOTE_L1);
+      const f = frameOf(body);
+      const id = f.getAttribute('data-pkc-html-render-id')!;
+      const w = giveWindow(f);
+      for (let i = 1; i <= 40; i += 1) post(ask(id, i), w);
+      expect(answers(w).map((a) => a.reqId), '最初の 1 件はすぐ答える').toEqual([1]);
+      vi.advanceTimersByTime(CONTEXT_MIN_INTERVAL_MS);
+      const got = answers(w).map((a) => a.reqId);
+      expect(got).toHaveLength(1 + CONTEXT_MAX_PENDING);
+      expect(got.slice(1)).toEqual(Array.from({ length: CONTEXT_MAX_PENDING }, (_, i) => i + 2));
+      // 答えの中身は同じノートの物
+      expect(answers(w).at(-1)!.context.tables).toHaveLength(1);
+      scope.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('🔴 箱の中の口を実際に走らせる(PR-08 レビュー:文字列の検査だけでは空振る)', () => {
+  /** 箱の中の window を模して prelude を走らせる。親へ送った物と、親から届ける口を返す。 */
+  function runPrelude(): {
+    api: { readTables: () => Promise<unknown>; readFrontmatter: () => Promise<unknown>; readNoteContext: () => Promise<unknown> };
+    sent: Record<string, unknown>[];
+    deliver: (data: unknown, fromParent?: boolean) => void;
+  } {
+    const html = buildHtmlSandboxIframe('<p>z</p>', '', 0);
+    const doc = html.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const all = [...doc.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+    const prelude = all.find((x) => x.includes('api.readTables='))!;
+    expect(prelude, 'prelude が見つからない').toBeTruthy();
+    const sent: Record<string, unknown>[] = [];
+    const listeners: ((e: { source: unknown; data: unknown }) => void)[] = [];
+    const parentWin = { postMessage: (m: Record<string, unknown>) => sent.push(m) };
+    const win: Record<string, unknown> = {
+      parent: parentWin,
+      addEventListener: (t: string, cb: (e: { source: unknown; data: unknown }) => void) => {
+        if (t === 'message') listeners.push(cb);
+      },
+      localStorage: null,
+    };
+    const fakeDoc = { documentElement: { style: { setProperty() {}, removeProperty() {} }, setAttribute() {} } };
+    new Function('window', 'document', prelude)(win, fakeDoc);
+    return {
+      api: win.pkcWidget as never,
+      sent,
+      deliver: (data, fromParent = true) => {
+        for (const l of listeners) l({ source: fromParent ? parentWin : {}, data });
+      },
+    };
+  }
+
+  it('readTables / readFrontmatter / readNoteContext は親へ問い合わせ、親の答えの該当部分を返す', async () => {
+    const { api, sent, deliver } = runPrelude();
+    const ctx = { frontmatter: { a: 1 }, tables: [{ index: 0, kind: 'csv', headers: ['h'], rows: [['1']] }] };
+    const pT = api.readTables();
+    const pF = api.readFrontmatter();
+    const pC = api.readNoteContext();
+    // 1 通目は起動時の ready(テーマを受け取る合図)
+    expect(sent.map((m) => m.type)).toEqual([
+      WIDGET_READY_MSG_TYPE,
+      WIDGET_CONTEXT_REQ_MSG_TYPE,
+      WIDGET_CONTEXT_REQ_MSG_TYPE,
+      WIDGET_CONTEXT_REQ_MSG_TYPE,
+    ]);
+    const ids = sent.slice(1).map((m) => m.reqId);
+    expect(new Set(ids).size, 'reqId が重なっている').toBe(3);
+    // 🔴 親以外から来た答えは受けない
+    deliver({ type: WIDGET_CONTEXT_RES_MSG_TYPE, reqId: ids[0], context: { frontmatter: {}, tables: ['偽'] } }, false);
+    for (const id of ids) deliver({ type: WIDGET_CONTEXT_RES_MSG_TYPE, reqId: id, context: ctx });
+    expect(await pT).toEqual(ctx.tables);
+    expect(await pF).toEqual(ctx.frontmatter);
+    expect(await pC).toEqual(ctx);
+  });
+
+  it('🔴 答えが来なければ、待ち時間の後に空の答えを返す(書き出した HTML でも止まらない)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { api } = runPrelude();
+      const p = api.readNoteContext();
+      const pt = api.readTables();
+      vi.advanceTimersByTime(WIDGET_CONTEXT_TIMEOUT_MS + 1);
+      expect(await p).toEqual({ frontmatter: {}, tables: [] });
+      expect(await pt).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('壊れた答え(配列の前書き・表でない表)は空に直す', async () => {
+    const { api, sent, deliver } = runPrelude();
+    const p = api.readNoteContext();
+    deliver({ type: WIDGET_CONTEXT_RES_MSG_TYPE, reqId: sent[1]!.reqId, context: { frontmatter: [1], tables: 'x' } });
+    expect(await p).toEqual({ frontmatter: {}, tables: [] });
   });
 });
