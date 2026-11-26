@@ -54,6 +54,8 @@ import { spliceLines } from '@features/markdown/edit-journal';
 import { appKeymap, type KeymapStore } from './keymap';
 import { RichCell, type RichCellHooks, type RichSplit } from './rich-cell';
 import { composeRichBlock, nextRichMeta, PARAGRAPH_META } from '@features/markdown/rich-block';
+import { moveLinesWithInverse } from '@features/markdown/line-move';
+import { swapLines } from '@features/markdown/line-swap';
 
 /**
  * 🔴 **その場に自分の意味を持っている物**(2026-08-28。着地前レビュー E)。
@@ -281,9 +283,9 @@ export interface RowSwapCallbacks {
    */
   onInserted(els: readonly Element[]): void;
   /**
-   * 🔴 **リッチ編集を使うか**(フラグ `editor.rich`。v4.0 Phase 1 / PR-05)。開くたびに読む ──
-   *   フラグ画面で切り替えたら、次に押したブロックから効く(再起動は要らない)。
-   * ⚠ 渡さなければ使わない(= 今までの原文の `<textarea>` だけ。既定)。
+   * 🔴 **リッチ編集を使うか**(設定「編集の仕方」= リッチ編集。v4.0 Phase 1 / PR-05 → PR-06 で正規の設定へ昇格)。
+   *   開くたびに読む ── 設定を切り替えたら、次に押したブロックから効く(再起動は要らない)。
+   * ⚠ 渡さなければ使わない(= 今までの原文の `<textarea>` だけ)。
    */
   richEnabled?(): boolean;
 }
@@ -375,7 +377,15 @@ interface Active {
   rich: RichCell | null;
   /** リッチ編集で開いた(途中で原文へ切り替えても立ったまま)。書き足しの前後に空行を補うかの判定に使う。 */
   richOpened: boolean;
+  /**
+   * 🔴 リッチ編集で開いてよい開き方だったか(1 つの塊 / 項目 / 書き足す行。PR-06)。
+   * 原文の欄からリッチへ戻す(`Alt+M` / 「リッチ」ボタン)ときの門 ── 範囲・全文の編集では戻さない。
+   */
+  richAllowed: boolean;
 }
+
+/** 原文の欄の隣の「リッチ」ボタン(リッチ編集へ戻す。PR-06)の印。 */
+export const RICH_BACK_BUTTON_ATTR = 'data-pkc-rich-back';
 
 /** 🔴 この字数を超える本文だけ、連続入力のときに開放終端の走査をまとめる(#1467) */
 const OPEN_END_SYNC_MAX_CHARS = 20_000;
@@ -1263,10 +1273,11 @@ export class RowSwap {
       held: null,
       rich: null,
       richOpened: false,
+      richAllowed: o.rich === true,
     };
     const active = this.active;
     /**
-     * 🔴 **安全なブロックならリッチ編集のセルで開く**(フラグ `editor.rich`。PR-05)。
+     * 🔴 **安全なブロックならリッチ編集のセルで開く**(設定「編集の仕方」= リッチ編集。PR-05 / PR-06)。
      * ⚠ 判定は `RichCell.create` の 1 本(形 + 本物の描き手での往復が原文と 1 バイトも違わない)。
      *   通らなければ今までどおり原文の `<textarea>`(意図しない記法の破壊を 0 にする)。
      */
@@ -1275,27 +1286,101 @@ export class RowSwap {
         ? RichCell.create(document, o.source, this.richHooks())
         : null;
     if (rich !== null) {
-      active.rich = rich;
-      active.richOpened = true;
       slot.append(rich.wrap);
-      ROW_BODY.set(rich.wrap, () => {
-        // ⚠ 変換中は綴り直さない(DOM を読むだけでも、契約どおり封印の間は触らない)
-        if (active.composing || active.rich === null) return null;
-        const typed = active.rich.currentSource();
-        if (typed === o.source) return null;
-        const text = restoreEol(typed, o.crs, this.body.split('\n').length - 1 === o.endLine);
-        return spliceLines(this.body, o.startLine, o.endLine, this.padInsertion(active, text));
-      });
+      this.mountRich(active, rich);
       rich.focus(o.caret);
       return true;
     }
     slot.append(ta);
     this.wire(ta);
+    this.syncRichBack(active);
     // ⚠ 高さは `syncActiveBox` が 1 か所で決める(上限つき ── S6 の全文差し替えで
     //    5000 行の箱を作らない)。ここで別に代入しない
     this.syncActiveBox();
     ta.focus();
     ta.setSelectionRange(o.caret, o.caret);
+    return true;
+  }
+
+  /** リッチのセルを活性に載せる(DOM へ入れるのは呼び側)。控え(`ROW_BODY`)も張る。 */
+  private mountRich(active: Active, rich: RichCell): void {
+    active.rich = rich;
+    active.richOpened = true;
+    ROW_BODY.set(rich.wrap, () => {
+      // ⚠ 変換中は綴り直さない(DOM を読むだけでも、契約どおり封印の間は触らない)
+      if (active.composing || active.rich === null) return null;
+      const typed = active.rich.currentSource();
+      if (typed === active.source) return null;
+      const text = restoreEol(typed, active.crs, this.body.split('\n').length - 1 === active.endLine);
+      return spliceLines(this.body, active.startLine, active.endLine, this.padInsertion(active, text));
+    });
+  }
+
+  /**
+   * 🔴 **原文の欄の隣に「リッチ」ボタンを出す / 外す**(PR-06。片道を作らない)。
+   * 出すのは「リッチ編集を使う設定で、1 つのブロックを開いている」ときだけ。
+   */
+  private syncRichBack(a: Active): void {
+    const want = a.rich === null && a.richAllowed && this.cb.richEnabled?.() === true;
+    const cur = a.slot.querySelector<HTMLElement>(`[${RICH_BACK_BUTTON_ATTR}]`);
+    if (!want) {
+      cur?.remove();
+      return;
+    }
+    if (cur !== null) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.setAttribute(RICH_BACK_BUTTON_ATTR, '');
+    btn.textContent = 'リッチ';
+    btn.title = 'このブロックを記号を隠したリッチ編集に戻す(Alt+M)';
+    // ⚠ 押しても焦点を奪わない(奪うと欄の blur が確定して閉じ、戻す相手が消える)
+    btn.addEventListener('mousedown', (ev) => ev.preventDefault());
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      this.sourceToRich();
+    });
+    a.slot.append(btn);
+  }
+
+  /** 欄を差し替えている最中(外した欄の blur を確定に数えない)。 */
+  private switchingField = false;
+  /** 契約を張った欄(リッチ ⇔ 原文を往復しても二重に張らない)。 */
+  private readonly wiredFields = new WeakSet<HTMLTextAreaElement>();
+
+  /**
+   * 🔴 **原文の `<textarea>` → リッチのセル**(`Alt+M` / 「リッチ」ボタン。PR-06)。
+   * 打った内容と caret を持って行く。⚠ 表せない記法を含むなら理由を出して原文のまま(壊さない)。
+   * ⚠ 変換中は切り替えない。
+   */
+  sourceToRich(): boolean {
+    const a = this.active;
+    if (a === null || a.rich !== null || a.composing) return false;
+    if (this.cb.richEnabled?.() !== true) return false;
+    if (!a.richAllowed) {
+      this.cb.notify?.('リッチ編集は、1 つのブロックを開いているときだけ使えます');
+      return false;
+    }
+    const ta = a.textarea;
+    const text = normalizeEol(ta.value);
+    const caret = ta.selectionStart;
+    const rich = RichCell.create(document, text, this.richHooks());
+    if (rich === null) {
+      this.cb.notify?.(
+        text.trim() === ''
+          ? 'リッチ編集に戻すには、ブロックに字を入れてください'
+          : 'このブロックは表・コード・HTML などリッチ編集で表せない記法を含むため、原文のまま編集します',
+      );
+      return false;
+    }
+    this.switchingField = true;
+    try {
+      a.slot.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)?.remove();
+      ta.replaceWith(rich.wrap);
+    } finally {
+      this.switchingField = false;
+    }
+    this.mountRich(a, rich);
+    rich.focus(Math.min(caret, text.length));
     return true;
   }
 
@@ -1322,8 +1407,104 @@ export class RowSwap {
         if (this.active) this.active.composing = false;
       },
       notify: (m) => this.cb.notify?.(m),
+      moveBlock: (dir) => this.richMoveBlock(dir),
       keymap: this.keymap,
     };
+  }
+
+  /**
+   * 🔴 **リッチのセルのブロックを、上下のブロックと入れ替える**(`Alt+↑` / `Alt+↓`。PR-06)。
+   *
+   * - 段落・見出し・引用: 隣の**塊**と入れ替える(規則は読む面の掴みと同じ `moveLinesWithInverse` の 1 本 ──
+   *   空行の補い方・囲みの中へ入れない門もそちら)。
+   * - リストの項目: 隣の**項目**と入れ替える(子の項目ごと。規則は行の欄と同じ `swapLines` の 1 本)。リストの端では動かない。
+   * 打っていた字は動かす前に書き戻す。確定は 1 回(`cb.commit`)なので、取り消し(`edit-journal`)も 1 手で戻る。
+   * 動かしたあとは、動かした先のブロックをリッチのまま開き直す(続けて押せる)。
+   */
+  private richMoveBlock(dir: -1 | 1): void {
+    const a = this.active;
+    if (a === null || a.rich === null || a.composing) return;
+    if (a.endLine < a.startLine) {
+      this.cb.notify?.('まだ書き込んでいないブロックは動かせません');
+      return;
+    }
+    const typed = a.rich.currentSource();
+    const text = restoreEol(typed, a.crs, this.body.split('\n').length - 1 === a.endLine);
+    const before = spliceLines(this.body, a.startLine, a.endLine, text);
+    const end = a.startLine + text.split('\n').length - 1;
+    const lines = before.split('\n');
+    let after: string | null = null;
+    let newStart = a.startLine;
+    if (a.rich.meta.kind === 'list-item') {
+      const neighbor = lines[dir < 0 ? a.startLine - 1 : end + 1];
+      // ⚠ リストの端(隣が項目でない)では動かさない ── 項目がリストの外へ出ると別の塊になる
+      if (neighbor !== undefined && /^\s*([-*+]|\d{1,9}[.)])(\s|$)/.test(neighbor)) {
+        let off = 0;
+        for (let i = 0; i < a.startLine; i += 1) off += lines[i]!.length + 1;
+        const r = swapLines({ text: before, start: off, end: off }, dir);
+        if (r !== null) {
+          after = r.text;
+          newStart = r.text.slice(0, r.start).split('\n').length - 1;
+        }
+      }
+    } else if (a.sub === null) {
+      const delta = end - a.endLine;
+      let toBefore: number | null = null;
+      if (dir < 0) {
+        for (let i = a.blockIndex - 1; i >= 0; i -= 1) {
+          if (this.starts[i]! >= 0) {
+            toBefore = this.starts[i]!;
+            break;
+          }
+        }
+      } else {
+        for (let i = a.blockIndex + a.blockCount; i < this.starts.length; i += 1) {
+          if (this.starts[i]! >= 0 && this.ends[i]! >= 0) {
+            toBefore = this.ends[i]! + 1 + delta;
+            break;
+          }
+        }
+      }
+      if (toBefore !== null) {
+        const moved = moveLinesWithInverse(before, {
+          start: a.startLine,
+          end,
+          toBefore,
+          lines: lines.slice(a.startLine, end + 1),
+          toBeforeLine: lines[toBefore] ?? null,
+        });
+        if (moved !== null && moved.inverse !== null) {
+          after = moved.body;
+          newStart = moved.inverse.start;
+        }
+      }
+    }
+    if (after === null || after === before) {
+      this.cb.notify?.(dir < 0 ? 'これより上へは動かせません' : 'これより下へは動かせません');
+      return;
+    }
+    // 変わった行の範囲だけを書き戻す(前後の一致を剥ぐ)
+    const old = this.body.split('\n');
+    const next = after.split('\n');
+    let p = 0;
+    while (p < old.length && p < next.length && old[p] === next[p]) p += 1;
+    let q = 0;
+    while (q < old.length - p && q < next.length - p && old[old.length - 1 - q] === next[next.length - 1 - q]) q += 1;
+    let from = p;
+    let to = old.length - 1 - q;
+    let repl = next.slice(p, next.length - q);
+    if (to < from || repl.length === 0) {
+      from = 0;
+      to = old.length - 1;
+      repl = next;
+    }
+    // ⚠ 活性を畳んでから書く(畳む前に書くと、着弾の描き直しが「外から変わった」と見て閉じる)
+    this.restoreActive();
+    if (next.length === old.length) this.body = spliceLines(this.body, from, to, repl.join('\n'));
+    else this.staleAfter = { end: to, delta: next.length - old.length };
+    this.awaitingUpdate = true;
+    this.cb.commit(from, to, repl.join('\n'));
+    this.queueOpen({ kind: 'line', line: newStart, caret: 'start', exact: true });
   }
 
   /**
@@ -1356,8 +1537,15 @@ export class RowSwap {
     a.rich = null;
     const ta = a.textarea;
     ta.value = text;
-    rich.wrap.replaceWith(ta);
+    this.switchingField = true;
+    try {
+      rich.wrap.replaceWith(ta);
+    } finally {
+      this.switchingField = false;
+    }
     this.wire(ta);
+    // 🔴 戻り道(「リッチ」ボタン / Alt+M)を出す ── 片道を作らない(PR-06)
+    this.syncRichBack(a);
     this.syncActiveBox();
     ta.focus();
     ta.setSelectionRange(start, end);
@@ -1542,6 +1730,9 @@ export class RowSwap {
 
   /** textarea に契約を張る(IME / 確定の引き金 / auto pair)。 */
   private wire(ta: HTMLTextAreaElement): void {
+    // ⚠ リッチ ⇔ 原文を往復しても契約を二重に張らない(同じ欄を使い回す)
+    if (this.wiredFields.has(ta)) return;
+    this.wiredFields.add(ta);
     ta.addEventListener('compositionstart', () => {
       const a = this.active;
       if (a) a.composing = true;
@@ -1564,6 +1755,15 @@ export class RowSwap {
       // 🔴 Chrome は確定の直後の keydown を `isComposing: false` + `keyCode 229` で送る(binder と同じ見方。#1087)
       if (ke.isComposing || ke.keyCode === 229) return;
       const cmd = this.keymap.match(ke, 'row');
+      /**
+       * 🔴 **原文の欄からリッチ編集へ戻す**(`Alt+M`。PR-06)── リッチのセルの「原文で編集」と同じ鍵の往復。
+       * ⚠ リッチ編集を使う設定でなければ何もしない(今までどおり)。
+       */
+      if (cmd === 'row-rich-source' && this.cb.richEnabled?.() === true) {
+        ev.preventDefault();
+        this.sourceToRich();
+        return;
+      }
       if (cmd === 'row-cancel') {
         /**
          * 🔴 **一覧(書式の「その他 ▾」など)が開いている間の Esc は、一覧を閉じるだけ**(#1982 段 3 の着地前レビュー)。
@@ -1656,6 +1856,8 @@ export class RowSwap {
        */
       const doc = ta.ownerDocument;
       if (doc.activeElement === ta && !doc.hasFocus()) return;
+      // ⚠ リッチのセルへ差し替えている最中の blur は確定に数えない(PR-06)
+      if (this.switchingField) return;
       this.commitActive();
     });
     /**

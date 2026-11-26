@@ -2,16 +2,18 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, dismissAnnounce } from './helpers';
 
 /**
- * 🔴 **ブロック単位のリッチ編集**(v4.0 Phase 1 / PR-05。フラグ `editor.rich`)の実ブラウザ検証。
+ * 🔴 **ブロック単位のリッチ編集**(v4.0 Phase 1 / PR-05・PR-06。設定「編集の仕方」= リッチ編集)の実ブラウザ検証。
  *
- * 1. フラグを有効にしてノートを開く
+ * 1. 設定「編集の仕方」のプルダウンから「リッチ編集(記号を隠して編集)」を選び、ノートを開く
  * 2. 段落を押す → 記号の無い `contenteditable` が開く → 打つ + 帯で太字・ハイライト・文字色 → ブロックの外を押して確定
  *    → 原文が `**…**` / `==…==` / `:…:#…:` のプレーンな PKC-Markdown で保存され、**コード・`:::format` は 1 バイトも変わらない**
+ *    (PR-06)文字色を当てた直後の `Ctrl+Z` で当てる前へ戻り、`Ctrl+Y` で当て直せる
  * 3. コード・`:::format` のブロックを押すと、自動で原文の `<textarea>` が開く
- * 4. セルの「原文」で `<textarea>` に切り替わる(打った内容を持って行く)
- * 5. フラグ OFF(既定)では今までどおり `<textarea>` が開く
- * ⚠ 起動は 2 回だけ(`scripts/smoke-budget.mjs`)── 「何も変えずに閉じても 1 バイトも変わらない」は 1 本目の道中に載せる。
- *   フラグ OFF は保存値が違うので別の起動が要る。
+ * 4. セルの「原文」で `<textarea>` に切り替わる(打った内容を持って行く)。(PR-06)`Alt+M` でリッチ → 原文 → リッチを往復できる
+ * 5.(PR-06)空の段落で `/` → 見出し 2 を挿入、続けて `/code` でコードブロックを挿入 → 原文へ正しく保存される
+ * 6. 既定(live)では今までどおり `<textarea>` が開く
+ * ⚠ 起動は 2 回だけ(`scripts/smoke-budget.mjs`)── 設定の切替から挿入までは 1 本目の道中に載せる。
+ *   既定(live)は保存値が違うので別の起動が要る。
  *
  * 🔑 押し方は実マウス(`clickReal` = mousedown → mouseup → click)── 帯のボタンがセルから焦点を奪わないこと
  *   (奪うとセルが確定して閉じ、書き込む先が消える)まで含めて見る。
@@ -38,15 +40,14 @@ const DOC = [
   ':::',
 ].join('\n');
 
-/** フラグを保存値として立てる(ブラウザの保存に置く ── フラグ画面で ON にしたのと同じ)。 */
-async function enableRich(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    try {
-      localStorage.setItem('pkc3.flags', JSON.stringify({ 'editor.rich': true }));
-    } catch {
-      /* sandbox の frame ── アプリの設定とは無関係 */
-    }
-  });
+/** 🔴 設定画面の「編集の仕方」のプルダウンで「リッチ編集」を選ぶ(本物の選択欄 ── dead control を出さない)。 */
+async function chooseRich(page: Page): Promise<void> {
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const select = page.locator('[data-pkc-field="editor-mode-select"]');
+  await expect(select).toBeVisible();
+  await expect(select.locator('option[value="rich"]')).toHaveText(/リッチ編集\(記号を隠して編集\)/);
+  await select.selectOption('rich');
+  await expect(select).toHaveValue('rich');
 }
 
 /** セルの中の字を選ぶ(`contenteditable` の選択)。 */
@@ -101,10 +102,10 @@ async function seed(page: Page, rich: boolean): Promise<void> {
 
 test('🔴 リッチ編集: 段落を記号なしで編集し、帯の書式がプレーンな PKC-Markdown で保存され、ほかのブロックは 1 バイトも変わらない', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await enableRich(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
   await dismissAnnounce(page);
+  await chooseRich(page);
   await seed(page, true);
   const live = page.locator(LIVE);
 
@@ -155,6 +156,17 @@ test('🔴 リッチ編集: 段落を記号なしで編集し、帯の書式が�
   await expect(red, '一覧から選んだらセルが閉じた(書き込む先が消える)').toHaveText('追記');
   await expect(red).toHaveCSS('color', 'rgb(224, 49, 49)');
 
+  // 🔴 (PR-06)書式を当てた直後の Ctrl+Z で当てる前へ戻り、Ctrl+Y で当て直せる(セルは閉じない)
+  await page.keyboard.press('Control+z');
+  await expect(live.locator(`${CELL} [data-pkc-rich-color]`), 'Ctrl+Z で文字色が戻らない').toHaveCount(0);
+  await expect(live.locator(CELL)).toHaveText('書き換える段落と追記');
+  await expect(live.locator(`${CELL} strong`)).toHaveText('書き換える');
+  await page.keyboard.press('Control+y');
+  await expect(live.locator(`${CELL} [data-pkc-rich-color="${RED}"]`), 'Ctrl+Y で文字色が戻らない').toHaveText('追記');
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+Shift+z');
+  await expect(live.locator(`${CELL} [data-pkc-rich-color="${RED}"]`), 'Ctrl+Shift+Z で文字色が戻らない').toHaveText('追記');
+
   // ブロックの外(見出し)を押して確定 ── 段落は描画に戻り、見出しがセルで開く
   await clickReal(page, live.locator('h1', { hasText: '題' }));
   await expect(live.locator(`h1${CELL}`)).toBeVisible();
@@ -197,15 +209,66 @@ test('🔴 リッチ編集: 段落を記号なしで編集し、帯の書式が�
   await expect(row).toBeVisible();
   await expect(row).toHaveValue(`**書き換える**==段落==と:追記!:${RED}:`);
   await expect(live.locator(CELL)).toHaveCount(0);
+  // 🔴 (PR-06)Alt+M で原文 → リッチへ戻せる(片道を作らない)。もう一度 Alt+M で原文へ
+  await page.keyboard.press('Alt+m');
+  await expect(live.locator(CELL), 'Alt+M で原文からリッチへ戻らない').toBeVisible();
+  await expect(live.locator(ROW)).toHaveCount(0);
+  await expect(live.locator(`${CELL} [data-pkc-rich-color="${RED}"]`)).toHaveText('追記!');
+  await page.keyboard.press('Alt+m');
+  await expect(live.locator(ROW)).toHaveValue(`**書き換える**==段落==と:追記!:${RED}:`);
+  await expect(live.locator('[data-pkc-rich-back]'), '原文の欄の隣に「リッチ」ボタンが無い').toBeVisible();
+  await clickReal(page, `${LIVE} [data-pkc-rich-back]`);
+  await expect(live.locator(CELL)).toBeVisible();
   await page.keyboard.press('Tab');
   await expect(live.locator(ROW)).toHaveCount(0);
+  await expect(live.locator(CELL)).toHaveCount(0);
   const after = await readWholeBody(page);
   expect(after.split('\n').slice(4)).toEqual(DOC.split('\n').slice(4));
+
+  // 🔴 (PR-06)空の段落で / → 一覧。Esc は一覧だけを閉じて / を残す。見出し 2 → 続けて /code でコードブロック
+  await clickReal(page, live.locator('h1', { hasText: '題' }));
+  await expect(live.locator(`h1${CELL}`)).toBeVisible();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  const para = live.locator(CELL);
+  await expect(para).toBeVisible();
+  await expect(para).toHaveText('');
+  const slashMenu = page.locator('[data-pkc-rich-insert-menu="slash"]');
+  await page.keyboard.type('/');
+  await expect(slashMenu, '/ で一覧が開かない').toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(slashMenu).toHaveCount(0);
+  await expect(live.locator(CELL), 'Esc でセルまで閉じた').toHaveText('/');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('/');
+  await expect(slashMenu).toBeVisible();
+  await page.keyboard.type('見出し');
+  await expect(slashMenu.locator('button[role="menuitem"]')).toHaveText(['見出し 1', '見出し 2', '見出し 3']);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(slashMenu.locator('[data-pkc-active]')).toHaveText('見出し 2');
+  await page.keyboard.press('Enter');
+  await expect(live.locator(`h2${CELL}`), '見出し 2 にならない').toBeVisible();
+  await expect(live.locator(`h2${CELL}`)).toHaveText('');
+  await page.keyboard.type('章');
+  await page.keyboard.press('Enter');
+  await expect(live.locator(CELL)).toHaveText('');
+  await page.keyboard.type('/code');
+  await expect(slashMenu.locator('button[role="menuitem"]')).toHaveText(['コードブロック']);
+  await page.keyboard.press('Enter');
+  const codeRow = live.locator(ROW);
+  await expect(codeRow, 'コードブロックで原文の編集へ移らない').toHaveValue('```\n\n```');
+  await page.keyboard.type('x = 1');
+  await page.keyboard.press('Tab');
+  await expect(live.locator(ROW)).toHaveCount(0);
+  const inserted = await readWholeBody(page);
+  expect(inserted.startsWith('# 題\n\n## 章\n\n```\nx = 1\n```\n\n**書き換える**')).toBe(true);
+  expect(inserted.split('\n').slice(-7)).toEqual(DOC.split('\n').slice(4));
 
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
 
-test('🔴 フラグ OFF(既定)では今までどおり原文の <textarea> が開く', async ({ page }) => {
+test('🔴 既定(1 画面で編集(ライブ))では今までどおり原文の <textarea> が開く', async ({ page }) => {
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await dismissAnnounce(page);
@@ -213,6 +276,10 @@ test('🔴 フラグ OFF(既定)では今までどおり原文の <textarea> が
   const live = page.locator(LIVE);
   await clickReal(page, live.locator('p', { hasText: '書き換える段落' }));
   await expect(live.locator(ROW)).toHaveValue('書き換える段落');
+  await expect(page.locator(CELL)).toHaveCount(0);
+  // 既定では「リッチ」ボタンも出ず、Alt+M でリッチにならない
+  await expect(page.locator('[data-pkc-rich-back]')).toHaveCount(0);
+  await page.keyboard.press('Alt+m');
   await expect(page.locator(CELL)).toHaveCount(0);
   await page.keyboard.press('Escape');
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);

@@ -611,7 +611,14 @@ import { parseLinkTarget } from '@features/entry-ref/link-target';
 import { flashCopied, handleCopyMdBlock, MENU_FROM_ATTR } from './copy-md-block';
 import { finishCopy, selectedMarkdown } from './copy-source';
 import { formatTarget } from './format-target';
-import { activeRichCell, RICH_CELL_FIELD, richCellOf } from '@adapter/ui/render/rich-cell';
+import {
+  activeRichCell,
+  RICH_CELL_FIELD,
+  RICH_INSERT_ID_ATTR,
+  RICH_INSERT_SLASH_ATTR,
+  richCellOf,
+} from '@adapter/ui/render/rich-cell';
+import { RICH_INSERT_ITEMS, type RichInsertId } from '@features/markdown/rich-insert';
 import { installLongPress, LONG_PRESS_TARGET, LONG_PRESS_TARGETS } from './long-press';
 import { isRepeatUnit, materializedDates } from '@features/schedule/repeat';
 import { buildIcs, resolveIcsZone } from '@features/schedule/ics';
@@ -13537,6 +13544,16 @@ const ACTIONS: Record<string, ActionHandler> = {
       insertText(ta, iconShortcodeFor(name));
     });
   },
+  /**
+   * 🔴 **リッチ編集のブロックの挿入**(`/` の一覧・「+」の一覧の項目。v4.0 Phase 1 / PR-06)。
+   * 当て方はセルの `insertBlock` の 1 本(項目の意味は `features/markdown/rich-insert.ts`)。
+   * ⚠ 開いているセルが無い(一覧が残っていた)なら何もしない ── 書き込む先が無い。
+   */
+  'rich-insert-block': (_dispatcher, target, _services, root) => {
+    const id = target.getAttribute(RICH_INSERT_ID_ATTR) ?? '';
+    if (!RICH_INSERT_ITEMS.some((it) => it.id === id)) return;
+    activeRichCell(root)?.insertBlock(id as RichInsertId, target.getAttribute(RICH_INSERT_SLASH_ATTR) === '1');
+  },
   'format-text': (_dispatcher, target, services, root) => {
     const op = target.getAttribute('data-pkc-format') as FormatOp | null;
     if (!op) return;
@@ -22247,6 +22264,8 @@ export function bindActions(
     if (act === 'open-format-more') ev.preventDefault();
     // 🔴 「文字色 ▾」「配置 ▾」も同じ(PR-04)。「ページ設定 ▾」は押したときに行を確定させてからパネルへ焦点を移す
     if (act === 'open-format-menu' || act === 'open-page-setup') ev.preventDefault();
+    // 🔴 リッチ編集のブロックの挿入の一覧(PR-06)も同じ ── 奪うとセルが確定して閉じ、当てる先が消える
+    if (act === 'rich-insert-block') ev.preventDefault();
   };
   const onInput = (ev: Event) => {
     if (isEditorBody(ev.target)) {

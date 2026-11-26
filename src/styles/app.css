@@ -3253,7 +3253,7 @@ li[data-pkc-row-slot] {
 [data-pkc-field='row-source']:focus-visible {
   outline-width: 1px;
 }
-/* 🔴 **リッチ編集のセル**(v4.0 Phase 1 / PR-05。フラグ `editor.rich`)。
+/* 🔴 **リッチ編集のセル**(v4.0 Phase 1 / PR-05・PR-06。設定「編集の仕方」= リッチ編集)。
  * 原文の欄と違い**本文と同じ字**(等幅にしない)── 記号を隠して、読む面とほぼ同じ見た目のまま打てる。
  * 編集中であることは左端の accent の線で示す(色は意味にだけ使う。枠で囲まない)。
  * ⚠ `pre-wrap`: 打った空白を詰めない・字の中の改行(貼り付け)をそのまま見せる。 */
@@ -3281,8 +3281,11 @@ li[data-pkc-row-slot] {
   outline: none;
   caret-color: var(--accent);
 }
-/* 「原文」に切り替えるボタン ── 端に控えめに(ゴースト型)。焦点・ホバーで濃くする */
-[data-pkc-rich-source] {
+/* 「原文」に切り替えるボタン・「+」(ブロックの挿入)・原文の欄からの「リッチ」(PR-06)── 端に控えめに(ゴースト型)。
+ * 焦点・ホバーで濃くする */
+[data-pkc-rich-source],
+[data-pkc-rich-insert-open],
+[data-pkc-rich-back] {
   flex: 0 0 auto;
   align-self: flex-start;
   font: inherit;
@@ -3297,7 +3300,11 @@ li[data-pkc-row-slot] {
   opacity: 0.7;
 }
 [data-pkc-rich-source]:hover,
-[data-pkc-rich-source]:focus-visible {
+[data-pkc-rich-source]:focus-visible,
+[data-pkc-rich-insert-open]:hover,
+[data-pkc-rich-insert-open]:focus-visible,
+[data-pkc-rich-back]:hover,
+[data-pkc-rich-back]:focus-visible {
   opacity: 1;
   color: var(--fg);
   border-color: var(--hairline, var(--border));
@@ -3305,6 +3312,11 @@ li[data-pkc-row-slot] {
 [data-pkc-rich-check] {
   flex: 0 0 auto;
   margin: 0;
+}
+/* 原文の欄の下の右端に「リッチ」(リッチ編集へ戻す)── 欄の幅を削らない */
+[data-pkc-rich-back] {
+  display: block;
+  margin-left: auto;
 }
 /* 🔴 **開放終端の色変え**(user 提案 2026-08-05「行を色変え」)。
  * ⚠ 「閉じ待ち」は**エラーではない**ので赤にしない ── 左端の帯だけで示す。

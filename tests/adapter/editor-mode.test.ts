@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { DEFAULT_EDITOR_MODE, EDITOR_MODES, isEditorMode } from '../../src/features/editor-mode';
+import { DEFAULT_EDITOR_MODE, EDITOR_MODES, isEditorMode, isOnePaneEditorMode, isRichEditorMode } from '../../src/features/editor-mode';
 import { EditorModeStore } from '../../src/adapter/ui/render/editor-mode';
 import { SettingsRenderer } from '../../src/adapter/ui/render/settings';
 import { initialState } from '../../src/adapter/state/app-state';
@@ -24,14 +24,21 @@ describe('意味論(features/editor-mode)', () => {
     expect(DEFAULT_EDITOR_MODE).toBe('live');
   });
 
-  it('一覧は live と split の 2 つ(2 ペインは廃止されていない)', () => {
-    expect(EDITOR_MODES.map((m) => m.id)).toEqual(['live', 'split']);
+  it('一覧は live / rich / split の 3 つ(2 ペインは廃止されていない。rich は PR-06 で flag から昇格)', () => {
+    expect(EDITOR_MODES.map((m) => m.id)).toEqual(['live', 'rich', 'split']);
+  });
+
+  it('🔴 rich は 1 画面の編集の一種(押したブロックをその場で開く)。リッチのセルで開くのは rich だけ', () => {
+    expect(EDITOR_MODES.filter((m) => isOnePaneEditorMode(m.id)).map((m) => m.id)).toEqual(['live', 'rich']);
+    expect(EDITOR_MODES.filter((m) => isRichEditorMode(m.id)).map((m) => m.id)).toEqual(['rich']);
   });
 
   it('引き当てられない値を弾く', () => {
     expect(isEditorMode('live')).toBe(true);
     expect(isEditorMode('split')).toBe(true);
+    expect(isEditorMode('rich')).toBe(true);
     expect(isEditorMode('editor.live')).toBe(false);
+    expect(isEditorMode('editor.rich')).toBe(false);
     expect(isEditorMode('')).toBe(false);
   });
 });

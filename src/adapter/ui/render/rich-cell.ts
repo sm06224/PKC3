@@ -1,5 +1,5 @@
 /**
- * 🔴 **リッチ編集セル**(v4.0 Phase 1 / PR-05。ビジョン 4-A。フラグ `editor.rich`)。
+ * 🔴 **リッチ編集セル**(v4.0 Phase 1 / PR-05・PR-06。ビジョン 4-A / 4-B。設定「編集の仕方」= リッチ編集)。
  *
  * 1 画面編集(`row-swap.ts`)で押したブロックが**安全な単純ブロック**なら、原文の `<textarea>` の代わりに
  * 記号を隠した `contenteditable` を置く。保存の正本は**プレーンな PKC-Markdown のまま** ──
@@ -29,8 +29,17 @@ import {
   type RichPoint,
 } from '@features/markdown/rich-block';
 import type { TextSelection } from '@features/markdown/text-ops';
+import { createRichHistory, pushRich, redoRich, undoRich, type RichHistory, type RichSnap } from '@features/markdown/rich-history';
+import {
+  applyRichInsert,
+  filterRichInsert,
+  RICH_INSERT_ITEMS,
+  slashQueryOf,
+  type RichInsertId,
+  type RichInsertItem,
+} from '@features/markdown/rich-insert';
 import type { KeymapStore } from './keymap';
-import { contextMenuOpen } from './context-menu';
+import { attachKeepFocusNav, closeContextMenu, contextMenuOpen, menuNavItems, openContextMenu, type MenuItem } from './context-menu';
 
 /** セルの印(`data-pkc-field`)。⚠ 控える側(`main.ts`)・書式の帯(`binder.ts`)と同じ字を使う(§7)。 */
 export const RICH_CELL_FIELD = 'rich-cell';
@@ -38,6 +47,17 @@ export const RICH_CELL_FIELD = 'rich-cell';
 export const RICH_SOURCE_BUTTON_ATTR = 'data-pkc-rich-source';
 /** チェックリストの印の箱(セルの外。押すと印が切り替わる)。 */
 export const RICH_CHECK_ATTR = 'data-pkc-rich-check';
+/** 「+」(ブロックの挿入の一覧を開く)ボタンの印。 */
+export const RICH_INSERT_BUTTON_ATTR = 'data-pkc-rich-insert-open';
+/**
+ * 挿入の一覧の項目の押し所(`data-pkc-action`)。⚠ 受け手は binder の 1 本(`ACTIONS`)── 一覧の側に実行の口を作らない。
+ * 項目の id は {@link RICH_INSERT_ID_ATTR}、`/` で開いたかは {@link RICH_INSERT_SLASH_ATTR} が運ぶ。
+ */
+export const RICH_INSERT_ACTION = 'rich-insert-block';
+export const RICH_INSERT_ID_ATTR = 'data-pkc-rich-insert';
+export const RICH_INSERT_SLASH_ATTR = 'data-pkc-rich-slash';
+/** 打った字を 1 手にまとめる間(打つ手がこの時間止まったら 1 件記録する)。 */
+const TYPING_CHUNK_MS = 600;
 
 /** 本物の描き手(セルに入れる木はこれで作る ── 自前の構文解析を持たない)。 */
 export function richRenderHtml(md: string): string {
@@ -78,6 +98,8 @@ export interface RichCellHooks {
   unseal(): void;
   /** 押せない・表せないときの知らせ。 */
   notify(message: string): void;
+  /** 🔴 ブロックを上下のブロックと入れ替える(`Alt+↑` / `Alt+↓`。PR-06)。 */
+  moveBlock(dir: -1 | 1): void;
   readonly keymap: KeymapStore;
 }
 
@@ -118,6 +140,12 @@ export class RichCell {
   /** 枠を組み直している最中(外したセルの blur を確定に数えない)。 */
   private rebuilding = false;
   private readonly doc: Document;
+  /** 🔴 セルの中の取り消し / やり直しの履歴(PR-06。規則は `rich-history.ts`)。 */
+  private history: RichHistory;
+  /** 打った字をまとめている間の timer(止まったら 1 件記録)。 */
+  private typingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 🔴 挿入の一覧が開いているか(`slash` = `/` で開いた ── 打った字で絞り込み、選ぶと `/…` を消す)。 */
+  private insertMenu: { slash: boolean; el: HTMLElement; detach: () => void } | null = null;
 
   private constructor(doc: Document, source: string, meta: RichBlockMeta, nodes: DocumentFragment, private readonly hooks: RichCellHooks) {
     this.doc = doc;
@@ -126,6 +154,7 @@ export class RichCell {
     this.wrap = doc.createElement('div');
     this.wrap.setAttribute('data-pkc-rich-wrap', '');
     this.cell = this.build(nodes);
+    this.history = createRichHistory({ markdown: source, start: source.length, end: source.length });
   }
 
   /**
@@ -198,6 +227,23 @@ export class RichCell {
       this.toSource();
     });
     this.wrap.append(btn);
+    /**
+     * 🔴 **「+」── ブロックの挿入の一覧**(PR-06)。`/` を打たなくても同じ一覧が出る(マウスだけで完結)。
+     * ⚠ 押しても焦点を奪わない(奪うとセルが確定して閉じ、当てる先が消える)。
+     */
+    const plus = doc.createElement('button');
+    plus.type = 'button';
+    plus.setAttribute(RICH_INSERT_BUTTON_ATTR, '');
+    plus.textContent = '+';
+    plus.title = 'ブロックを挿入する(見出し・リスト・表・コードブロックなど。空の段落で / を打っても開きます)';
+    plus.setAttribute('aria-label', 'ブロックを挿入する');
+    plus.addEventListener('mousedown', (ev) => ev.preventDefault());
+    plus.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      if (this.insertMenu !== null) this.closeInsertMenu();
+      else this.openInsertMenu(false, RICH_INSERT_ITEMS);
+    });
+    this.wrap.append(plus);
     CELLS.set(cell, this);
     this.wire(cell);
     this.cell = cell;
@@ -207,6 +253,9 @@ export class RichCell {
   /** 後片付け(聞き耳を止める)。⚠ 外す前に呼ぶ ── 焦点のあるセルを外すと同期で blur が来る。 */
   dispose(): void {
     this.disposed = true;
+    if (this.typingTimer !== null) clearTimeout(this.typingTimer);
+    this.typingTimer = null;
+    this.closeInsertMenu();
   }
 
   get isDisposed(): boolean {
@@ -257,6 +306,8 @@ export class RichCell {
    */
   applyEdit(fn: (sel: TextSelection) => TextSelection): void {
     if (this.disposed || this.hooks.isComposing()) return;
+    // 🔴 当てる前の形を 1 件にする(打ちかけの字もここで区切る ── 書式の直後の Ctrl+Z で、当てる前へ戻る)
+    this.recordNow();
     const cur = this.sourceSelection();
     const next = fn(cur);
     if (next.text === cur.text) {
@@ -265,7 +316,158 @@ export class RichCell {
       this.setSourceSelection(next.start, next.end);
       return;
     }
-    this.reload(next.text, next.start, next.end);
+    // 🔴 当てた後の形も 1 件(やり直しの行き先)。⚠ 原文の編集へ移ったら記録しない(セルは閉じた)
+    if (this.reload(next.text, next.start, next.end)) this.record({ markdown: next.text, start: next.start, end: next.end });
+  }
+
+  // ── 🔴 セルの中の取り消し / やり直し(PR-06) ─────────────────────────
+
+  /** 1 件記録する(履歴の規則は `pushRich` の 1 本)。 */
+  private record(snap: RichSnap): void {
+    this.history = pushRich(this.history, snap);
+  }
+
+  /**
+   * いまの形を 1 件記録する(打ちかけの字を区切る)。⚠ 変換中は**何もしない**(DOM も読まない ── 契約)。
+   */
+  private recordNow(): void {
+    if (this.typingTimer !== null) {
+      clearTimeout(this.typingTimer);
+      this.typingTimer = null;
+    }
+    if (this.disposed || this.hooks.isComposing()) return;
+    const s = this.sourceSelection();
+    this.record({ markdown: s.text, start: s.start, end: s.end });
+  }
+
+  /** 打った字 ── 打つ手が止まったら 1 件にまとめる。 */
+  private scheduleTyping(): void {
+    if (this.typingTimer !== null) clearTimeout(this.typingTimer);
+    this.typingTimer = setTimeout(() => {
+      this.typingTimer = null;
+      if (!this.disposed) this.recordNow();
+    }, TYPING_CHUNK_MS);
+  }
+
+  /** 履歴の 1 件をセルへ戻す(DOM と caret を組み直す)。 */
+  private restoreSnap(snap: RichSnap): void {
+    this.reload(snap.markdown, snap.start, snap.end);
+  }
+
+  /**
+   * 🔴 **セルの中で 1 つ取り消す**。
+   * @returns 取り消せたか。⚠ `false`(セルの履歴の先頭)なら、呼び側はブロックを跨ぐ取り消しへ譲る
+   */
+  undo(): boolean {
+    if (this.disposed || this.hooks.isComposing()) return false;
+    this.recordNow();
+    const r = undoRich(this.history);
+    if (r === null) return false;
+    this.history = r.history;
+    this.restoreSnap(r.snap);
+    return true;
+  }
+
+  /** 🔴 セルの中で 1 つやり直す。@returns やり直せたか */
+  redo(): boolean {
+    if (this.disposed || this.hooks.isComposing()) return false;
+    this.recordNow();
+    const r = redoRich(this.history);
+    if (r === null) return false;
+    this.history = r.history;
+    this.restoreSnap(r.snap);
+    return true;
+  }
+
+  /** test 用: 履歴の件数(戻せる手 / やり直せる手)。 */
+  historyDepth(): { past: number; future: number } {
+    return { past: this.history.past.length, future: this.history.future.length };
+  }
+
+  // ── 🔴 ブロックの挿入(`/` と「+」。PR-06) ───────────────────────────
+
+  /** 挿入の一覧が開いているか。 */
+  get insertMenuOpen(): boolean {
+    return this.insertMenu !== null && this.insertMenu.el.isConnected;
+  }
+
+  /**
+   * 一覧を開く(開いていれば項目を差し替える)。⚠ 焦点はセルに残す(`keepFocus`)──
+   * ↑ ↓ で項目を選び Enter で押せる(`attachKeepFocusNav`)。Esc は一覧だけを閉じる(binder の `onMenuKey`)。
+   */
+  openInsertMenu(slash: boolean, items: readonly RichInsertItem[]): void {
+    const root = this.cell.closest<HTMLElement>('[data-pkc-slot="root"]');
+    if (root === null || this.disposed) return;
+    if (items.length === 0) {
+      this.closeInsertMenu();
+      return;
+    }
+    this.insertMenu?.detach();
+    const menuItems: MenuItem[] = items.map((it) => ({
+      action: RICH_INSERT_ACTION,
+      label: it.label,
+      hint: it.hint,
+      attrs: { [RICH_INSERT_ID_ATTR]: it.id, [RICH_INSERT_SLASH_ATTR]: slash ? '1' : '0' },
+    }));
+    const r = this.cell.getBoundingClientRect();
+    const opened = openContextMenu(root, { x: r.left, y: r.bottom }, menuItems, this.cell, {}, { keepFocus: true });
+    if (opened === null) {
+      this.insertMenu = null;
+      return;
+    }
+    opened.el.setAttribute('data-pkc-rich-insert-menu', slash ? 'slash' : 'button');
+    this.insertMenu = { slash, el: opened.el, detach: attachKeepFocusNav(root, opened.el, this.cell) };
+  }
+
+  /** 一覧を閉じる(自分が開いた一覧が残っているときだけ)。 */
+  closeInsertMenu(): void {
+    const m = this.insertMenu;
+    if (m === null) return;
+    this.insertMenu = null;
+    m.detach();
+    if (m.el.isConnected) {
+      const root = m.el.parentElement;
+      if (root !== null) closeContextMenu(root);
+    }
+  }
+
+  /**
+   * `/` の一覧を開く・絞る・閉じる(打った字が確定したあとに呼ぶ)。
+   * ⚠ 変換中は呼ばれない(`input` の `isComposing` と封印で止める)── 確定してから見る。
+   */
+  private syncSlash(): void {
+    if (this.disposed || this.hooks.isComposing()) return;
+    const text = (this.cell.textContent ?? '').replace(/\u200b/g, '');
+    const q = this.meta.kind === 'paragraph' ? slashQueryOf(text) : null;
+    if (this.insertMenu !== null && !this.insertMenu.el.isConnected) this.closeInsertMenu();
+    if (q === null) {
+      if (this.insertMenu?.slash === true) this.closeInsertMenu();
+      return;
+    }
+    // ⚠ 開くのは「空の段落で / を打った」ときだけ(`/` 1 字)。一覧が出ている間は打った字で絞る
+    if (this.insertMenu === null && q !== '') return;
+    if (this.insertMenu !== null && !this.insertMenu.slash) return;
+    this.openInsertMenu(true, filterRichInsert(q));
+  }
+
+  /**
+   * 🔴 **一覧の項目を当てる**(binder の `rich-insert-block` から)。
+   * - 種類を変える項目 → いまのセルの枠を変えてリッチ編集を続ける。
+   * - 差し込む項目 → テンプレートを入れて原文の編集へ移る(リッチでは表せない)。
+   */
+  insertBlock(id: RichInsertId, slash: boolean): void {
+    if (this.disposed || this.hooks.isComposing()) return;
+    this.closeInsertMenu();
+    this.recordNow();
+    const cur = this.sourceSelection();
+    const res = applyRichInsert(id, cur.text, slash);
+    // ⚠ 当てたのに変わらない形にはしない ── 綴り直しを要する
+    this.dirty = true;
+    if (res.mode === 'source') {
+      this.hooks.toSource(res.text, res.start, res.end);
+      return;
+    }
+    if (this.reload(res.text, res.start, res.end)) this.record({ markdown: res.text, start: res.start, end: res.end });
   }
 
   /**
@@ -452,11 +654,22 @@ export class RichCell {
       if (live()) h.compositionStart();
     });
     cell.addEventListener('compositionend', () => {
-      if (live()) h.compositionEnd();
+      if (!live()) return;
+      h.compositionEnd();
+      // 🔴 変換の確定を 1 手として記録し、`／` の確定なら一覧を開く(封印が解けた後だけ ── 変換中は何も読まない)
+      if (!h.isComposing()) {
+        this.recordNow();
+        this.syncSlash();
+      }
     });
     // ⚠ 打っただけでは DOM に触らない(旗を立てるだけ ── 変換中に来ても壊れない)
-    cell.addEventListener('input', () => {
-      if (live()) this.dirty = true;
+    cell.addEventListener('input', (ev) => {
+      if (!live()) return;
+      this.dirty = true;
+      // 🔴 変換中は記録も一覧も触らない(確定は compositionend で拾う)
+      if ((ev as InputEvent).isComposing || h.isComposing()) return;
+      this.scheduleTyping();
+      this.syncSlash();
     });
     /**
      * 🔴 **ブラウザ自前の書式(Ctrl+B の既定など)と、段落の自動挿入を止める**。
@@ -468,6 +681,13 @@ export class RichCell {
       const ie = ev as InputEvent;
       if (ie.isComposing || h.isComposing()) return;
       const t = ie.inputType;
+      // 🔴 メニューの「元に戻す / やり直し」なども自前の履歴へ(ブラウザの履歴は組み直しで切れている)
+      if (t === 'historyUndo' || t === 'historyRedo') {
+        ev.preventDefault();
+        if (t === 'historyUndo') this.undo();
+        else this.redo();
+        return;
+      }
       if (t.startsWith('format') || t === 'insertFromDrop' || t === 'insertFromPaste') {
         ev.preventDefault();
         return;
@@ -489,8 +709,26 @@ export class RichCell {
       // ⚠ 変換中のキーは全部 IME のもの(Chrome は確定直後の keydown を keyCode 229 で送る)
       if (ke.isComposing || ke.keyCode === 229 || h.isComposing()) return;
       const plain = !ke.ctrlKey && !ke.metaKey && !ke.altKey;
+      /**
+       * 🔴 **セルの中の取り消し / やり直し**(PR-06)。鍵は 1 画面の取り消しと同じ表(`live` の `undo` / `redo`)。
+       * セルの履歴で戻せたら、ここで止める(ブロックを跨ぐ取り消しへ流さない)。先頭まで戻り切ったら
+       * 素通しする ── 文書の聞き手(`detail.ts`)がブロックを跨ぐ取り消し(`edit-journal`)を当てる。
+       */
+      const liveCmd = h.keymap.match(ke, 'live');
+      if (liveCmd === 'undo' || liveCmd === 'redo') {
+        if (liveCmd === 'undo' ? this.undo() : this.redo()) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
+        return;
+      }
       if (ke.key === 'Enter' && plain && !ke.shiftKey) {
         ev.preventDefault();
+        // 🔴 挿入の一覧が出ていて強調が無いときの Enter は先頭の項目を押す(強調があれば `attachKeepFocusNav` が先に押す)
+        if (this.insertMenuOpen) {
+          menuNavItems(this.insertMenu!.el)[0]?.click();
+          return;
+        }
         h.enter(this.split());
         return;
       }
@@ -512,6 +750,13 @@ export class RichCell {
       if (cmd === 'row-rich-source') {
         ev.preventDefault();
         this.toSource();
+        return;
+      }
+      // 🔴 ブロックを上下のブロックと入れ替える(行の欄の「行を上へ / 下へ動かす」と同じ鍵。セルの 1 行 = 1 ブロック)
+      if (cmd === 'move-line-up' || cmd === 'move-line-down') {
+        ev.preventDefault();
+        this.recordNow();
+        h.moveBlock(cmd === 'move-line-up' ? -1 : 1);
         return;
       }
       if (cmd === 'row-commit') {
