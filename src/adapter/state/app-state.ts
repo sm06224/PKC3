@@ -7,6 +7,7 @@
  * - PKC2 の規約を維持: SET_VIEW_MODE は selection を消さない /
  *   selectedLid が選択の単一情報源
  */
+import type { NoteLayoutPatch } from '@features/page-layout';
 import type { EntryMeta, Relation } from '@core/model/entry-meta';
 import { reduceBoot } from './slices/boot';
 import { reduceQueryScan } from './slices/query-scan';
@@ -3561,6 +3562,11 @@ export type UserAction =
   | { type: 'SET_SCHEDULE_OWNER'; owner: string | null }
   /** 🔴 ノート 1 件の担当を書く / 外す(#283。前書きの `owner:`)。`owner: null` = 外す(`date` と同じ双方向)。 */
   | { type: 'SET_ENTRY_OWNER'; lid: string; owner: string | null }
+  /**
+   * 🔴 **ノート 1 件のページ設定を書く / 外す**(v4.0 Phase 1 / PR-03。前書きの `page_format` / `page_margin` /
+   *   `page_columns` / `page_font`)。`patch` の `null` はキーを消す(「アプリの設定に従う」── 片道を作らない)。
+   */
+  | { type: 'SET_NOTE_LAYOUT'; lid: string; patch: NoteLayoutPatch }
   /** 予定の面で、そのノートの予定を隠す / 出す(「出すもの」のノートの一覧)。 */
   | { type: 'TOGGLE_SCHEDULE_NOTE'; lid: string }
   | { type: 'RETRY_PERSIST' }
@@ -5686,6 +5692,7 @@ export function reduceCore(
     case 'INSERT_LINES':
     case 'UNDO_MOVE':
     case 'SET_ENTRY_DATE':
+    case 'SET_NOTE_LAYOUT':
     case 'TOGGLE_TODO_STATUS':
     case 'BODY_REWRITTEN':
       return reduceBlockOps(state, action);

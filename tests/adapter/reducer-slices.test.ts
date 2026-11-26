@@ -42,7 +42,8 @@ describe('reducer slices (#1383)', () => {
   it('同じ action を 2 つの slice が持たない', () => {
     const all = files.flatMap((f) => labelsOf(readFileSync(f, 'utf-8')));
     // 2026-11-26(#2066 段 5-B): 263 → 264。選択同期の写し(SET_SYNC_SCOPE)を query-scan の slice に足した
-    expect(all.length).toBe(264);
+    // 2026-11-26(v4.0 Phase 1 / PR-03): 264 → 265。ノートのページ設定(SET_NOTE_LAYOUT)を block-ops の slice に足した
+    expect(all.length).toBe(265);
     expect(new Set(all).size).toBe(all.length);
   });
 

@@ -20,6 +20,7 @@ import {
   paperRule,
   type PageFormat,
 } from '@features/page-format';
+import type { PageMargin } from '@features/page-margin';
 
 /** ⚠ 1 鍵だけ(`pkc3.theme` / `pkc3.external-images` と同じ作法)。 */
 export const PAGE_FORMAT_STORAGE_KEY = 'pkc3.page-format';
@@ -93,8 +94,13 @@ export function choosePageFormat(target: HTMLElement, fmt: PageFormat): void {
   }
 }
 
-function applyPaper(doc: Document, fmt: PageFormat): void {
-  const css = paperRule(fmt);
+/**
+ * 紙(`@page`)を載せ替える。
+ * 🔴 **余白はノート単位のページ設定から来る**(v4.0 Phase 1 / PR-03。`note-layout.ts` が開いているノートの値で呼ぶ)。
+ * ⚠ `margin` を渡さなければ従来と同じ(`paperRule` の約束)。
+ */
+export function applyPaper(doc: Document, fmt: PageFormat, margin: PageMargin | null = null): void {
+  const css = paperRule(fmt, margin);
   const found = doc.querySelector<HTMLStyleElement>(`style[data-pkc-field='${PAPER_FIELD}']`);
   if (css === '') {
     found?.remove();

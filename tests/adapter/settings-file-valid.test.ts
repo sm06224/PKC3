@@ -194,6 +194,8 @@ function validSamples(): Record<string, string[]> {
   out['pkc3.theme'] = THEMES.map((t) => t.id);
   out['pkc3.editor-mode'] = EDITOR_MODES.map((m) => m.id);
   out['pkc3.page-format'] = PAGE_FORMATS.map((m) => m.id);
+  // v4.0 Phase 1 / PR-03: 印刷レイアウト表示(入のときだけ鍵が在る)
+  out['pkc3.print-layout'] = ['1'];
   out['pkc3.prose-align'] = PROSE_ALIGNS.map((m) => m.id);
   out['pkc3.text-scale'] = TEXT_SCALES.map((m) => m.id);
   // 🔴 アクセントの色・字体(#1982 段 4)。既定('theme' / 'standard')は鍵ごと消えるので、見本には選べる値を並べる

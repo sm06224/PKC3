@@ -16368,6 +16368,134 @@ h6:hover > .pkc-heading-anchor,
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+ * 🔴 **ノート単位のページ設定と、印刷レイアウト表示**(v4.0 Phase 1 / PR-03。ビジョン 3-A)。
+ *
+ * ノートの前書き(`page_format` / `page_margin` / `page_columns` / `page_font`)で上書きした値は、
+ * 中央の本文の器(`[data-pkc-view-pane='detail']`)にだけ当たる(`adapter/ui/render/note-layout.ts`)。
+ * ⚠ `:root` は汚さない ── 書いていないノートの見た目は 1 バイトも変わらない(器に印も変数も付かない)。
+ * ⚠ 値は CSS に写さない ── 読み幅(`--read-w`)・字体(`--font`)・段数(`--pkc-read-cols`)は
+ *   JS が各正本の表(`PAGE_FORMATS` / `FONTS` / `READ_COLUMN_CHOICES`)から引いて器の変数に入れる。
+ * ══════════════════════════════════════════════════════════════════════ */
+/**
+ * 紙面の上書き ── `--prose-indent` は `:root` で `--read-w` を解決済みなので、器で読み幅を変えたら
+ * 器の上で式を当て直す(表・図・コードの左端を段落と揃えたまま保つ)。式は `tokens.css` の既定と同じ。
+ * ⚠ 本文の置き場所が「左」のときは 0 のまま(`tokens.css` の `:root[data-pkc-prose-align='start']`)。
+ */
+[data-pkc-region='detail'] > [data-pkc-view-pane='detail'][data-pkc-page-format] {
+  --prose-indent: max(0px, calc((100% - var(--read-w)) / 2));
+}
+:root[data-pkc-prose-align='start'] [data-pkc-region='detail'] > [data-pkc-view-pane='detail'][data-pkc-page-format] {
+  --prose-indent: 0px;
+}
+/** 字体の上書き ── `body` の `font-family: var(--font)` は `body` で解決済みなので、器の上で当て直す。 */
+[data-pkc-view-pane='detail'][data-pkc-note-font] {
+  font-family: var(--font);
+}
+
+/**
+ * 🔴 **印刷レイアウト表示**(`<html data-pkc-print-layout="1">`)── 閲覧・ライブ編集の本文を「紙のシート」として中央に置く。
+ * ⚠ **画面だけ**(`@media screen`)── 紙に印刷するときは紙枠・影・「改ページ」の字を一切出さない
+ *   (改ページは従来の `break-after: page` だけが効く)。
+ * 🔑 紙の寸法は器の変数(`--pkc-paper-w` / `--pkc-paper-h` / `--pkc-paper-pad`)── `features/page-layout.ts` の
+ *   `paperSheetSpec` と余白の表(`PAGE_MARGINS`)から JS が入れる。予備の値は A4 縦・標準の余白。
+ * 🔑 紙の余白が読み幅を決めるので、紙の中では散文の読み幅の上限を外す(`--read-w: none`)── 紙の中に
+ *   二重の余白を作らない。横送りの段組みは止める(`read-columns.ts` が `data-pkc-columns-on` を付けない)。
+ */
+@media screen {
+  :root[data-pkc-print-layout='1'] [data-pkc-region='detail'] > [data-pkc-view-pane='detail'] {
+    background: var(--surface-2);
+  }
+  :root[data-pkc-print-layout='1'] [data-pkc-region='detail'] > [data-pkc-view-pane='detail'] :is([data-pkc-field='detail-body'], [data-pkc-region='editor-live']) {
+    box-sizing: border-box;
+    width: min(100%, var(--pkc-paper-w, 210mm));
+    max-width: 100%;
+    min-height: var(--pkc-paper-h, 297mm);
+    padding: var(--pkc-paper-pad, 20mm);
+    margin-inline: auto;
+    margin-block: var(--s5);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 2px;
+    box-shadow: var(--shadow-sm);
+    overflow-x: hidden;
+    --read-w: none;
+    --prose-indent: 0px;
+  }
+  /* 段組み ── 紙の中では縦に流す(段の幅が狭すぎる紙では自然に 1 段へ戻る)。段間は 16px(`--s5`) */
+  :root[data-pkc-print-layout='1'] [data-pkc-region='detail'] > [data-pkc-view-pane='detail'][data-pkc-sheet-cols] :is([data-pkc-field='detail-body'], [data-pkc-region='editor-live']) {
+    columns: 18em var(--pkc-sheet-cols, 1);
+    column-gap: var(--s5);
+  }
+  /* スマホの幅では紙の幅に固定せず、画面いっぱいに縮める(横に溢れさせない) */
+  :root[data-pkc-print-layout='1'] [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-region='detail'] > [data-pkc-view-pane='detail'] :is([data-pkc-field='detail-body'], [data-pkc-region='editor-live']) {
+    width: 100%;
+    min-height: 0;
+    padding: var(--s4);
+    margin-block: var(--s3);
+  }
+  /* 🔴 改ページ(`+++` = `hr.pkc-section-break`)を「紙の継ぎ目」として見せる ── 破線と控えめな「改ページ」の字 */
+  :root[data-pkc-print-layout='1'] [data-pkc-view-pane='detail'] :is([data-pkc-field='detail-body'], [data-pkc-region='editor-live']) hr.pkc-section-break {
+    position: relative;
+    overflow: visible;
+    height: 0;
+    border: 0;
+    border-top: 1px dashed var(--muted);
+    margin: var(--s6) 0;
+  }
+  :root[data-pkc-print-layout='1'] [data-pkc-view-pane='detail'] :is([data-pkc-field='detail-body'], [data-pkc-region='editor-live']) hr.pkc-section-break::after {
+    content: '改ページ';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 0 var(--s2);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+}
+
+/* 🔴 情報ペインの「ページ設定」(v4.0 Phase 1 / PR-03)── 切替ボタン・4 つの選択欄・一括で戻すボタンを縦に並べる */
+/* 選択欄の字(「アプリの設定に従う」)が切れないよう、このカードだけ名前と中身を縦に積んで幅いっぱいを使う */
+[data-pkc-region='inspector'] > dl[data-pkc-card='page-layout'] > :is(dt, dd) {
+  grid-column: 1 / -1;
+}
+[data-pkc-field='inspector-page-layout'] > button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+}
+[data-pkc-field='inspector-page-layout'] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  min-width: 0;
+}
+[data-pkc-field='inspector-note-layout'] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  width: 100%;
+}
+[data-pkc-field='inspector-note-layout'] > label {
+  display: contents;
+}
+[data-pkc-field='inspector-note-layout'] select {
+  min-width: 0;
+  max-width: 100%;
+}
+/* 印刷レイアウト表示が入のときは、形(左端の線と太字)で示す ── 色は意味にだけ使う */
+[data-pkc-field='inspector-print-layout'][aria-pressed='true'] {
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 600;
+}
+
+
 /* ═══════════════════════════════════════════════════════════════════════════════
  * 輪郭の近接発光(ネオン。B2)── ここから末尾まで 1 つの塊(`render/neon-glow.ts` が印と局所座標を書く)
  * ═══════════════════════════════════════════════════════════════════════════════ */

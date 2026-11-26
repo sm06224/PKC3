@@ -29,6 +29,8 @@
  *   (`theme.ts` と `tokens.css` を突き合わせている `docs-parity` と同じ作法)。
  */
 
+import { pageMarginSpec, type PageMargin } from './page-margin';
+
 export interface PageFormatSpec {
   readonly id: string;
   /** 設定画面に出る名前。⚠ ここを変えたらマニュアルも直す(`docs-parity`)。 */
@@ -94,13 +96,24 @@ export function readWidthRule(fmt: PageFormat): string {
  * 紙の幾何。⚠ `@page` は**セレクタで絞れない**(文書に 1 つ)ので、
  * アプリ側は選んだ 1 つだけを `<style>` に載せ替える。画面用のフォーマットでは空文字
  * ── 空を返したときに**古い紙が残らない**ことは適用側の責務である。
+ *
+ * 🔴 **余白(`margin`)はノート単位のページ設定から来る**(v4.0 Phase 1 / PR-03)。
+ * ⚠ **渡さない / `null` のときは従来と 1 バイトも変わらない**(既存の等値 pin を壊さない)──
+ *   余白を書いていないノートの印刷は、いままでどおりブラウザの既定の余白に任せる。
+ * ⚠ 画面用のフォーマット(紙を持たない)でも余白だけは出す(`@page{margin:…}`)── 紙の大きさは
+ *   ブラウザの既定のまま、余白だけノートの指定に従う。
  */
-export function paperRule(fmt: PageFormat): string {
+export function paperRule(fmt: PageFormat, margin?: PageMargin | null): string {
   const paper = pageFormatSpec(fmt).paper;
-  return paper === null ? '' : `@page{size:${paper}}`;
+  if (margin === undefined || margin === null) return paper === null ? '' : `@page{size:${paper}}`;
+  const m = pageMarginSpec(margin).css;
+  return paper === null ? `@page{margin:${m}}` : `@page{size:${paper};margin:${m}}`;
 }
 
-/** 書き出す HTML に焼く分(読み幅 + 紙)。 */
-export function pageFormatCss(fmt: PageFormat): string {
-  return `${readWidthRule(fmt)}${paperRule(fmt)}`;
+/**
+ * 書き出す HTML に焼く分(読み幅 + 紙)。
+ * ⚠ `margin` を渡さなければ従来と同じ出力(`paperRule` と同じ約束)。
+ */
+export function pageFormatCss(fmt: PageFormat, margin?: PageMargin | null): string {
+  return `${readWidthRule(fmt)}${paperRule(fmt, margin)}`;
 }

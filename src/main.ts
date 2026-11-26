@@ -323,6 +323,11 @@ import {
   initialPageFormat,
 } from '@adapter/ui/render/page-format';
 import { isPageFormat } from '@features/page-format';
+import {
+  applyPrintLayout,
+  initialPrintLayout,
+  watchPrintLayoutFromOtherWindows,
+} from '@adapter/ui/render/note-layout';
 import { isProseAlign } from '@features/prose-align';
 import { appExternalImages } from '@adapter/ui/render/external-images';
 import { appPasteSource } from '@adapter/ui/render/paste-source';
@@ -1595,6 +1600,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   // ⚠ ここでは**保存しない**(`applyPageFormat` は当てるだけ)── 保存するのは
   //    user が選んだときだけ(`theme.ts` の M-7 と同じ)
   applyPageFormat(document.documentElement, initialPageFormat());
+  // 🔴 **印刷レイアウト表示**も枠より先(v4.0 Phase 1 / PR-03)── 後だと 1 度ふつうに組んでから紙になる。⚠ 保存しない(当てるだけ)
+  applyPrintLayout(document.documentElement, initialPrintLayout());
   /**
    * 🔴 **本文の置き場所も枠より先**(#722、2026-09-08)── 理由は紙面と同じで、
    *   後だと**一瞬だけ中央で組んでから左へ飛ぶ**。
@@ -1630,6 +1637,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   applyTagBadge(document.documentElement, initialTagBadge());
   // 🔴 紙面・置き場所・段数・段の境界線・タグの見せ方も、別のウィンドウの変更に付いていく(#1087)
   watchAppearanceFromOtherWindows(document.documentElement, window);
+  // 🔴 別のウィンドウで切り替えた印刷レイアウト表示にも付いていく(v4.0 Phase 1 / PR-03)
+  watchPrintLayoutFromOtherWindows(document.documentElement, window);
   /**
    * 🔴 **タグの色を読んで当てる**(#1457)。色は器のデータ(`settings` 表)── 端末の好みではない。
    * ⚠ 起動を待たせない(読めなくても札は灰色で出るだけ)。

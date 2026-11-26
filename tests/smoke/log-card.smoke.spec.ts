@@ -288,7 +288,7 @@ test('🔴 ログのカード: 輪郭・時刻の帯の廃止・表とコード�
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
 
-test('🔴 情報ペイン: 4 枚のカード(基本 / 目次と添付 / タグ・つながり / 操作)が紙の地と輪郭で見える (B1)', async ({ page }) => {
+test('🔴 情報ペイン: 5 枚のカード(基本 / ページ設定 / 目次と添付 / タグ・つながり / 操作)が紙の地と輪郭で見える (B1)', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -296,8 +296,9 @@ test('🔴 情報ペイン: 4 枚のカード(基本 / 目次と添付 / タグ�
   await openLog(page);
 
   const cards = page.locator('[data-pkc-region="inspector"] > [data-pkc-card]');
-  await expect(cards).toHaveCount(4);
-  expect(await cards.evaluateAll((els) => els.map((e) => e.getAttribute('data-pkc-card')))).toEqual(['basic', 'toc', 'links', 'actions']);
+  // ⚠ v4.0 Phase 1 / PR-03 で「ページ設定」のカードが基本の次に入った(4 → 5 枚)
+  await expect(cards).toHaveCount(5);
+  expect(await cards.evaluateAll((els) => els.map((e) => e.getAttribute('data-pkc-card')))).toEqual(['basic', 'page-layout', 'toc', 'links', 'actions']);
   const paper = await page.evaluate(() => {
     const i = document.createElement('i');
     i.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--surface');
@@ -529,10 +530,10 @@ test('🔴 情報ペイン: 見出しも添付も無いノートは「目次と�
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
   await page.waitForSelector('[data-pkc-action="start-edit"]');
   const cards = page.locator('[data-pkc-region="inspector"] > [data-pkc-card]');
-  await expect(cards).toHaveCount(4);
+  await expect(cards).toHaveCount(5);
   const display = await cards.evaluateAll((els) => els.map((e) => [e.getAttribute('data-pkc-card'), getComputedStyle(e).display] as const));
   expect(display.find(([n]) => n === 'toc')![1], '空の「目次と添付」カードが出ている').toBe('none');
-  for (const name of ['basic', 'links', 'actions']) expect(display.find(([n]) => n === name)![1], `${name} のカードが消えた`).not.toBe('none');
+  for (const name of ['basic', 'page-layout', 'links', 'actions']) expect(display.find(([n]) => n === name)![1], `${name} のカードが消えた`).not.toBe('none');
   // 見出しを書くと出る(対照群: 隠す規則が常に効いているのではない)
   await clickReal(page, '[data-pkc-action="start-edit"]');
   await page.fill('[data-pkc-field="editor-body"]', '# 見出し\n\n本文');

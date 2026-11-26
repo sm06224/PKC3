@@ -198,6 +198,8 @@ describe('割当の検め', () => {
   // 🔑 #1042 C3(裁定 2026-09-25 Q3 = A)で `deselect-entry` に既定 `Escape` が付いた
   // (専用の文脈 `reading` を作って `global` の重なりを避けた。定義の docstring)
   'format-table', 'format-codeblock', 'format-math', 'insert-callout', 'pin-note', 'unpin-note',
+  // v4.0 Phase 1 / PR-03: 印刷レイアウト表示の切替(既定の鍵の衝突を作らない ── 設定から割り当てる)
+  'toggle-print-layout',
   // 🔴 #1982 段 5-4: タブを閉じる / 開き直す ── 操作を探す・タブの右クリックから(既定の鍵は次・前の 2 つだけ。裁定 6.1-7)
   'tab-close', 'tab-reopen',
   'format-callout-note', 'format-callout-tip', 'format-callout-info', 'format-callout-important', 'format-callout-warning', 'format-callout-caution', 'format-callout-danger', 'format-callout-summary',

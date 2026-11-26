@@ -212,6 +212,7 @@ describe('読み込む前に、何が変わるか見せる(#414)', () => {
     const GOOD: Record<string, string> = {
       'pkc3.editor-mode': 'live',
       'pkc3.page-format': 'a4-portrait',
+      'pkc3.print-layout': '1', // v4.0 Phase 1 / PR-03(入 = '1' のときだけ鍵が在る)
       'pkc3.prose-align': 'center',
       'pkc3.text-scale': 'xlarge',
       'pkc3.tag-badge': 'chip',

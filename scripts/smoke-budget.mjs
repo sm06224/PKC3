@@ -162,8 +162,11 @@ import { join } from 'node:path';
  *   ⚠ 既存の道中には載せられない ── 見る相手は「PKC が開いた窓ではない」まっさらなタブ(`w=` の合図と sessionStorage の印が無い)で、開いた窓の続きでは作れない。
  * - 2026-11-26(#2066 段 5-B): **651**(そのときの実数 651)。`sync-selective.smoke.spec.ts` を新設(起動 1 つ)。⚠ 既存の道中には載せられない ──
  *   見る相手は、同期をオンにしたまっさらな起動で選択同期へ切り替え、右クリック → 印 → 差分ファイル → 全体 / オフで消える、までの 1 本の流れ。
+ * - 2026-11-26(v4.0 Phase 1 / PR-03): **654**(そのときの実数 654)。`page-layout.smoke.spec.ts` を新設(起動 3 つ)。⚠ 既存の道中には載せられない ──
+ *   見る相手は、まっさらな起動から作ったノートの前書きのページ設定と印刷レイアウト表示で、既定(アプリの段組みが 1 段)の窓・
+ *   保存した印刷レイアウト表示で起動するスマホ幅・広い窓(2200px)の段組みを、それぞれ別の起動から見る。
  */
-export const BOOT_BUDGET = 651;
+export const BOOT_BUDGET = 654;
 // 2026-11-25(Stage 4): **650**(実数 650)。⚠ main が 649 > 641 で赤だった(#2069 / #2071 / #2073 で上げ忘れ。PR の CI は test-pr の選択でこの test を回さず、
 //   main への push の全量でだけ鳴っていた)── 事実に合わせた。足した起動は次の 9 つ:
 //   - #2069(#1442 S3-1)`builtin-apps.smoke.spec.ts` に 2 本(起動 2 つ)── 広い別ウィンドウの予定表の 2 ペインで本体の › が左の小さな月も送る / 900px で縦に積む。
@@ -218,7 +221,7 @@ export const BOOT_BUDGET = 651;
 export const SECONDS_PER_BOOT = 1.63;
 
 /** 🔴 下限 ── 数え方が壊れて 0 になったら「予算内」に見える(CLAUDE.md §1)。 */
-export const BOOT_FLOOR = 326;
+export const BOOT_FLOOR = 327; // v4.0 Phase 1 / PR-03: 実数 654 の半分(下限は実数の半分以上 ── smoke-budget.test)
 
 /** TS のコメントを落とす(`tests/helpers/code-only.ts` と同じ規則)。 */
 export function codeOnly(src) {
