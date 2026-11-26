@@ -33,6 +33,13 @@ const HTML_REF = /(?:src|href)\s*=\s*("|')([^"']+)\1/g;
 const INLINE_MAP = /sourceMappingURL=data:application\/json/;
 /** 中身を走査する script(`.mjs` / `.cjs` を落とすと inline map が素通りする)。 */
 const SCRIPT = /\.(?:js|mjs|cjs)$/;
+/** chunk の**静的な** import(`from"./x.js"` / `import"./x.js"`)。⚠ 動的 `import(` は含めない ── 遅延 chunk は初期の読み込みではない。 */
+const STATIC_IMPORT = /(?:\bfrom\s*|\bimport\s*)(["'`])([^"'`\n]+)\1/g;
+/**
+ * Three.js の目印(縮小しても残るエラー文の字)。⚠ 1 つの名前に頼らない ── core だけの chunk には
+ * `THREE.WebGLRenderer` が無く、`THREE.Mesh` / `THREE.Vector3` が在る(r187 で実測)。
+ */
+export const THREE_MARK = /THREE\.(?:WebGLRenderer|Renderer|Mesh|Vector3|BufferGeometry)\b/;
 
 /**
  * **構造化された場所**(HTML 属性 / manifest の JSON field)の参照文字列 →
@@ -382,6 +389,38 @@ export function inspectDist({
       `誰からも参照されていない hash 付き生成物がある(${orphans.length} 件):\n` +
         orphans.map((f) => `      ${f.path}`).join('\n'),
     );
+  }
+
+  // ── ②' **初期の読み込みに Three.js が混ざっていないか**(v4.0 PR-11 の使い捨て GPU 基盤)。
+  // 🔴 three は `gpu-lease.ts` の動的 `import()` だけで読む ── index.html が指す script と、そこから**静的に**
+  //    辿れる chunk(`from"./x.js"` / `import"./x.js"`)に 1 バイトでも入ったら、使わない人の起動に載る。
+  // ⚠ 過去の release zip には three が無いので、この規則は古い zip を赤くしない(新規要求ではなく禁止のみ)。
+  if (html !== undefined) {
+    const initial = [];
+    const seen = new Set();
+    const push = (path) => {
+      if (seen.has(path) || !SCRIPT.test(path) || !text.has(path)) return;
+      seen.add(path);
+      initial.push(path);
+    };
+    for (const m of html.matchAll(HTML_REF)) {
+      const ref = refFromValue(m[2]);
+      if (ref !== null && !ref.startsWith('/')) push(resolveFrom('index.html', ref));
+    }
+    for (let i = 0; i < initial.length; i += 1) {
+      const path = initial[i];
+      for (const m of text.get(path).matchAll(STATIC_IMPORT)) {
+        const ref = refFromCode(m[2]);
+        if (ref !== null && !ref.startsWith('/')) push(resolveFrom(path, ref));
+      }
+    }
+    const withThree = initial.filter((p) => THREE_MARK.test(text.get(p)));
+    if (withThree.length > 0) {
+      errors.push(
+        `初期の読み込みに Three.js が混ざっている(${withThree.length} 件)── three は動的 import の遅延 chunk だけに置く:\n` +
+          withThree.map((p) => `      ${p}`).join('\n'),
+      );
+    }
   }
 
   // ── ③ SW の precache 一覧が**生成物と一致するか**(P7 段④、設計 doc §3)

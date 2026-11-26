@@ -1117,3 +1117,64 @@ describe('🔴 ONNX Runtime の glue が指す既定の wasm 名は、実行時�
     expect(run(i).join('\n')).toContain('参照されている生成物が dist に無い');
   });
 });
+
+describe('🔴 初期の読み込みに Three.js が混ざらない(v4.0 PR-11 の使い捨て GPU 基盤)', () => {
+  const THREE_CHUNK = 'assets/three-EEEEEEEE.js';
+  const THREE_CODE = 'console.error("THREE.WebGLRenderer: Error creating WebGL context.");class Mesh{}';
+
+  /** three の chunk を足し、entry から `link` の形で指させた健全 fixture。 */
+  function withThreeChunk(link: (ref: string) => string, threeCode = THREE_CODE): Input {
+    const i = healthy();
+    i.files.push({ path: THREE_CHUNK, bytes: 600_000 });
+    i.text.set(THREE_CHUNK, threeCode);
+    i.text.set(ENTRY, `${i.text.get(ENTRY)!}\n${link('./three-EEEEEEEE.js')}`);
+    const listed = JSON.parse(i.text.get(LIST)!) as string[];
+    listed.push(`./${THREE_CHUNK}`);
+    i.text.set(LIST, JSON.stringify(listed));
+    i.text.set('sw.js', `const PRECACHE = ${JSON.stringify(listed)};\nself.addEventListener("fetch", () => {});`);
+    return i;
+  }
+  const threeErrors = (i: Input): string[] => run(i).filter((e) => e.includes('Three.js'));
+
+  it('動的 import の遅延 chunk に在るのは正しい形(鳴らない)', () => {
+    const i = withThreeChunk((r) => `const t=()=>import("${r}");`);
+    expect(run(i)).toEqual([]);
+  });
+
+  it('entry が静的に import する chunk に入ったら鳴る', () => {
+    const i = withThreeChunk((r) => `import{a as Z}from"${r}";`);
+    expect(threeErrors(i)).toHaveLength(1);
+    expect(threeErrors(i)[0]).toContain(THREE_CHUNK);
+  });
+
+  it('副作用だけの静的 import(`import"./x.js"`)でも鳴る', () => {
+    const i = withThreeChunk((r) => `import"${r}";`);
+    expect(threeErrors(i)).toHaveLength(1);
+  });
+
+  it('entry 自身に入ったら鳴る(core だけの目印 `THREE.Mesh` でも)', () => {
+    const i = healthy();
+    i.text.set(ENTRY, `${i.text.get(ENTRY)!};console.warn("THREE.Mesh: .raycast() needs geometry");`);
+    expect(threeErrors(i)).toHaveLength(1);
+    expect(threeErrors(i)[0]).toContain(ENTRY);
+  });
+
+  it('静的な連鎖の 2 段目(entry → a → three)でも鳴る', () => {
+    const i = withThreeChunk((r) => `import{q}from"./mid-FFFFFFFF.js";const _=()=>import("${r}");`);
+    const MID = 'assets/mid-FFFFFFFF.js';
+    i.files.push({ path: MID, bytes: 1000 });
+    i.text.set(MID, 'import{m}from"./three-EEEEEEEE.js";export const q=1;');
+    const listed = JSON.parse(i.text.get(LIST)!) as string[];
+    listed.push(`./${MID}`);
+    i.text.set(LIST, JSON.stringify(listed));
+    i.text.set('sw.js', `const PRECACHE = ${JSON.stringify(listed)};\nself.addEventListener("fetch", () => {});`);
+    expect(threeErrors(i)).toHaveLength(1);
+    expect(threeErrors(i)[0]).toContain(THREE_CHUNK);
+  });
+
+  it('目印に似ているだけの字(`THREE.Meshes` / `three.mesh`)では鳴らない', () => {
+    const i = healthy();
+    i.text.set(ENTRY, `${i.text.get(ENTRY)!};const s="THREE.Meshes three.mesh";`);
+    expect(threeErrors(i)).toEqual([]);
+  });
+});
