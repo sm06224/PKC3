@@ -509,6 +509,36 @@ describe('選択同期: 受け手(planSyncImport)', () => {
     expect(plan.relationRemoves).toEqual([{ from: 'a', to: 'b', kind: 'semantic' }]);
   });
 
+  it('相手が選択同期で、相手の一覧に無いノートをこちらで編集していたら、記録を落とさず持ち越す(次の往復で初回の競合にしない)', () => {
+    const pEdited = note('p', 'P', 'こちらで編集');
+    const inp = remoteSel(input({ remoteNotes: [a0], localStates: [st(a0), st(pEdited)], baseline: { a: fpOf(a0), p: fpOf(p0) } }));
+    const plan = planSyncImport(inp);
+    expect(plan.trash).toEqual([]);
+    expect(plan.summary.keptLocal).toBe(1);
+    expect(plan.baseline.p, '相手に見えていないノートの記録を落とした').toEqual(fpOf(p0));
+    // 対照: 全部のファイルなら「相手が消した・こちらで編集」の競合(こちらを残す)で、記録には載せない
+    const ctl = planSyncImport(remoteSel(inp, 'all'));
+    expect(ctl.conflicts.map((c) => c.kind)).toEqual(['edited-here-deleted-there']);
+    expect(ctl.baseline.p).toBeUndefined();
+  });
+
+  it('相手が選択同期でも、相手の一覧に載っているノートの色ラベル・ピン留めの消失は外す(載っていないノートの印は触らない)', () => {
+    const b0 = note('b', 'B', 'b');
+    const lab = (lid: string) => ({ key: `lab:${lid}`, ...labelFp(2) });
+    const pin = (lid: string) => ({ key: `pin:${lid}`, ...pinFp() });
+    const local = [st(a0), st(b0), lab('a'), pin('a'), lab('b'), pin('b')];
+    const base = Object.fromEntries(local.map((x) => [x.key, { content: x.content, ...(x.place === undefined ? {} : { place: x.place }) }]));
+    // 相手の一覧には a だけ(b は相手の選択の外)。相手は a の印を外した
+    const inp = remoteSel(input({ remoteNotes: [a0], localStates: local, baseline: base }));
+    inp.remote.container.labels = [];
+    inp.remote.container.pins = [];
+    const plan = planSyncImport(inp);
+    expect(plan.labelSets).toEqual([{ lid: 'a', color: null }]);
+    expect(plan.pinSets).toEqual([{ lid: 'a', on: false }]);
+    expect(plan.summary.labelsChanged + plan.summary.pinsChanged).toBe(2);
+    expect(plan.baseline['lab:b'], '載っていないノートの印の記録を落とした').toEqual(base['lab:b']);
+  });
+
   it('相手が選択同期で、両端が載っているつながりが残っていれば何もしない(外した判定の空振りの対照)', () => {
     const b0 = note('b', 'B', 'b');
     const inp = remoteSel(
