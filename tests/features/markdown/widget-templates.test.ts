@@ -13,13 +13,22 @@ import { renderMarkdown } from '../../../src/features/markdown/markdown-render';
 import { allFences } from '../../../src/features/markdown/source-blocks';
 
 describe('WIDGET_TEMPLATES', () => {
-  it('4 種(並び順も正本どおり)', () => {
-    expect(WIDGET_TEMPLATES.map((t) => t.baseId)).toEqual(['tracker', 'checklist', 'calculator', 'table-summary']);
+  it('6 種(並び順も正本どおり)', () => {
+    expect(WIDGET_TEMPLATES.map((t) => t.baseId)).toEqual([
+      'tracker',
+      'checklist',
+      'calculator',
+      'table-summary',
+      'table-filter',
+      'pomodoro',
+    ]);
     expect(WIDGET_TEMPLATES.map((t) => t.label)).toEqual([
       'カウンター・進捗トラッカー',
       'チェック集計リスト',
       '簡易計算・試算ツール',
       'ノート内テーブル集計',
+      '表の検索・絞り込み',
+      '作業タイマー',
     ]);
   });
 
@@ -52,6 +61,22 @@ describe('WIDGET_TEMPLATES', () => {
       });
     });
   }
+
+  it('🔴 表の検索・絞り込みは readTables で同じノートの表を読み、語と選んだ表を保存する', () => {
+    const t = WIDGET_TEMPLATES.find((x) => x.baseId === 'table-filter')!;
+    expect(t.html).toContain('window.pkcWidget.readTables()');
+    expect(t.html).toContain("S.setItem('query'");
+    expect(t.html).toContain("S.setItem('table'");
+    // ⚠ template literal の中の \\s が字のまま残る(\s だと「s」に化けて空白で区切れない)
+    expect(t.html).toContain('split(/\\s+/)');
+  });
+
+  it('🔴 作業タイマーは止めている間 setInterval を解き、回数を localStorage に残す', () => {
+    const t = WIDGET_TEMPLATES.find((x) => x.baseId === 'pomodoro')!;
+    expect(t.html).toContain('clearInterval(timer)');
+    expect(t.html).toContain("S.setItem('sets'");
+    expect(t.hint).toBe('25 分作業 / 5 分休憩を計り回数を記録');
+  });
 
   it('ノート内テーブル集計は readTables で同じノートの表を読む', () => {
     const t = WIDGET_TEMPLATES.find((x) => x.baseId === 'table-summary')!;

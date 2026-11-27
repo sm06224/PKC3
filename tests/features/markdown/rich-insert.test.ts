@@ -11,6 +11,8 @@ import {
 } from '../../../src/features/markdown/rich-insert';
 import { renderMarkdown } from '../../../src/features/markdown/markdown-render';
 import { prepareRichBlock } from '../../../src/features/markdown/rich-block';
+import { DIAGRAM_TEMPLATES, SCENE_3D_BLOCK } from '../../../src/features/markdown/text-ops';
+import { parse3dSceneSpec } from '../../../src/features/viewer3d/scene-spec';
 
 /** 期待値は固定の字(実装と同じ規則で作らない)。 */
 const EMPTY: Record<RichInsertId, { text: string; mode: 'rich' | 'source'; tag: RegExp }> = {
@@ -26,14 +28,23 @@ const EMPTY: Record<RichInsertId, { text: string; mode: 'rich' | 'source'; tag: 
   callout: { text: ':::note\n\n:::', mode: 'source', tag: /pkc-section-note/ },
   pagebreak: { text: '+++', mode: 'source', tag: /<hr class="pkc-section-break"/ },
   mermaid: { text: '```mermaid\ngraph TD\n  A-->B\n```', mode: 'source', tag: /data-pkc-render-lang="mermaid"/ },
+  scene3d: {
+    text:
+      '```3d\n{ "objects": [\n' +
+      '    { "type": "box", "position": [0, 0.5, 0], "color": "#4a90d9", "label": "土台" },\n' +
+      '    { "type": "sphere", "position": [0, 1.5, 0], "size": 0.6, "color": "#e0a030", "label": "上の段" }\n' +
+      '  ],\n  "camera": { "position": [3, 3, 4] },\n  "grid": true }\n```',
+    mode: 'source',
+    tag: /data-pkc-render-lang="3d"/,
+  },
 };
 
 describe('rich-insert の一覧', () => {
-  it('12 種がこの順で並ぶ(見出し 1〜3・箇条書き・番号・チェック・引用・コード・表・注意書き・改ページ・図)', () => {
+  it('13 種がこの順で並ぶ(見出し 1〜3・箇条書き・番号・チェック・引用・コード・表・注意書き・改ページ・図・3D シーン)', () => {
     expect(RICH_INSERT_ITEMS.map((i) => i.id)).toEqual([
-      'h1', 'h2', 'h3', 'ul', 'ol', 'task', 'quote', 'codeblock', 'table', 'callout', 'pagebreak', 'mermaid',
+      'h1', 'h2', 'h3', 'ul', 'ol', 'task', 'quote', 'codeblock', 'table', 'callout', 'pagebreak', 'mermaid', 'scene3d',
     ]);
-    expect(new Set(RICH_INSERT_ITEMS.map((i) => i.label)).size).toBe(12);
+    expect(new Set(RICH_INSERT_ITEMS.map((i) => i.label)).size).toBe(13);
   });
 
   it.each(RICH_INSERT_ITEMS.map((i) => i.id))('空の段落(/ で開いた)に %s を当てると決まった原文になり、描画でその要素になる', (id) => {
@@ -78,12 +89,27 @@ describe('rich-insert の一覧', () => {
   });
 
   it('/ の後ろの字で絞り込む(日本語・英語・全角)', () => {
-    expect(filterRichInsert('').length).toBe(12);
+    expect(filterRichInsert('').length).toBe(13);
     expect(filterRichInsert('見出し').map((i) => i.id)).toEqual(['h1', 'h2', 'h3']);
     expect(filterRichInsert('code').map((i) => i.id)).toEqual(['codeblock']);
     expect(filterRichInsert('ｃｏｄｅ').map((i) => i.id)).toEqual(['codeblock']);
     expect(filterRichInsert('表').map((i) => i.id)).toEqual(['table']);
     expect(filterRichInsert('zzz')).toEqual([]);
+    // 🔴 /3d・/立体 で 3D シーンに当たる(全角の ３ｄ も)
+    expect(filterRichInsert('3d').map((i) => i.id)).toEqual(['scene3d']);
+    expect(filterRichInsert('３Ｄ').map((i) => i.id)).toEqual(['scene3d']);
+    expect(filterRichInsert('立体').map((i) => i.id)).toEqual(['scene3d']);
+  });
+
+  it('🔴 3D シーンの差し込みは、そのまま描ける JSON(誤り 0 件)で、「テンプレートを挿入」と同じ字', () => {
+    const r = applyRichInsert('scene3d', '/3d', true);
+    const inner = r.text.split('\n').slice(1, -1).join('\n');
+    const parsed = parse3dSceneSpec(inner);
+    expect(parsed.ok, parsed.ok ? '' : parsed.error).toBe(true);
+    expect(`${r.text}\n`).toBe(SCENE_3D_BLOCK.text);
+    expect(DIAGRAM_TEMPLATES.find((d) => d.id === '3d')?.block).toBe(SCENE_3D_BLOCK);
+    // 中身のあるブロックの後ろには空行を挟んで足す
+    expect(applyRichInsert('scene3d', '本文', false).text.startsWith('本文\n\n```3d\n')).toBe(true);
   });
 
   it('スラッシュの絞り込みの字か(/ か ／ で始まり、空白を含まない)', () => {

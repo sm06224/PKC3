@@ -120,6 +120,26 @@ test('🔴 雛形を作って、短縮語 + Tab で本文に挿せる (#196)', a
   await expect(taT, '選んでも編集の状態でノートが開かない').toBeVisible();
   await expect(taT, '選んだテンプレートの中身が入っていない').toHaveValue(/〒100-0000/);
 
+  /**
+   * 🔴 **v4.0 実践サンプル「アイデア整理ボード」を選ぶと、無限キャンバスで付箋 4 枚と線 3 本が出て、線のエラーが 0 件**(v4.0 仕上げ PR-D)。
+   * ⚠ 線の from= / to= が付箋の名前を指しているかは、描いた画面でしか分からない(断りは `place-board.ts` が出す)。
+   * ⚠ 新しく起動せず、この道中に足す(smoke の起動の予算)。
+   */
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await clickReal(page, '[data-pkc-field="create-pick"]');
+  await clickReal(page, '[data-pkc-region="create-menu"] [data-pkc-action="create-from-template"]');
+  await expect(tplRows.first(), 'テンプレートの一覧が出ない').toBeVisible();
+  // 自分のテンプレート(addr)1 件 + 記録 3 本 + 実践サンプル 5 種
+  await expect(tplRows).toHaveCount(9);
+  await tplRows.filter({ hasText: 'アイデア整理ボード' }).click();
+  await expect(taT).toHaveValue(/^---\nlayout: canvas\n---\n/);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  const detail = page.locator('[data-pkc-region="detail"]');
+  await expect(detail.locator('[data-pkc-field="canvas-viewport"]'), '無限キャンバスで開かない').toBeVisible({ timeout: 10000 });
+  await expect(detail.locator('.pkc-format-block.pkc-place')).toHaveCount(4);
+  await expect(detail.locator('[data-pkc-field="place-lines"] path[data-pkc-line-from]')).toHaveCount(3);
+  await expect(detail.locator('[data-pkc-line-missing]'), '線が引けない断りが出ている').toHaveCount(0);
+
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
 
@@ -240,3 +260,4 @@ test('🔴 雛形を一覧から選ぶと、caret の位置に入る (#196)', as
 
   expect(errors, `page error: ${errors.join(' / ')}`).toEqual([]);
 });
+

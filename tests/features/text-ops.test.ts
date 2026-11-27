@@ -729,13 +729,15 @@ describe('図の一覧の表(#528 案 B)', () => {
     );
   });
 
-  it('🔴 5 種 = フローチャート + UML の 4 種(表から引いていて、数も名指しで pin)', () => {
-    expect(DIAGRAM_CHOICES).toHaveLength(5);
+  it('🔴 6 種 = フローチャート + UML の 4 種 + 3D シーン(表から引いていて、数も名指しで pin)', () => {
+    expect(DIAGRAM_CHOICES).toHaveLength(6);
     expect(DIAGRAM_CHOICES.slice(1)).toEqual(DIAGRAM_TEMPLATES);
-    expect(new Set(DIAGRAM_CHOICES.map((d) => d.id)).size, 'id が重複').toBe(5);
-    expect(new Set(DIAGRAM_CHOICES.map((d) => d.label)).size, '字が重複').toBe(5);
-    // ⚠ 5 つとも mermaid の囲みで始まり、2 行目が種類の名前(空の枠を入れない)
-    for (const d of DIAGRAM_CHOICES) {
+    expect(new Set(DIAGRAM_CHOICES.map((d) => d.id)).size, 'id が重複').toBe(6);
+    expect(new Set(DIAGRAM_CHOICES.map((d) => d.label)).size, '字が重複').toBe(6);
+    expect(DIAGRAM_CHOICES[5]!.label).toBe('3D シーン');
+    expect(DIAGRAM_CHOICES[5]!.block.text.startsWith('```3d\n')).toBe(true);
+    // ⚠ 図の 5 つは mermaid の囲みで始まり、2 行目が種類の名前(空の枠を入れない)
+    for (const d of DIAGRAM_CHOICES.slice(0, 5)) {
       const lines = d.block.text.split('\n');
       expect(lines[0], `${d.label} が mermaid の囲みで始まっていない`).toBe('```mermaid');
       expect(lines[1]!.trim().length, `${d.label} の 1 行目(種類)が空`).toBeGreaterThan(0);

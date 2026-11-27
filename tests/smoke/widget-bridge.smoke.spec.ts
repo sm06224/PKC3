@@ -184,7 +184,7 @@ async function insertTool(page: Page, label: string): Promise<void> {
   await ta.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(el.value.length, el.value.length));
   await clickBarMoreItem(page, '[data-pkc-action="insert-widget-template"]');
   const rows = page.locator('[data-pkc-field="pick-widget-template"]');
-  await expect(rows, 'HTML ツールの一覧が 4 行出ていない').toHaveCount(4);
+  await expect(rows, 'HTML ツールの一覧が 6 行出ていない').toHaveCount(6);
   await clickReal(page, rows.filter({ hasText: label }).first());
   await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
 }
@@ -268,4 +268,21 @@ async function prOEight(page: Page): Promise<void> {
   await expect(sf!.locator('[data-table-index="0"] [data-sum]')).toHaveAttribute('data-sum', '2400');
   await expect(sf!.locator('[data-table-index="1"]')).toContainText('表 2(csv):2 行');
   await expect(sf!.locator('[data-table-index="1"] [data-sum]')).toHaveAttribute('data-sum', '3');
+
+  // 10. 🔴 同じノートに「表の検索・絞り込み」(v4.0 仕上げ PR-D)── 実物の readTables で表を読み、語で行が絞れる
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await insertTool(page, '表の検索・絞り込み');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+  // ⚠ 枠は「見えたとき」に起動する(`widget-bridge.ts` の IntersectionObserver)── 本文の下にあるので見える所まで送る
+  await page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-id="table-filter"]').scrollIntoViewIfNeeded();
+  const filterFrame = page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-id="table-filter"] iframe.pkc-widget-frame');
+  await expect(filterFrame).toHaveCount(1, { timeout: 10_000 });
+  const ff = await (await filterFrame.elementHandle())!.contentFrame();
+  await expect(ff!.locator('#count')).toHaveText('3 / 3 行', { timeout: 10_000 });
+  await ff!.locator('#q').fill('米');
+  await expect(ff!.locator('#count')).toHaveText('1 / 3 行');
+  await expect(ff!.locator('#out mark')).toHaveText('米');
+  await ff!.locator('#pick').selectOption('1');
+  await expect(ff!.locator('#count')).toHaveText('0 / 2 行');
 }

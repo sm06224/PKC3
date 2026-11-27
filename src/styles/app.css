@@ -5797,6 +5797,8 @@ dd[data-pkc-field='inspector-toc'] {
   /* 付箋(絶対配置)の下に隠れない ── 板の上でも前に出す */
   position: relative;
   z-index: 1000;
+  /* 案内は前に見せたまま、下の付箋のつまみ(⠿)や本文の操作を遮らない */
+  pointer-events: none;
 }
 [data-pkc-field='place-line-note'] {
   display: block;
