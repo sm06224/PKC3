@@ -144,3 +144,52 @@ export function orbitFromPosition(position: Vec3, target: Vec3): OrbitState {
   const theta = Math.atan2(dx, dz);
   return { target, radius, theta, phi };
 }
+
+// ───────────────────────────── 視点のプリセット・ズームの段・ホイールの判定
+
+/** 視点のプリセット(3D ビューアのツールバー)。 */
+export type OrbitPreset = 'oblique' | 'front' | 'top';
+
+export const ORBIT_PRESETS: readonly OrbitPreset[] = ['oblique', 'front', 'top'];
+
+/**
+ * 視点のプリセット。⚠ 注視点と距離(寄り具合)は変えず、向きだけを決める。
+ * - `oblique`(斜め): 方位 45°・天頂 60° ── `fitBoundsToOrbit` の最初の視点と同じ向き
+ * - `front`(正面): 方位 0°・天頂 90° ── 水平に +z 側から見る
+ * - `top`(上面): 真上から見下ろす(天頂は極の手前 `ORBIT_PHI_EPS` で止める)
+ */
+export function orbitPreset(state: OrbitState, preset: OrbitPreset): OrbitState {
+  switch (preset) {
+    case 'front':
+      return { ...state, theta: 0, phi: Math.PI / 2 };
+    case 'top':
+      return { ...state, theta: 0, phi: ORBIT_PHI_EPS };
+    case 'oblique':
+    default:
+      return { ...state, theta: Math.PI / 4, phi: Math.PI / 3 };
+  }
+}
+
+/** ボタン・キーの 1 段ぶんのズーム量(`orbitZoom` の `wheelDelta`)。 */
+export const ORBIT_ZOOM_STEP = 200;
+
+/** `−`(引く = -1)/ `+`(寄る = +1)の 1 段。 */
+export function orbitZoomStep(state: OrbitState, dir: 1 | -1, limits: OrbitLimits = DEFAULT_ORBIT_LIMITS): OrbitState {
+  return orbitZoom(state, dir > 0 ? -ORBIT_ZOOM_STEP : ORBIT_ZOOM_STEP, limits);
+}
+
+/**
+ * 🔴 **ホイールでズームしてよいか**(スクロールの取り合いを 0 にする判定。ビューア・グラフで共通)。
+ * - Ctrl / ⌘ + ホイール(トラックパッドのピンチは `ctrlKey` 付きの wheel で届く)はいつでもズーム
+ * - ただのホイールは、描画面を**クリックして有効にした**ときだけズーム
+ * - それ以外は `false` ── 呼び側は `preventDefault` せず、親(ノート)のスクロールへ流す
+ */
+export function wheelZoomsStage(ctrlOrMeta: boolean, active: boolean): boolean {
+  return ctrlOrMeta || active;
+}
+
+/** `WheelEvent` の `deltaY` を `orbitZoom` の入力へ(行単位の送りは 16 倍、ページ単位は 100 倍)。 */
+export function wheelDeltaPx(deltaY: number, deltaMode: number): number {
+  const unit = deltaMode === 1 ? 16 : deltaMode === 2 ? 100 : 1;
+  return finiteOr(deltaY, 0) * unit;
+}

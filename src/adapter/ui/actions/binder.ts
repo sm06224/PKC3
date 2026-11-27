@@ -10680,7 +10680,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   'graph-depth': (dispatcher, target) => {
-    const n = Number(target.getAttribute('data-pkc-graph-depth'));
+    // 🔴 `<select>`(選んだ値)でも、値を運ぶボタン(`data-pkc-graph-depth`)でも読める
+    const n = Number(target instanceof HTMLSelectElement ? target.value : target.getAttribute('data-pkc-graph-depth'));
     if (Number.isFinite(n)) dispatcher.dispatch({ type: 'SET_GRAPH_VIEW', depth: n });
   },
   /**
@@ -10688,6 +10689,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   ボード(`entry=` の付箋 + `.pkc-line`)の新しいノートにして開く。図は描画と同じ `graphViewOf` の 1 本から組む。
    * ⚠ 新しいデータ形式は作らない(本文は PKC-Markdown)。編集中は作らない(理由を出す)。
    */
+  /**
+   * 🔴 **左のタブの関係グラフを、中央の広い画面で開く**(1 クリック)。⚠ 中央の面(`ViewMode` の `graph`)は
+   *   既にある ── ここは `openView` の 1 本に乗るだけ(開いた後の後始末を落とさない)。読むだけの操作。
+   */
+  'graph-open-wide': (dispatcher) => {
+    openView(dispatcher, 'graph');
+  },
   'graph-open-board': (dispatcher) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {

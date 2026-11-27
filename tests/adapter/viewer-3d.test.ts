@@ -128,7 +128,7 @@ describe('mount3dViewer(` ```3d ` のシーン)', () => {
     expect(root.getAttribute('data-pkc-3d-state')).toBe('loading');
     expect(root.querySelector('[data-pkc-3d-info="format"]')!.textContent).toBe('3D シーン');
     expect(root.querySelector('[data-pkc-3d-info="size"]')!.textContent).toBe('オブジェクト 1 個');
-    expect([...root.querySelectorAll('[data-pkc-3d-op]')].map((b) => b.textContent)).toEqual(['視点をリセット', 'ワイヤーフレーム', 'グリッド']);
+    expect([...root.querySelectorAll('[data-pkc-3d-op]')].map((b) => b.textContent)).toEqual(['−', '+', '斜め', '正面', '上面', '視点をリセット', 'ワイヤーフレーム', 'グリッド', '拡大']);
     // 描画面は ` ```3d ` の height
     expect((root.querySelector('[data-pkc-3d-stage]') as HTMLElement).style.height).toBe('360px');
   });
@@ -183,6 +183,93 @@ describe('mount3dViewer(` ```3d ` のシーン)', () => {
     session.render(SIZE);
     expect(renderer.calls[3]!.camera.position.distanceTo(before)).toBeLessThan(1e-9);
     expect(s.invalidates).toBe(n0 + 4);
+  });
+
+  it('🔴 ホイール: 有効にしていないただのホイールは奪わず、Ctrl+ホイール / クリックで有効にした後だけ寄る。Esc・外側のクリックで抜ける', async () => {
+    mount3dViewer(host, { kind: 'scene', spec: spec('{"objects":[{"type":"box"}]}') });
+    const s = surfaces[0]!;
+    const { ctx, renderer } = fakeCtx();
+    const session = await s.opts.onAcquire(ctx);
+    session.render(SIZE);
+    const stage = host.querySelector<HTMLElement>('[data-pkc-3d-stage]')!;
+    const dist = (): number => renderer.calls.at(-1)!.camera.position.length();
+    const r0 = dist();
+    const n0 = s.invalidates;
+    const plain = new WheelEvent('wheel', { deltaY: 500, bubbles: true, cancelable: true });
+    stage.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
+    expect(s.invalidates).toBe(n0); // 何も頼まない(親のスクロールに任せる)
+    const ctrl = new WheelEvent('wheel', { deltaY: 500, bubbles: true, cancelable: true });
+    Object.defineProperty(ctrl, 'ctrlKey', { value: true });
+    stage.dispatchEvent(ctrl);
+    expect(ctrl.defaultPrevented).toBe(true);
+    session.render(SIZE);
+    expect(dist()).toBeGreaterThan(r0);
+    // クリックで有効
+    stage.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 5, clientY: 5, buttons: 1, bubbles: true }));
+    stage.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true }));
+    expect(stage.hasAttribute('data-pkc-3d-active')).toBe(true);
+    const act = new WheelEvent('wheel', { deltaY: 500, bubbles: true, cancelable: true });
+    stage.dispatchEvent(act);
+    expect(act.defaultPrevented).toBe(true);
+    // Esc で抜ける
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    stage.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect(stage.hasAttribute('data-pkc-3d-active')).toBe(false);
+    const after = new WheelEvent('wheel', { deltaY: 500, bubbles: true, cancelable: true });
+    stage.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+    // 外側のクリックで抜ける
+    stage.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 5, clientY: 5, buttons: 1, bubbles: true }));
+    stage.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, bubbles: true }));
+    expect(stage.hasAttribute('data-pkc-3d-active')).toBe(true);
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 9, bubbles: true }));
+    expect(stage.hasAttribute('data-pkc-3d-active')).toBe(false);
+  });
+
+  it('🔴 ツールバー: − / + のズーム・視点プリセット・拡大の入り切り(aria-pressed で高さが大きく変わる)', async () => {
+    mount3dViewer(host, { kind: 'scene', spec: spec('{"objects":[{"type":"box"}]}') });
+    const s = surfaces[0]!;
+    const { ctx, renderer } = fakeCtx();
+    const session = await s.opts.onAcquire(ctx);
+    session.render(SIZE);
+    const btn = (op: string): HTMLButtonElement => host.querySelector(`[data-pkc-3d-op="${op}"]`)!;
+    expect(btn('zoom-out').getAttribute('aria-label')).toBe('ズームアウト');
+    expect(btn('zoom-in').getAttribute('aria-label')).toBe('ズームイン');
+    const pos = (): THREE.Vector3 => renderer.calls.at(-1)!.camera.position.clone();
+    const r0 = pos().length();
+    btn('zoom-in').click();
+    session.render(SIZE);
+    expect(pos().length()).toBeLessThan(r0);
+    btn('zoom-out').click();
+    btn('zoom-out').click();
+    session.render(SIZE);
+    expect(pos().length()).toBeGreaterThan(r0);
+    btn('preset-front').click();
+    session.render(SIZE);
+    const f = pos();
+    btn('preset-top').click();
+    session.render(SIZE);
+    const t = pos();
+    btn('preset-oblique').click();
+    session.render(SIZE);
+    const o = pos();
+    expect(Math.abs(f.y)).toBeLessThan(0.5 * f.length());
+    expect(t.y).toBeGreaterThan(0.99 * t.length());
+    expect(o.distanceTo(f)).toBeGreaterThan(0.1);
+    expect(o.distanceTo(t)).toBeGreaterThan(0.1);
+    // 拡大
+    const stage = host.querySelector<HTMLElement>('[data-pkc-3d-stage]')!;
+    expect(btn('expand').getAttribute('aria-pressed')).toBe('false');
+    expect(stage.style.height).toBe('360px');
+    btn('expand').click();
+    expect(btn('expand').getAttribute('aria-pressed')).toBe('true');
+    expect(host.querySelector('[data-pkc-3d-viewer]')!.hasAttribute('data-pkc-3d-expanded')).toBe(true);
+    btn('expand').click();
+    expect(btn('expand').getAttribute('aria-pressed')).toBe('false');
+    expect(host.querySelector('[data-pkc-3d-viewer]')!.hasAttribute('data-pkc-3d-expanded')).toBe(false);
+    expect(stage.style.height).toBe('360px');
   });
 
   it('🔴 ワイヤーフレーム・グリッドの切替は描き直しを頼み、次の 1 コマに効く。リセットは最初の視点', async () => {

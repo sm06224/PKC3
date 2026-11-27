@@ -76,4 +76,19 @@ describe('code block language badge (Issue #1128)', () => {
     expect(extractLanguageName('no-lang-class')).toBeNull();
     expect(extractLanguageName('')).toBeNull();
   });
+
+  it('```3d(-render / -both)のバッジは JSON ではなく 3D(V-6)', () => {
+    host.innerHTML = `
+      <div class="pkc-md-block" data-pkc-md-block-kind="code" data-pkc-render-lang="3d" data-pkc-render-mode="render">
+        <div class="pkc-render-slot"><div class="pkc-3d-placeholder" data-pkc-md-block-kind="3d"><pre class="pkc-3d-source"><code class="language-json">{}</code></pre></div></div>
+        <pre class="pkc-render-source"><code class="language-3d">{}</code></pre>
+      </div>
+      <div class="pkc-md-block" data-pkc-md-block-kind="code" data-pkc-render-lang="mermaid" data-pkc-render-mode="render">
+        <div class="pkc-render-slot"><pre><code class="language-mermaid">a</code></pre></div>
+      </div>
+    `;
+    applyCodeLangBadges(host);
+    const badges = [...host.querySelectorAll('.pkc-code-lang')].map((b) => b.textContent);
+    expect(badges).toEqual(['3D', 'mermaid']);
+  });
 });

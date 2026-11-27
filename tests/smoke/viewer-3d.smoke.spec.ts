@@ -1,5 +1,5 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
-import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor } from './helpers';
+import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, pixels, changed } from './helpers';
 
 /**
  * 🔴 3D ビューア(v4.0 Phase 3 / PR-12、ビジョン 1-B)── 実ブラウザで確かめる 4 つ。
@@ -174,6 +174,54 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   await expect(page.locator('[data-pkc-field="detail-body"] .pkc-render-source').first()).toBeVisible();
   await clickReal(page, toggle);
   await expect(viewer).toBeVisible();
+
+  // ⑤ 🔴 スクロールの取り合い 0: 長いノートの途中にある 3D の上でただのホイールを回すと、ノートが送られる
+  //    (図は奪わない)。Ctrl + ホイールは図のズーム(ノートは送られない)。ツールバーの 拡大 で高さが大きく変わる
+  const filler = Array.from({ length: 40 }, (_, i) => `${i} 行目の段落です。`).join('\n\n');
+  await writeNote(page, '長い 3D', `${filler}\n\n${SCENE}\n\n${filler}\n`);
+  const longHost = page.locator('[data-pkc-field="detail-body"] [data-pkc-3d-src]').first();
+  await expect(longHost).toHaveAttribute('data-pkc-3d-state', 'ready', { timeout: 15_000 });
+  const longViewer = longHost.locator('[data-pkc-3d-viewer]');
+  await longViewer.scrollIntoViewIfNeeded();
+  await expect(longViewer.locator('[data-pkc-3d-info="backend"][data-pkc-3d-backend]')).toHaveAttribute('data-pkc-3d-backend', /^(webgpu|webgl2|2d)$/, { timeout: 30_000 });
+  // V-6: 言語バッジは JSON ではなく 3D
+  const badges = await page.locator('[data-pkc-field="detail-body"] .pkc-code-lang').allTextContents();
+  expect(badges.filter((t) => /json/i.test(t)), '3d の囲みに JSON のバッジが出ている').toEqual([]);
+  const scroller = page.locator('[data-pkc-region="detail"]');
+  const top = async (): Promise<number> => scroller.evaluate((el) => el.scrollTop);
+  const longStage = longViewer.locator('[data-pkc-3d-stage]');
+  const sb = (await longStage.boundingBox())!;
+  await page.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2);
+  const t0 = await top();
+  await page.mouse.wheel(0, 400);
+  await expect.poll(top, { message: '3D の上のホイールでノートが送られない(スクロールを奪っている)' }).toBeGreaterThan(t0);
+  // Ctrl + ホイール = 図のズーム(画素が変わる)。ノートは送られない
+  await longStage.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
+  const cb = (await longStage.boundingBox())!;
+  const clip = { x: cb.x + 4, y: cb.y + 4, width: Math.max(8, cb.width - 8), height: Math.max(8, cb.height - 8) };
+  await page.mouse.move(cb.x + cb.width / 2, cb.y + cb.height / 2);
+  const before = await pixels(page, clip);
+  const t1 = await top();
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -500);
+  await page.keyboard.up('Control');
+  await expect
+    .poll(async () => changed(before, await pixels(page, clip)), { message: 'Ctrl + ホイールで図が変わらない' })
+    .toBeGreaterThan(50);
+  expect(Math.abs((await top()) - t1), 'Ctrl + ホイールでノートが送られた').toBeLessThan(2);
+  // クリックで有効 → 枠が出る → Esc で抜ける
+  await clickReal(page, longStage);
+  await expect(longStage).toHaveAttribute('data-pkc-3d-active', '');
+  await page.keyboard.press('Escape');
+  await expect(longStage).not.toHaveAttribute('data-pkc-3d-active', '');
+  // 拡大: 高さが大きくなり、もう一度で戻る
+  const h0 = (await longStage.boundingBox())!.height;
+  await clickReal(page, longViewer.locator('[data-pkc-3d-op="expand"]'));
+  await expect(longViewer.locator('[data-pkc-3d-op="expand"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => (await longStage.boundingBox())!.height).toBeGreaterThan(h0 + 150);
+  await clickReal(page, longViewer.locator('[data-pkc-3d-op="expand"]'));
+  await expect.poll(async () => Math.round((await longStage.boundingBox())!.height)).toBe(Math.round(h0));
 
   expect(errors, errors.join('\n')).toEqual([]);
 });

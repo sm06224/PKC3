@@ -331,7 +331,7 @@ export class BrowseRouter {
     this.schedule = new ScheduleRenderer(this.panes.schedule, now);
     this.contacts = new ContactsRenderer(this.panes.contacts);
     this.captures = new CapturesRenderer(this.panes.captures, assets, onCaptureReady);
-    this.graph = new GraphRenderer(this.panes.graph);
+    this.graph = new GraphRenderer(this.panes.graph, { wideButton: true });
     this.timers = new TimersRenderer(this.panes.timers);
     this.pc = new PcFolderRenderer(this.panes.pc, pcFolder, folderSync);
     this.shell = new ShellPaneRenderer(this.panes.shell, 'pane');

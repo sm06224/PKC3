@@ -4856,10 +4856,33 @@ dd[data-pkc-field='inspector-toc'] {
 .pkc-3d-btn {
   font-size: var(--btn-fs-sm);
 }
-/* 切替の入は形(太字)で示す ── 色は意味にだけ使う */
+/* 切替の入は形で示す ── 薄い地の色 + アクセントの下線(塗りつぶさない) */
 .pkc-3d-btn[aria-pressed='true'] {
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--fg);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+/* ── 3D ビューア v4.0 仕上げ(スクロール 0 取り合い・ズーム・視点・拡大)── 区切りの塊 ── */
+/* 情報(形式・大きさ・描画方式)は中黒で区切る(空の欄には出さない) */
+.pkc-3d-info:not(:empty) + .pkc-3d-info:not(:empty)::before {
+  content: '·';
+  margin: 0 var(--s1);
+  color: var(--muted);
+  font-weight: 400;
+}
+/* ズーム・視点のボタンは小さく(− / + は正方形に近く) */
+.pkc-3d-btn[data-pkc-3d-op='zoom-out'],
+.pkc-3d-btn[data-pkc-3d-op='zoom-in'] {
+  min-width: 2em;
+  text-align: center;
+}
+/* 描画面を「有効」にしたら(クリック)、ホイールだけでもズームする ── 輪郭で示す */
+.pkc-3d-stage[data-pkc-3d-active] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.pkc-3d-viewer[data-pkc-3d-expanded] .pkc-3d-stage {
+  height: max(560px, 75vh) !important;
 }
 .pkc-3d-stage {
   position: relative;
@@ -15675,6 +15698,18 @@ h6:hover > .pkc-heading-anchor,
   flex-wrap: wrap;
   gap: var(--s1);
 }
+/* 🔴 関係グラフの「たどる段階」と、左の列(狭い)での図の広さ ── 段階は <select> にして折り返しで壁にしない */
+[data-pkc-field='graph-depth-select'] {
+  min-width: 6.5em;
+}
+[data-pkc-browse-pane='graph'] [data-pkc-field='graph-gpu-stage'] {
+  aspect-ratio: 1 / 1.15;
+  min-height: 300px;
+  max-height: 70vh;
+}
+[data-pkc-browse-pane='graph'] [data-pkc-field='graph-map'] {
+  aspect-ratio: 1 / 1.15 !important;
+}
 [data-pkc-field='graph-note'],
 [data-pkc-field='graph-legend'] {
   margin: 0;
@@ -15761,7 +15796,8 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='graph-gpu'][data-pkc-graph-panning] [data-pkc-field='graph-gpu-stage'] {
   cursor: grabbing;
 }
-[data-pkc-field='graph-gpu-stage']:focus-visible {
+[data-pkc-field='graph-gpu-stage']:focus-visible,
+[data-pkc-field='graph-gpu-stage'][data-pkc-graph-active] {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
