@@ -38,7 +38,23 @@ import {
   routeWidgetBlocked,
   setWidgetPermissionGate,
   widgetAssetLabel,
+  widgetIoLidOf,
 } from '../../src/adapter/ui/render/widget-bridge';
+import {
+  resetWidgetIoForTest,
+  setWidgetIoPressGuardForTest,
+  widgetIoPendingCount,
+  widgetIoPendingForTest,
+} from '../../src/adapter/ui/render/widget-io-bar';
+import {
+  WIDGET_DL_REQ_MSG_TYPE,
+  WIDGET_DL_RES_MSG_TYPE,
+  WIDGET_FILE_REQ_MSG_TYPE,
+  WIDGET_FILE_RES_MSG_TYPE,
+  WIDGET_IO_PRESS_GUARD_MS,
+  WIDGET_IO_REASONS,
+  WIDGET_IO_TIMEOUT_MS,
+} from '../../src/features/markdown/widget-io';
 import { WidgetPermissionGate } from '../../src/adapter/platform/widget-permission-grants';
 import {
   applyWidgetStorageOp,
@@ -1299,5 +1315,741 @@ describe('🔴 添付 HTML ウィジェットの追加権限(#2090 ②)', () => 
     expect(opened).toContain("connect-src 'none'");
     expect(widgetAssetLabel(KEY)).toBe('道具のノート');
     for (const s of scopes) s.dispose();
+  });
+});
+
+describe('🔴 ファイルの入出力(#2097 ── 確認バーを押したときだけ保存・添付・読み込み)', () => {
+  const PLAIN = '```html\n<p>tool</p>\n```\n';
+  let urlSeq = 0;
+  function catchDl(): { files: { name: string; blob: Blob; url: string }[]; revoked: string[] } {
+    const files: { name: string; blob: Blob; url: string }[] = [];
+    const revoked: string[] = [];
+    const made = new Map<string, Blob>();
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => {
+      // ⚠ test をまたいで一意にする(前の test の 1 秒後の revoke が同じ名前で紛れ込まない)
+      urlSeq += 1;
+      const url = `blob:io/${urlSeq}`;
+      made.set(url, b as Blob);
+      return url;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((u) => {
+      revoked.push(u);
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      files.push({ name: this.download, blob: made.get(this.href)!, url: this.href });
+    });
+    return { files, revoked };
+  }
+  type IoHost = WidgetNoteHost & {
+    fails: string[];
+    blocked: string | null;
+    attached: { lid: string; file: File }[];
+    listed: string[];
+    read: string[];
+  };
+  function ioHost(bodies: Record<string, string>, assets: Record<string, { name: string; mime: string; bytes: string }[]> = {}): IoHost {
+    const base = fakeHost(bodies);
+    const h: IoHost = {
+      ...base,
+      attached: [],
+      listed: [],
+      read: [],
+      attachFile: (lid, file) => {
+        h.attached.push({ lid, file });
+        return Promise.resolve(true);
+      },
+      listNoteAssets: (lid) => {
+        h.listed.push(lid);
+        return Promise.resolve(
+          (assets[lid] ?? []).map((a, i) => ({ key: `${lid}-k${String(i)}`, name: a.name, mime: a.mime, size: a.bytes.length })),
+        );
+      },
+      readAssetBlob: (key) => {
+        h.read.push(key);
+        for (const [lid, list] of Object.entries(assets)) {
+          const i = list.findIndex((_, j) => `${lid}-k${String(j)}` === key);
+          if (i >= 0) return Promise.resolve(new Blob([list[i]!.bytes], { type: list[i]!.mime }));
+        }
+        return Promise.resolve(null);
+      },
+    };
+    // ⚠ fakeHost の writeBlockReason は自分の `blocked` を読む ── 写した h から読ませる
+    h.writeBlockReason = () => h.blocked;
+    return h;
+  }
+  const plainFrame = (root: ParentNode): HTMLIFrameElement => root.querySelector<HTMLIFrameElement>('iframe.pkc-html-render')!;
+  const idOf = (f: HTMLIFrameElement): string => f.getAttribute('data-pkc-html-render-id')!;
+  const dlReq = (f: HTMLIFrameElement, reqId: number, name: string, data: unknown, mime = 'text/csv'): Record<string, unknown> => ({
+    type: WIDGET_DL_REQ_MSG_TYPE,
+    id: idOf(f),
+    reqId,
+    name,
+    mime,
+    data,
+  });
+  const bar = (root: ParentNode = document): HTMLElement | null => root.querySelector<HTMLElement>('[data-pkc-field="widget-io-bar"]');
+  const press = (field: string): void => {
+    const b = document.querySelector<HTMLButtonElement>(`[data-pkc-field="${field}"]`);
+    expect(b, `${field} が無い`).not.toBeNull();
+    b!.click();
+  };
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
+  };
+  // ⚠ 出した直後に押せない時間(すり替え対策)は専用の test で見る ── 他の test はすぐ押す
+  beforeEach(() => setWidgetIoPressGuardForTest(0));
+  afterEach(() => {
+    resetWidgetIoForTest();
+    setWidgetIoPressGuardForTest(null);
+  });
+
+  it('🔴 確認バーを出した直後・差し替えた直後は押せない(すり替え対策)── 時間が来たら押せる', () => {
+    setWidgetIoPressGuardForTest(null);
+    vi.useFakeTimers();
+    try {
+      const { body } = mount('L1', PLAIN);
+      const f = plainFrame(body);
+      const w = giveWindow(f);
+      post(dlReq(f, 1, 'safe.csv', 'x'), w);
+      const save1 = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-save"]')!;
+      expect(save1.disabled, '出した直後に押せる').toBe(true);
+      vi.advanceTimersByTime(WIDGET_IO_PRESS_GUARD_MS - 50);
+      // 押せるようになる直前に差し替える
+      post(dlReq(f, 2, 'evil.html', 'x', 'text/html'), w);
+      const save2 = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-save"]')!;
+      expect(save2.disabled, '差し替えた直後に押せる').toBe(true);
+      vi.advanceTimersByTime(100);
+      expect(save2.disabled, '前の要求の時間で押せるようになった').toBe(true);
+      vi.advanceTimersByTime(WIDGET_IO_PRESS_GUARD_MS);
+      expect(save2.disabled).toBe(false);
+      expect(body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-cancel"]')!.disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 書けない理由で止めた「このノートへ添付」は、押せない時間が過ぎても止めたまま', () => {
+    setWidgetIoPressGuardForTest(null);
+    vi.useFakeTimers();
+    try {
+      const h = ioHost({ L1: PLAIN });
+      h.blocked = '編集中です';
+      setWidgetNoteHost(h);
+      const { body } = mount('L1', PLAIN);
+      const f = plainFrame(body);
+      post(dlReq(f, 1, 'a.csv', 'x'), giveWindow(f));
+      vi.advanceTimersByTime(WIDGET_IO_PRESS_GUARD_MS + 1);
+      expect(body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-attach"]')!.disabled).toBe(true);
+      expect(body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-save"]')!.disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 箱が諦める時間で親も確認バーを閉じ、預かった bytes を手放す', () => {
+    vi.useFakeTimers();
+    try {
+      const { body } = mount('L1', PLAIN);
+      const f = plainFrame(body);
+      const w = giveWindow(f);
+      post(dlReq(f, 1, 'a.csv', 'abc'), w);
+      const p = widgetIoPendingForTest(f)!;
+      expect(p.bytes?.byteLength).toBe(3);
+      vi.advanceTimersByTime(WIDGET_IO_TIMEOUT_MS + 1);
+      expect(bar(body)).toBeNull();
+      expect(p.bytes, '時間切れで bytes を握り続けた').toBeNull();
+      expect(w.posted).toEqual([{ type: WIDGET_DL_RES_MSG_TYPE, reqId: 1, ok: false, action: 'cancel', reason: WIDGET_IO_REASONS.timeout }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 置き換え・やめる・保存のどれでも、預かった bytes を手放す', () => {
+    catchDl();
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 1, 'a.csv', 'x'), w);
+    const p1 = widgetIoPendingForTest(f)!;
+    post(dlReq(f, 2, 'b.csv', 'y'), w);
+    expect(p1.bytes, '置き換えで手放していない').toBeNull();
+    const p2 = widgetIoPendingForTest(f)!;
+    press('widget-io-cancel');
+    expect(p2.bytes, 'やめるで手放していない').toBeNull();
+    post(dlReq(f, 3, 'c.csv', 'z'), w);
+    const p3 = widgetIoPendingForTest(f)!;
+    press('widget-io-save');
+    expect(p3.bytes, '保存で手放していない').toBeNull();
+  });
+
+  it('🔴 添付の最中に来た新しい要求は断り(置き換えない)、添付の答え attach を返す', async () => {
+    const h = ioHost({ L1: PLAIN });
+    let finish: (ok: boolean) => void = () => undefined;
+    h.attachFile = (lid, file) => {
+      h.attached.push({ lid, file });
+      return new Promise<boolean>((r) => {
+        finish = r;
+      });
+    };
+    setWidgetNoteHost(h);
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 1, 'a.csv', 'x'), w);
+    press('widget-io-attach');
+    expect(widgetIoPendingForTest(f)!.busy).toBe(true);
+    post(dlReq(f, 2, 'b.csv', 'y'), w);
+    expect(w.posted).toEqual([{ type: WIDGET_DL_RES_MSG_TYPE, reqId: 2, ok: false, action: 'rejected', reason: WIDGET_IO_REASONS.busy }]);
+    expect(bar(body)!.textContent).toContain('a.csv');
+    finish(true);
+    await flush();
+    expect(w.posted.at(-1)).toEqual({ type: WIDGET_DL_RES_MSG_TYPE, reqId: 1, ok: true, action: 'attach' });
+  });
+
+  it('🔴 添付が効かなかったら(口が false)「添付できませんでした」で返す(attach と偽らない)', async () => {
+    const h = ioHost({ L1: PLAIN });
+    h.attachFile = () => Promise.resolve(false);
+    setWidgetNoteHost(h);
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 1, 'a.csv', 'x'), w);
+    press('widget-io-attach');
+    await flush();
+    expect(w.posted).toEqual([{ type: WIDGET_DL_RES_MSG_TYPE, reqId: 1, ok: false, action: 'cancel', reason: WIDGET_IO_REASONS.attachFailed }]);
+  });
+
+  it('🔴 流量で断る要求は中身を検めない(大きな文字列を符号化しない)', () => {
+    vi.spyOn(Date, 'now').mockImplementation(() => 5000);
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    for (let i = 1; i <= 3; i++) post(dlReq(f, i, 'a.csv', 'x'), w);
+    const enc = vi.spyOn(TextEncoder.prototype, 'encode');
+    post(dlReq(f, 4, 'a.csv', 'y'.repeat(1000)), w);
+    expect(enc, '断る要求を符号化した').not.toHaveBeenCalled();
+    expect(w.posted.at(-1)).toMatchObject({ reqId: 4, action: 'rejected', reason: WIDGET_IO_REASONS.rateLimited });
+  });
+
+  it('🔴 埋め込みの中なら、中に別の lid の器が入れ子になっていても「このノート」としない', () => {
+    const { body } = mount('L1', 'x');
+    const embed = document.createElement('div');
+    embed.setAttribute('data-pkc-embed-ref', 'entry:L2');
+    const inner = document.createElement('div');
+    inner.setAttribute(WIDGET_LID_ATTR, 'L2');
+    inner.innerHTML = renderMarkdown(PLAIN, {});
+    embed.append(inner);
+    body.append(embed);
+    expect(widgetIoLidOf(plainFrame(inner))).toBeNull();
+    // 対照:埋め込みでない器なら引ける
+    const { body: b2 } = mount('L3', PLAIN);
+    expect(widgetIoLidOf(plainFrame(b2))).toBe('L3');
+  });
+
+  it('🔴 `id=` の無い直書きの ```html の箱も対象で、sandbox は allow-scripts のまま(allow-downloads を足さない)', () => {
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(f.srcdoc).toContain('api.requestDownload=');
+    expect(f.srcdoc).toContain('api.requestFile=');
+    const w = giveWindow(f);
+    post(dlReq(f, 1, 'out.csv', 'a,b'), w);
+    expect(bar(body)).not.toBeNull();
+    // 🔑 箱の直前に置く
+    expect(bar(body)!.nextElementSibling).toBe(f);
+    expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+  });
+
+  it('🔴 保存の要求だけでは何も保存しない → 「PC へ保存」で保存し、箱へ save を返し、ObjectURL を手放す', async () => {
+    setWidgetNoteHost(ioHost({ L1: PLAIN }));
+    const dl = catchDl();
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    const bytes = new TextEncoder().encode('名前,値\n');
+    post(dlReq(f, 5, '../../売上.csv', bytes.buffer), w);
+    expect(dl.files, '要求だけで保存された(ドライブバイ)').toHaveLength(0);
+    expect(w.posted, '押す前に答えた').toEqual([]);
+    expect(bar(body)!.textContent).toContain('「売上.csv」');
+    expect(bar(body)!.querySelector('[data-pkc-field="widget-io-risk"]')).toBeNull();
+    press('widget-io-save');
+    expect(dl.files).toHaveLength(1);
+    expect(dl.files[0]!.name).toBe('売上.csv');
+    expect(new Uint8Array(await dl.files[0]!.blob.arrayBuffer())).toEqual(bytes);
+    expect(dl.files[0]!.blob.type).toBe('text/csv');
+    expect(w.posted).toEqual([{ type: WIDGET_DL_RES_MSG_TYPE, reqId: 5, ok: true, action: 'save' }]);
+    expect(bar(body), '保存した後もバーが残る').toBeNull();
+    expect(widgetIoPendingCount()).toBe(0);
+    await new Promise((r) => setTimeout(r, 1100));
+    // ⚠ 前の test が残した 1 秒後の revoke もここへ来る ── この test で作った URL だけを見る
+    expect(dl.revoked.filter((u) => u === dl.files[0]!.url)).toEqual([dl.files[0]!.url]);
+  });
+
+  it('🔴「このノートへ添付」は置いたノートの lid と同じ中身の File で正規の口を呼び、attach を返す', async () => {
+    const h = ioHost({ L1: PLAIN });
+    setWidgetNoteHost(h);
+    const dl = catchDl();
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 2, 'data.json', '{"a":1}', 'application/json'), w);
+    press('widget-io-attach');
+    await flush();
+    expect(h.attached.map((a) => a.lid)).toEqual(['L1']);
+    expect(h.attached[0]!.file.name).toBe('data.json');
+    expect(h.attached[0]!.file.type).toBe('application/json');
+    expect(await h.attached[0]!.file.text()).toBe('{"a":1}');
+    expect(dl.files).toHaveLength(0);
+    expect(w.posted).toEqual([{ type: WIDGET_DL_RES_MSG_TYPE, reqId: 2, ok: true, action: 'attach' }]);
+    expect(bar(body)).toBeNull();
+  });
+
+  it('🔴 書けないノートでは「このノートへ添付」を押せず理由を添え、押されても添付しない', async () => {
+    const h = ioHost({ L1: PLAIN });
+    h.blocked = '編集中です';
+    setWidgetNoteHost(h);
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 2, 'a.csv', 'x'), w);
+    const b = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-attach"]')!;
+    expect(b.disabled).toBe(true);
+    expect(b.title).toContain('編集中です');
+    b.disabled = false;
+    b.click();
+    await flush();
+    expect(h.attached).toEqual([]);
+    expect(h.fails).toEqual(['編集中です']);
+    expect(bar(body), '断ったら要求は残る(PC へ保存・やめるを選べる)').not.toBeNull();
+  });
+
+  it('🔴 埋め込み(別のノートの塊)の中の箱・lid の無い面には「このノートへ添付」を出さない', () => {
+    setWidgetNoteHost(ioHost({ L1: PLAIN }));
+    const { body } = mount('L1', 'x');
+    const embed = document.createElement('div');
+    embed.setAttribute('data-pkc-embed-ref', 'entry:L2');
+    embed.innerHTML = renderMarkdown(PLAIN, {});
+    body.append(embed);
+    const f = plainFrame(embed);
+    expect(widgetIoLidOf(f)).toBeNull();
+    post(dlReq(f, 1, 'a.csv', 'x'), giveWindow(f));
+    expect(bar(embed)).not.toBeNull();
+    expect(embed.querySelector('[data-pkc-field="widget-io-attach"]')).toBeNull();
+    expect(embed.querySelector('[data-pkc-field="widget-io-save"]')).not.toBeNull();
+    resetWidgetIoForTest();
+    const { body: nolid } = mount(null, PLAIN);
+    const f2 = plainFrame(nolid);
+    post(dlReq(f2, 1, 'a.csv', 'x'), giveWindow(f2));
+    expect(nolid.querySelector('[data-pkc-field="widget-io-attach"]')).toBeNull();
+  });
+
+  it('🔴 要注意の拡張子(.html / .exe)は注意の文を出す(保存は止めない)', () => {
+    setWidgetNoteHost(ioHost({ L1: PLAIN }));
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 1, 'report.html', '<p>', 'text/html'), w);
+    expect(bar(body)!.querySelector('[data-pkc-field="widget-io-risk"]')!.textContent).toMatch(/スクリプトや実行コード/);
+    post(dlReq(f, 2, 'setup.EXE', 'MZ', 'application/octet-stream'), w);
+    expect(bar(body)!.querySelector('[data-pkc-field="widget-io-risk"]')).not.toBeNull();
+    expect(bar(body)!.querySelector('[data-pkc-field="widget-io-save"]')).not.toBeNull();
+  });
+
+  it('🔴 なりすまし(別の窓が箱の id を名乗る)・実体の無い送り主には確認バーも答えも出さない', () => {
+    const { body } = mount('L1', PLAIN + '\n```html\n<p>other</p>\n```\n');
+    const [a, b] = [...body.querySelectorAll<HTMLIFrameElement>('iframe.pkc-html-render')];
+    const wa = giveWindow(a!);
+    const wb = giveWindow(b!);
+    // A の窓が B の id を名乗る
+    post({ ...dlReq(b!, 1, 'x.csv', 'x') }, wa);
+    post(dlReq(a!, 1, 'x.csv', 'x'), fakeWin());
+    post(dlReq(a!, 1, 'x.csv', 'x'), null);
+    expect(bar(body)).toBeNull();
+    expect(wa.posted).toEqual([]);
+    expect(wb.posted).toEqual([]);
+  });
+
+  it('🔴 1 つの箱から 1 秒に 4 回送っても、4 回目は断り、確認バーは 1 枚のまま(UI を荒らさない)', () => {
+    let now = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    for (let i = 1; i <= 4; i++) post(dlReq(f, i, `a${String(i)}.csv`, 'x'), w);
+    expect(body.querySelectorAll('[data-pkc-field="widget-io-bar"]')).toHaveLength(1);
+    const types = w.posted.map((m) => (m as { reqId: number; action: string; reason?: string }));
+    // 1〜2 は置き換わり、4 は流量で断る
+    expect(types).toEqual([
+      expect.objectContaining({ reqId: 1, action: 'cancel', reason: WIDGET_IO_REASONS.replaced }),
+      expect.objectContaining({ reqId: 2, action: 'cancel', reason: WIDGET_IO_REASONS.replaced }),
+      expect.objectContaining({ reqId: 4, action: 'rejected', reason: WIDGET_IO_REASONS.rateLimited }),
+    ]);
+    expect(bar(body)!.textContent).toContain('a3.csv');
+    now += 1000;
+    post(dlReq(f, 5, 'a5.csv', 'x'), w);
+    expect(bar(body)!.textContent).toContain('a5.csv');
+  });
+
+  it('🔴 2 つ目の要求で前の要求は「置き換わりました」で閉じ、預かった bytes を手放す(古い方は保存できない)', async () => {
+    const dl = catchDl();
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 1, 'old.csv', 'OLD'), w);
+    const oldSave = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-save"]')!;
+    post(dlReq(f, 2, 'new.csv', 'NEW'), w);
+    expect(w.posted).toEqual([{ type: WIDGET_DL_RES_MSG_TYPE, reqId: 1, ok: false, action: 'cancel', reason: WIDGET_IO_REASONS.replaced }]);
+    expect(oldSave.isConnected).toBe(false);
+    oldSave.click();
+    expect(dl.files, '置き換わった要求で保存できた').toHaveLength(0);
+    press('widget-io-save');
+    expect(dl.files.map((x) => x.name)).toEqual(['new.csv']);
+    expect(await dl.files[0]!.blob.text()).toBe('NEW');
+  });
+
+  it('🔴 50 MB を超える・壊れた要求はバーを出さずに断る', () => {
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 1, 'a.csv', { not: 'bytes' }), w);
+    expect(bar(body)).toBeNull();
+    expect(w.posted).toEqual([{ type: WIDGET_DL_RES_MSG_TYPE, reqId: 1, ok: false, action: 'rejected', reason: WIDGET_IO_REASONS.badData }]);
+  });
+
+  it('「やめる」で cancel を返し、箱が外れたら確認バーを片付けて cancel を返す', async () => {
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post(dlReq(f, 1, 'a.csv', 'x'), w);
+    press('widget-io-cancel');
+    expect(w.posted).toEqual([{ type: WIDGET_DL_RES_MSG_TYPE, reqId: 1, ok: false, action: 'cancel' }]);
+    post(dlReq(f, 2, 'a.csv', 'x'), w);
+    expect(widgetIoPendingCount()).toBe(1);
+    body.remove();
+    await flush();
+    expect(widgetIoPendingCount()).toBe(0);
+    expect(w.posted.at(-1)).toMatchObject({ reqId: 2, ok: false, action: 'cancel', reason: WIDGET_IO_REASONS.closed });
+  });
+
+  it('🔴 読み込みの要求 →「PC から選ぶ」を押したときだけファイル選択を開き、中身を Transferable で返す', async () => {
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    const transfers: unknown[][] = [];
+    w.postMessage = (m: unknown, _o?: unknown, t?: unknown[]) => {
+      w.posted.push(m);
+      transfers.push(t ?? []);
+    };
+    const opened: HTMLInputElement[] = [];
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      opened.push(this);
+    });
+    post({ type: WIDGET_FILE_REQ_MSG_TYPE, id: idOf(f), reqId: 9, accept: '.csv', multiple: false }, w);
+    expect(opened, '要求だけでファイル選択が開いた').toHaveLength(0);
+    expect(bar(body)!.textContent).toContain('対象: .csv');
+    press('widget-io-pick-pc');
+    expect(opened).toHaveLength(1);
+    expect(opened[0]!.accept).toBe('.csv');
+    expect(opened[0]!.multiple).toBe(false);
+    const file = new File(['a,b\n1,2'], 'in.csv', { type: 'text/csv' });
+    Object.defineProperty(opened[0]!, 'files', { value: [file], configurable: true });
+    opened[0]!.dispatchEvent(new Event('change'));
+    await flush();
+    const res = w.posted.at(-1) as { type: string; reqId: number; ok: boolean; files: { name: string; mime: string; size: number; data: ArrayBuffer }[] };
+    expect(res).toMatchObject({ type: WIDGET_FILE_RES_MSG_TYPE, reqId: 9, ok: true });
+    expect(res.files.map((x) => [x.name, x.mime, x.size])).toEqual([['in.csv', 'text/csv', 7]]);
+    expect(new TextDecoder().decode(res.files[0]!.data)).toBe('a,b\n1,2');
+    expect(transfers.at(-1), 'buffer を移していない').toEqual([res.files[0]!.data]);
+    expect(bar(body)).toBeNull();
+  });
+
+  it('🔴 accept はブラウザで強制されない ── 指定外の種類を選んでも箱へ渡さない', async () => {
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    const opened: HTMLInputElement[] = [];
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      opened.push(this);
+    });
+    post({ type: WIDGET_FILE_REQ_MSG_TYPE, id: idOf(f), reqId: 1, accept: '.csv' }, w);
+    press('widget-io-pick-pc');
+    Object.defineProperty(opened[0]!, 'files', { value: [new File(['MZ'], 'tool.exe')], configurable: true });
+    opened[0]!.dispatchEvent(new Event('change'));
+    await flush();
+    expect(w.posted).toEqual([{ type: WIDGET_FILE_RES_MSG_TYPE, reqId: 1, ok: false, files: [], reason: WIDGET_IO_REASONS.wrongType }]);
+  });
+
+  it('🔴 読み込みで大きすぎる・数が多すぎるファイルは渡さない / 選択をやめたら cancel', async () => {
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    const opened: HTMLInputElement[] = [];
+    vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      opened.push(this);
+    });
+    post({ type: WIDGET_FILE_REQ_MSG_TYPE, id: idOf(f), reqId: 1, maxBytes: 3 }, w);
+    press('widget-io-pick-pc');
+    Object.defineProperty(opened[0]!, 'files', { value: [new File(['12345'], 'big.txt')], configurable: true });
+    opened[0]!.dispatchEvent(new Event('change'));
+    await flush();
+    expect(w.posted.at(-1)).toMatchObject({ reqId: 1, ok: false, files: [] });
+    expect((w.posted.at(-1) as { reason: string }).reason).toMatch(/大きすぎ/);
+    post({ type: WIDGET_FILE_REQ_MSG_TYPE, id: idOf(f), reqId: 2 }, w);
+    press('widget-io-pick-pc');
+    opened[1]!.dispatchEvent(new Event('cancel'));
+    expect(w.posted.at(-1)).toEqual({ type: WIDGET_FILE_RES_MSG_TYPE, reqId: 2, ok: false, files: [], reason: WIDGET_IO_REASONS.cancelled });
+  });
+
+  it('🔴「このノートの添付から選ぶ」は置いたノートの添付だけを並べ(種類で絞る)、選んだ物を返す', async () => {
+    const h = ioHost(
+      { L1: PLAIN },
+      {
+        L1: [
+          { name: 'mine.csv', mime: 'text/csv', bytes: 'x,y' },
+          { name: 'photo.png', mime: 'image/png', bytes: 'PNG' },
+        ],
+        L2: [{ name: 'other.csv', mime: 'text/csv', bytes: 'secret' }],
+      },
+    );
+    setWidgetNoteHost(h);
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    const w = giveWindow(f);
+    post({ type: WIDGET_FILE_REQ_MSG_TYPE, id: idOf(f), reqId: 3, accept: '.csv' }, w);
+    await flush();
+    expect(h.listed).toEqual(['L1']);
+    const pick = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-pick-note"]')!;
+    expect(pick.hidden).toBe(false);
+    pick.click();
+    const items = [...body.querySelectorAll<HTMLInputElement>('[data-pkc-field="widget-io-note-asset"]')];
+    expect(items.map((i) => i.getAttribute('data-pkc-asset-key'))).toEqual(['L1-k0']);
+    expect(body.textContent).not.toContain('other.csv');
+    expect(body.textContent).not.toContain('photo.png');
+    const give = body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-note-give"]')!;
+    expect(give.disabled).toBe(true);
+    items[0]!.checked = true;
+    items[0]!.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(give.disabled).toBe(false);
+    give.click();
+    await flush();
+    expect(h.read).toEqual(['L1-k0']);
+    const res = w.posted.at(-1) as { ok: boolean; files: { name: string; data: ArrayBuffer }[] };
+    expect(res.ok).toBe(true);
+    expect(res.files.map((x) => x.name)).toEqual(['mine.csv']);
+    expect(new TextDecoder().decode(res.files[0]!.data)).toBe('x,y');
+  });
+
+  it('このノートに合う添付が無ければ「このノートの添付から選ぶ」を出さない', async () => {
+    const h = ioHost({ L1: PLAIN }, { L1: [{ name: 'p.png', mime: 'image/png', bytes: 'P' }] });
+    setWidgetNoteHost(h);
+    const { body } = mount('L1', PLAIN);
+    const f = plainFrame(body);
+    post({ type: WIDGET_FILE_REQ_MSG_TYPE, id: idOf(f), reqId: 1, accept: '.csv' }, giveWindow(f));
+    await flush();
+    expect(body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-pick-note"]')!.hidden).toBe(true);
+  });
+
+  it('`id=` の在るウィジェット・添付 HTML ウィジェットの箱も同じ確認バーを使う', () => {
+    setWidgetNoteHost(ioHost({ L1: '```html id="w1"\n<p>w</p>\n```\n' }));
+    const { body } = mount('L1', '```html id="w1"\n<p>w</p>\n```\n');
+    const f = frameOf(body);
+    expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+    post(dlReq(f, 1, 'a.csv', 'x'), giveWindow(f));
+    expect(bar(body)).not.toBeNull();
+    expect(body.querySelector('[data-pkc-field="widget-io-attach"]')).not.toBeNull();
+  });
+});
+
+describe('🔴 箱の中の口(requestDownload / requestFile / <a download> の救済)を実際に走らせる', () => {
+  interface Run {
+    api: {
+      requestDownload: (o: unknown) => Promise<Record<string, unknown>>;
+      requestFile: (o?: unknown) => Promise<Record<string, unknown>>;
+    };
+    sent: { msg: Record<string, unknown>; transfer: unknown[] }[];
+    deliver: (data: unknown) => void;
+    docListeners: ((e: unknown) => void)[];
+    anchorProto: { click: () => unknown };
+    urls: { created: Blob[]; revoked: string[] };
+    win: Record<string, unknown>;
+  }
+  /** 箱の中の window を模して prelude を走らせる(`standalone` = 親の居ない所)。 */
+  function runIo(standalone = false): Run {
+    const html = buildHtmlSandboxIframe('<p>z</p>', '', 0);
+    const doc = html.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const prelude = [...doc.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!).find((x) => x.includes('api.requestDownload='))!;
+    const sent: Run['sent'] = [];
+    const listeners: ((e: { source: unknown; data: unknown }) => void)[] = [];
+    const docListeners: ((e: unknown) => void)[] = [];
+    const urls = { created: [] as Blob[], revoked: [] as string[] };
+    class FakeAnchor {
+      click(): string {
+        return 'original';
+      }
+    }
+    const parentWin = { postMessage: (m: Record<string, unknown>, _o: string, t: unknown[]) => sent.push({ msg: m, transfer: t }) };
+    const win: Record<string, unknown> = {
+      addEventListener: (t: string, cb: (e: { source: unknown; data: unknown }) => void) => {
+        if (t === 'message') listeners.push(cb);
+      },
+      localStorage: null,
+      Blob,
+      TextEncoder,
+      atob,
+      HTMLAnchorElement: FakeAnchor,
+      URL: {
+        createObjectURL: (b: Blob) => {
+          urls.created.push(b);
+          return `blob:fake/${String(urls.created.length)}`;
+        },
+        revokeObjectURL: (u: string) => urls.revoked.push(u),
+      },
+    };
+    win.parent = standalone ? win : parentWin;
+    const fakeDoc = {
+      documentElement: { style: { setProperty() {}, removeProperty() {} }, setAttribute() {}, appendChild() {} },
+      body: document.body,
+      addEventListener: (t: string, cb: (e: unknown) => void) => {
+        if (t === 'click') docListeners.push(cb);
+      },
+      createElement: (t: string) => document.createElement(t),
+    };
+    new Function('window', 'document', prelude)(win, fakeDoc);
+    return {
+      api: win.pkcWidget as Run['api'],
+      sent,
+      deliver: (data) => {
+        for (const l of listeners) l({ source: parentWin, data });
+      },
+      docListeners,
+      anchorProto: FakeAnchor.prototype,
+      urls,
+      win,
+    };
+  }
+  const ioSent = (r: Run): Run['sent'] => r.sent.filter((s) => s.msg.type !== WIDGET_READY_MSG_TYPE);
+
+  it('requestDownload は親へ頼み、箱の中で作った buffer を移し、親の答えを返す', async () => {
+    const r = runIo();
+    const p = r.api.requestDownload({ name: 'a.csv', mime: 'text/csv', data: 'あ' });
+    await new Promise((res) => setTimeout(res, 0));
+    const [s] = ioSent(r);
+    expect(s!.msg).toMatchObject({ type: WIDGET_DL_REQ_MSG_TYPE, name: 'a.csv', mime: 'text/csv', reqId: 1 });
+    expect(s!.msg.id).toMatch(/^pkc-html-render-/);
+    expect(s!.transfer).toEqual([s!.msg.data]);
+    expect(new Uint8Array(s!.msg.data as ArrayBuffer)).toEqual(new TextEncoder().encode('あ'));
+    // 🔴 種類の違う答え(番号が同じでも)は受けない
+    r.deliver({ type: WIDGET_FILE_RES_MSG_TYPE, reqId: 1, ok: true, files: [] });
+    r.deliver({ type: WIDGET_DL_RES_MSG_TYPE, reqId: 1, ok: true, action: 'save' });
+    expect(await p).toEqual({ ok: true, action: 'save' });
+  });
+
+  it('呼び手が渡した ArrayBuffer は移さない(呼び手の手元で使えなくしない)/ Blob は中身を移す', async () => {
+    const r = runIo();
+    const mine = new Uint8Array([1, 2]).buffer;
+    void r.api.requestDownload({ name: 'a.bin', data: mine });
+    void r.api.requestDownload({ name: 'b.txt', data: new Blob(['hi'], { type: 'text/plain' }) });
+    await new Promise((res) => setTimeout(res, 10));
+    const [a, b] = ioSent(r);
+    expect(a!.transfer).toEqual([]);
+    expect(a!.msg.data).toBe(mine);
+    expect(b!.msg.mime).toBe('text/plain');
+    expect(b!.transfer).toEqual([b!.msg.data]);
+  });
+
+  it('requestFile は親へ頼み、ArrayBuffer の付いたファイルだけを返す', async () => {
+    const r = runIo();
+    const p = r.api.requestFile({ accept: '.csv', multiple: true, maxBytes: 100 });
+    const [s] = ioSent(r);
+    expect(s!.msg).toMatchObject({ type: WIDGET_FILE_REQ_MSG_TYPE, accept: '.csv', multiple: true, maxBytes: 100 });
+    const data = new TextEncoder().encode('x').buffer;
+    r.deliver({ type: WIDGET_FILE_RES_MSG_TYPE, reqId: s!.msg.reqId, ok: true, files: [{ name: 'a.csv', mime: 'text/csv', data }, { name: 'bad' }] });
+    expect(await p).toEqual({ ok: true, files: [{ name: 'a.csv', mime: 'text/csv', size: 1, data }] });
+  });
+
+  it('🔴 答えが来なければ待ち時間の後に cancel(止まらない)', async () => {
+    vi.useFakeTimers();
+    try {
+      const r = runIo();
+      const p = r.api.requestFile();
+      vi.advanceTimersByTime(WIDGET_IO_TIMEOUT_MS + 1);
+      expect(await p).toEqual({ ok: false, files: [], reason: WIDGET_IO_REASONS.timeout });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('🔴 <a download href="blob:"> のクリックを捕まえて親へ頼む(繋いだ <a> も、文書に繋いでいない a.click() も)', async () => {
+    const r = runIo();
+    const U = r.win.URL as { createObjectURL: (b: Blob) => string; revokeObjectURL: (u: string) => void };
+    const blob = new Blob(['a,b'], { type: 'text/csv' });
+    const url = U.createObjectURL(blob);
+    const anchor = (href: string, connected: boolean): Record<string, unknown> => ({
+      isConnected: connected,
+      hasAttribute: (n: string) => n === 'download',
+      getAttribute: (n: string) => (n === 'href' ? href : n === 'download' ? 'out.csv' : null),
+    });
+    // ① 繋いだ <a> を押す(文書のキャプチャで捕まえる)
+    let prevented = 0;
+    const a1 = anchor(url, true);
+    for (const l of r.docListeners) l({ target: { closest: () => a1 }, preventDefault: () => (prevented += 1) });
+    // ⚠ 押した直後に revoke されても届く
+    U.revokeObjectURL(url);
+    expect(prevented).toBe(1);
+    // ② 文書に繋いでいない <a> の click()
+    const url2 = U.createObjectURL(new Blob(['z'], { type: 'text/plain' }));
+    const res = r.anchorProto.click.call(anchor(url2, false));
+    expect(res, '元の click が走った(捕まえていない)').toBeUndefined();
+    // ③ https: は捕まえない(元の click へ流す)
+    expect(r.anchorProto.click.call(anchor('https://example.com/x.csv', false))).toBe('original');
+    let ext = 0;
+    for (const l of r.docListeners) l({ target: { closest: () => anchor('https://example.com/a', true) }, preventDefault: () => (ext += 1) });
+    expect(ext).toBe(0);
+    await new Promise((res2) => setTimeout(res2, 10));
+    const reqs = ioSent(r);
+    expect(reqs.map((s) => [s.msg.type, s.msg.name, s.msg.mime])).toEqual([
+      [WIDGET_DL_REQ_MSG_TYPE, 'out.csv', 'text/csv'],
+      [WIDGET_DL_REQ_MSG_TYPE, 'out.csv', 'text/plain'],
+    ]);
+    expect(new TextDecoder().decode(reqs[0]!.msg.data as ArrayBuffer)).toBe('a,b');
+  });
+
+  it('<a download href="data:"> も救う(base64 と URL 符号化)', async () => {
+    const r = runIo();
+    const mk = (href: string): Record<string, unknown> => ({
+      isConnected: false,
+      hasAttribute: () => true,
+      getAttribute: (n: string) => (n === 'href' ? href : 'x.txt'),
+    });
+    r.anchorProto.click.call(mk('data:text/plain;base64,' + btoa('hi')));
+    r.anchorProto.click.call(mk('data:text/csv;charset=utf-8,' + encodeURIComponent('名,値')));
+    await new Promise((res) => setTimeout(res, 10));
+    const reqs = ioSent(r);
+    expect(reqs.map((s) => s.msg.mime)).toEqual(['text/plain', 'text/csv']);
+    expect(new TextDecoder().decode(reqs[0]!.msg.data as ArrayBuffer)).toBe('hi');
+    expect(new TextDecoder().decode(reqs[1]!.msg.data as ArrayBuffer)).toBe('名,値');
+  });
+
+  it('🔴 親の居ない所(単体の HTML)では <a download> で直に保存し、救済は付けない(回り続けない)', async () => {
+    const r = runIo(true);
+    expect(r.docListeners, '親の居ない所で救済の見張りを付けた').toHaveLength(0);
+    expect(r.anchorProto.click.call({}), 'a.click を差し替えた').toBe('original');
+    const clicked: { name: string; href: string }[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push({ name: this.download, href: this.getAttribute('href')! });
+    });
+    vi.useFakeTimers();
+    try {
+      const p = r.api.requestDownload({ name: 'a.csv', mime: 'text/csv', data: 'a' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await p).toEqual({ ok: true, action: 'save' });
+      expect(clicked).toEqual([{ name: 'a.csv', href: 'blob:fake/1' }]);
+      expect(ioSent(r), '親の居ない所で親へ頼んだ').toEqual([]);
+      expect(r.urls.revoked).toEqual([]);
+      vi.advanceTimersByTime(1000);
+      expect(r.urls.revoked).toEqual(['blob:fake/1']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

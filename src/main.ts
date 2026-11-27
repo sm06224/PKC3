@@ -1,6 +1,7 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
 import { installWidgetBridge, remountAssetWidgets, routeWidgetBlocked, setWidgetNoteHost, widgetPermissionGate } from '@adapter/ui/render/widget-bridge';
+import { listWidgetNoteAssets, widgetAttachLanded, widgetNoteAssetKeys } from '@adapter/platform/widget-note-assets';
 import { hasWidgetStateBlock } from '@features/markdown/widget-state-block';
 import { errorText, diagramExportErrorText } from '@features/error-text';
 import { APP_GROUP_REORDER_OK_LABEL, FOLDER_EXPORT_NOTE } from '@features/entry-actions';
@@ -7201,6 +7202,49 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     fail: (message) => dispatcher.dispatch({ type: 'OP_FAILED', error: message }),
     // 🔑 単体の HTML のファイル名・題名(#2090)── 題名は一覧の控え(`entryMetas`)から引く(本文を読まない)
     titleOf: (lid) => dispatcher.getState().entryMetas.get(lid)?.title ?? null,
+    /**
+     * 🔴 ウィジェットの「このノートへ添付」(#2097)── 添付ボタン・貼付と同じ正規の経路(`attachFiles`)を、
+     *   取り込みの門(`withAssetGate`)を通して呼ぶ。⚠ 門が塞がっていれば門が理由を言って断る(`false`)。
+     */
+    attachFile: async (lid, file) => {
+      /**
+       * 🔴 **本当に添付できたかで答える**(レビュー指摘)── `attachFiles` は断り・失敗を知らせで言って正常に終わるので、
+       *   門をくぐっただけで `true` を返すと、箱は「添付できた」と思い込む。添付ノートが増えたか、
+       *   そのノートの本文の添付の参照が増えたか(同じ中身の添付を使い回した回)で決める。
+       */
+      const st0 = dispatcher.getState();
+      const metasBefore = new Set(st0.entryMetas.keys());
+      const refsOf = (): number => {
+        const ob = dispatcher.getState().openBody;
+        return ob !== null && ob.lid === lid ? widgetNoteAssetKeys(ob.body).length : -1;
+      };
+      const refsBefore = refsOf();
+      let ran = false;
+      await withAssetGate(async () => {
+        ran = true;
+        await attachFiles(dispatcher, attachDeps, [file], '', undefined, lid);
+      });
+      return ran && widgetAttachLanded(metasBefore, dispatcher.getState().entryMetas, refsBefore, refsOf());
+    },
+    // 🔴 そのノートの添付だけ(本文が使っている添付と、添付ノート自身のファイル)。判断は `widget-note-assets.ts`
+    listNoteAssets: (lid) =>
+      listWidgetNoteAssets(
+        {
+          bodyOf: (l) => {
+            const ob = dispatcher.getState().openBody;
+            return ob !== null && ob.lid === l ? ob.body : null;
+          },
+          nameOf: async (assetKey) =>
+            ((await client.request({ op: 'findAssetOwner', cid, assetKey })) as { name: string | null }).name,
+          // ⚠ bytes は読まない ── IDB の Blob は大きさと種類だけ先に分かる
+          blobInfo: async (assetKey) => {
+            const blob = await blobs.get(cid, assetKey);
+            return blob ? { size: blob.size, type: blob.type } : null;
+          },
+        },
+        lid,
+      ),
+    readAssetBlob: async (key) => (await blobs.get(cid, key)) ?? null,
   });
   /**
    * 🔴 **箱が「外部画像を止めた」と言ってきたら帯を出す**(2026-08-06)。

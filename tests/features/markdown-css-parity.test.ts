@@ -221,6 +221,13 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-widget-bar': 'src/adapter/ui/render/widget-bridge.ts',
   // 添付 HTML ウィジェットの案内帯(#2090 ②)── 箱が CSP で止めたと申告したときに adapter が器へ置く
   'pkc-widget-perm-notice': 'src/adapter/ui/render/widget-bridge.ts',
+  // 🔑 ウィジェットのファイルの入出力の確認バー(#2097)
+  'pkc-widget-io-bar': 'src/adapter/ui/render/widget-io-bar.ts',
+  'pkc-widget-io-text': 'src/adapter/ui/render/widget-io-bar.ts',
+  'pkc-widget-io-risk': 'src/adapter/ui/render/widget-io-bar.ts',
+  'pkc-widget-io-actions': 'src/adapter/ui/render/widget-io-bar.ts',
+  'pkc-widget-io-list': 'src/adapter/ui/render/widget-io-bar.ts',
+  'pkc-widget-io-item': 'src/adapter/ui/render/widget-io-bar.ts',
   // 設定画面の「添付 HTML ウィジェットの追加権限」の権限名(#2090 ②)
   'pkc-widget-permission-badge': 'src/adapter/ui/render/settings/widget-permissions.ts',
   // 3D ビューア(v4.0 PR-12)。` ```3d ` の器と添付の 3D モデルの面に、adapter が描いた後に置く(markdown は placeholder まで)

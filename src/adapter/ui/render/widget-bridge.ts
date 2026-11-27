@@ -13,6 +13,8 @@
  * 5. **「ノートへ保存」「状態を初期化」**(PR-08)── user が親のボタンを押したときだけ、本文の
  *    ` ```json widget-state="…" ` を書く / 消す(書くのは reducer → `REQUEST_BODY_REWRITE` の 1 本)。
  *    🔴 箱から本文を書く口は無い(自動・黙っての書込を作らない)。
+ * 6. **ファイルの保存・読み込みの要求を確認バーへ回す**(#2097)── `id=` の無い直書きの ` ```html ` を含む全部の箱が対象。
+ *    判断と画面は `widget-io-bar.ts`(純関数は `features/markdown/widget-io.ts`)。ここは受け口から渡すだけ。
  *
  * ## 🔴 セキュリティの不変条件
  *
@@ -88,6 +90,8 @@ import { confirmChecksInApp, confirmInApp } from './app-dialog';
 import { watchVisible } from './visible-watch';
 import { typingQuietIn } from './typing-gate';
 import { registerLiveScope, type MermaidScope } from './mermaid-hydrate';
+import { handleWidgetIoMessage } from './widget-io-bar';
+import type { WidgetNoteAsset } from '@adapter/platform/widget-note-assets';
 
 /**
  * 本文の器に付ける「このノートの lid」。🔑 ウィジェットの保存先はここから引く(箱の名乗りは使わない)。
@@ -114,6 +118,15 @@ export interface WidgetNoteHost {
   fail(message: string): void;
   /** ノートの題名(単体の HTML のファイル名・`<title>` に使う。#2090)。引けなければ `null`。 */
   titleOf?(lid: string): string | null;
+  /**
+   * 🔴 ウィジェットの「このノートへ添付」(#2097)── 取り込みの門(`withAssetGate`)を通る正規の添付の経路。
+   * ⚠ 呼ぶのは確認バーのボタンを user が押したときだけ(箱の合図からは呼ばない)。添付の処理が走ったら `true`。
+   */
+  attachFile?(lid: string, file: File): Promise<boolean>;
+  /** そのノートの添付(本文が使っている添付と、添付ノート自身のファイル。#2097)── 他のノートの添付は返さない。 */
+  listNoteAssets?(lid: string): Promise<readonly WidgetNoteAsset[]>;
+  /** 添付の中身(#2097)。⚠ 呼ぶのは `listNoteAssets` が返した鍵だけ。 */
+  readAssetBlob?(key: string): Promise<Blob | null>;
 }
 
 let noteHost: WidgetNoteHost | null = null;
@@ -313,6 +326,20 @@ export function widgetLidOf(host: Element): string | null {
   return lid === '' ? null : lid;
 }
 
+/**
+ * 🔴 **ファイルの入出力で「このノート」とする lid**(#2097)。箱を置いた読む面の lid(親の DOM)。
+ * ⚠ 埋め込み(`[data-pkc-embed-ref]` ── 別のノートの塊)の中の箱は `null`(埋め込み先のノートの添付を見せない・書かない)。
+ * 🔑 `id=` の無い直書きの ` ```html ` の箱(`iframe.pkc-html-render`)も同じ規則で引く。
+ */
+export function widgetIoLidOf(frame: Element): string | null {
+  // 🔴 埋め込みの中なら、外のどこに lid が在っても `null`(埋め込みの中に別の lid の器が入れ子になっていても越境しない)
+  if (frame.closest('[data-pkc-embed-ref]') !== null) return null;
+  const host = frame.closest(`[${WIDGET_LID_ATTR}]`);
+  if (host === null) return null;
+  const lid = host.getAttribute(WIDGET_LID_ATTR) ?? '';
+  return lid === '' ? null : lid;
+}
+
 interface FrameReg {
   readonly lid: string;
   /**
@@ -492,6 +519,9 @@ export function installWidgetBridge(targetWindow: Window = window): () => void {
     const data: unknown = event.data;
     if (!data || typeof data !== 'object') return;
     const d = data as Record<string, unknown>;
+
+    // 🔴 ファイルの入出力(#2097)── 全部の箱(`id=` の無い直書きの ```html も)が対象。判断は `widget-io-bar.ts`
+    if (handleWidgetIoMessage(doc, event.source, d, { host: noteHost, lidOf: widgetIoLidOf })) return;
 
     if (d.type === WIDGET_READY_MSG_TYPE) {
       if (typeof d.id !== 'string') return;

@@ -22,6 +22,16 @@
  * ⚠ `id=` の無い囲みは**何も保存しない**(既存の挙動のまま。テーマ連動だけ効く)。
  */
 import { buildStorageShim, inlineJson } from '@features/launcher/app-storage-shim';
+import {
+  WIDGET_DL_REQ_MSG_TYPE,
+  WIDGET_DL_RES_MSG_TYPE,
+  WIDGET_FILE_REQ_MSG_TYPE,
+  WIDGET_FILE_RES_MSG_TYPE,
+  WIDGET_IO_MAX_BYTES,
+  WIDGET_IO_MAX_FILES,
+  WIDGET_IO_REASONS,
+  WIDGET_IO_TIMEOUT_MS,
+} from './widget-io';
 
 /** id に許す字(先頭は英数字、全体で 1〜64 字)。 */
 export const WIDGET_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -142,15 +152,119 @@ export const WIDGET_BASE_STYLE =
   '*{box-sizing:border-box;}' +
   'img,svg,video,canvas{max-width:100%;height:auto;}';
 
+/** 箱の中のファイルの入出力に渡す定数(#2097)。⚠ 綴りと上限の正本は `widget-io.ts`。 */
+const WIDGET_IO_PRELUDE_ARGS = {
+  dlReq: WIDGET_DL_REQ_MSG_TYPE,
+  dlRes: WIDGET_DL_RES_MSG_TYPE,
+  fReq: WIDGET_FILE_REQ_MSG_TYPE,
+  fRes: WIDGET_FILE_RES_MSG_TYPE,
+  to: WIDGET_IO_TIMEOUT_MS,
+  max: WIDGET_IO_MAX_BYTES,
+  maxf: WIDGET_IO_MAX_FILES,
+  big: WIDGET_IO_REASONS.tooLarge,
+  can: WIDGET_IO_REASONS.cancelled,
+  tmo: WIDGET_IO_REASONS.timeout,
+  rf: WIDGET_IO_REASONS.readFailed,
+  many: WIDGET_IO_REASONS.tooMany,
+} as const;
+
+/**
+ * 🔴 **箱の中のファイルの入出力**(#2097。`THEME_PRELUDE_SOURCE` の中に入る ── `api` / `iframeId` / `IO` を使う)。
+ *
+ * - `pkcWidget.requestDownload({ name, mime, data })` ── 親へ保存を頼む(親の確認バーで user が押したときだけ保存)。
+ *   `data` は `Blob` / `ArrayBuffer` / 型付き配列 / 文字列。🔑 箱の中で作った buffer(`Blob` の中身・文字列の符号化)は
+ *   Transferable で渡す(写さない)。⚠ 呼び手が渡した `ArrayBuffer` は**移さない**(呼び手の手元の値を使えなくしない)。
+ * - `pkcWidget.requestFile({ accept, multiple, maxBytes })` ── 親へファイルの読み込みを頼む。答えは
+ *   `{ ok, files: [{ name, mime, size, data: ArrayBuffer }], reason? }`。
+ * - 親の居ない所(単体の HTML としてブラウザで直に開いた等 ── `window.parent === window`)では、ブラウザ標準の
+ *   `<a download>` / `<input type="file">` で同じ形の答えを返す(確認バーは出ない ── 箱の外なので sandbox も無い)。
+ * - 🔴 **`<a download>` の救済**(箱の中だけ):`pkcWidget` を知らない HTML ツールが `blob:` / `data:` の
+ *   `<a download>` を押す(`a.click()` を含む)と、sandbox で黙って失敗する。それを捕まえて `requestDownload` へ渡す。
+ *   ⚠ `blob:` / `data:` だけ(`https:` などの外の URL は捕まえない ── CSP を回り道させない)。
+ *   ⚠ CSP の `connect-src 'none'` で箱の中の `fetch(blob:…)` は止まる ── `URL.createObjectURL` の対応表から Blob を引く。
+ *   ⚠ 親の居ない所では救済を付けない(自分の `<a download>` を自分で捕まえて回り続けない)。
+ *   ⚠ グローバルは `window.*` から引く(test が prelude を偽の window で走らせても、test 自身の `URL` を書き換えない)。
+ */
+const WIDGET_IO_PRELUDE_SOURCE =
+  'var iop={};var iq=0;' +
+  'function ioAsk(msg,resType,transfer,fail){return new Promise(function(res){iq+=1;var n=iq;' +
+  'var t=setTimeout(function(){delete iop[n];res(fail(IO.tmo));},IO.to);' +
+  'iop[n]={t:resType,f:function(d){clearTimeout(t);delete iop[n];res(d);}};' +
+  'msg.id=iframeId;msg.reqId=n;' +
+  "try{window.parent.postMessage(msg,'*',transfer);}catch(e){clearTimeout(t);delete iop[n];res(fail(String(e&&e.message||e)));}});}" +
+  "function normDl(d){var r={ok:!!d&&d.ok===true,action:d&&typeof d.action==='string'?d.action:'cancel'};" +
+  "if(d&&typeof d.reason==='string')r.reason=d.reason;return r;}" +
+  'function normF(d){var fs=[];if(d&&Array.isArray(d.files)){for(var i=0;i<d.files.length;i++){var f=d.files[i];' +
+  "if(f&&typeof f.name==='string'&&f.data instanceof ArrayBuffer)fs.push({name:f.name,mime:String(f.mime||'application/octet-stream'),size:f.data.byteLength,data:f.data});}}" +
+  "var r={ok:!!d&&d.ok===true&&fs.length>0,files:fs};if(d&&typeof d.reason==='string')r.reason=d.reason;return r;}" +
+  'function toData(x){try{' +
+  "if(typeof window.Blob==='function'&&x instanceof window.Blob)return x.arrayBuffer().then(function(b){return {d:b,t:[b],mime:x.type};});" +
+  'if(x instanceof ArrayBuffer)return Promise.resolve({d:x,t:[]});' +
+  // ⚠ 大きな buffer の一部だけを指す型付き配列は、その部分だけを切り出して移す(buffer 全体を写さない)
+  'if(ArrayBuffer.isView(x)){if(x.byteOffset===0&&x.byteLength===x.buffer.byteLength)return Promise.resolve({d:x,t:[]});' +
+  'var c=x.buffer.slice(x.byteOffset,x.byteOffset+x.byteLength);return Promise.resolve({d:c,t:[c]});}' +
+  "if(typeof x==='string'){if(typeof window.TextEncoder==='function'){var u=new window.TextEncoder().encode(x);return Promise.resolve({d:u.buffer,t:[u.buffer]});}" +
+  'return Promise.resolve({d:x,t:[]});}}catch(e){}' +
+  "return Promise.reject(new TypeError('pkcWidget.requestDownload: data must be a Blob, ArrayBuffer, typed array or string'));}" +
+  'function saveHere(name,mime,d){var b=new window.Blob([d],{type:mime});var u=window.URL.createObjectURL(b);' +
+  "var a=document.createElement('a');a.href=u;a.download=name||'download';a.style.display='none';" +
+  '(document.body||document.documentElement).appendChild(a);' +
+  'try{a.click();}finally{a.remove();setTimeout(function(){window.URL.revokeObjectURL(u);},1000);}' +
+  "return {ok:true,action:'save'};}" +
+  'api.requestDownload=function(o){o=o||{};return toData(o.data).then(function(p){' +
+  "var size=typeof p.d==='string'?p.d.length:p.d.byteLength;" +
+  "if(size>IO.max)return {ok:false,action:'rejected',reason:IO.big};" +
+  "var mime=typeof o.mime==='string'&&o.mime!==''?o.mime:(p.mime||'application/octet-stream');" +
+  "var name=typeof o.name==='string'?o.name:'';" +
+  'if(window.parent===window)return saveHere(name,mime,p.d);' +
+  "return ioAsk({type:IO.dlReq,name:name,mime:mime,data:p.d},IO.dlRes,p.t,function(r){return {ok:false,action:'cancel',reason:r};}).then(normDl);});};" +
+  'function pickHere(acc,mul,mx){return new Promise(function(res){' +
+  "var inp=document.createElement('input');inp.type='file';if(acc)inp.accept=acc;inp.multiple=mul;inp.style.display='none';" +
+  'var done=false;function fin(r){if(done)return;done=true;try{inp.remove();}catch(e){}res(r);}' +
+  "inp.addEventListener('cancel',function(){fin({ok:false,files:[],reason:IO.can});});" +
+  "inp.addEventListener('change',function(){var fl=[].slice.call(inp.files||[]);" +
+  'if(fl.length===0)return fin({ok:false,files:[],reason:IO.can});' +
+  'if(fl.length>(mul?IO.maxf:1))return fin({ok:false,files:[],reason:IO.many});' +
+  'for(var i=0;i<fl.length;i++)if(fl[i].size>mx)return fin({ok:false,files:[],reason:IO.big});' +
+  "Promise.all(fl.map(function(f){return f.arrayBuffer().then(function(b){return {name:f.name,mime:f.type||'application/octet-stream',size:b.byteLength,data:b};});}))" +
+  '.then(function(a){fin({ok:true,files:a});},function(){fin({ok:false,files:[],reason:IO.rf});});});' +
+  '(document.body||document.documentElement).appendChild(inp);inp.click();});}' +
+  "api.requestFile=function(o){o=o||{};var acc=typeof o.accept==='string'?o.accept:'';var mul=o.multiple===true;" +
+  "var mx=typeof o.maxBytes==='number'&&o.maxBytes>0?Math.min(o.maxBytes,IO.max):IO.max;" +
+  'if(window.parent===window)return pickHere(acc,mul,mx);' +
+  'return ioAsk({type:IO.fReq,accept:acc,multiple:mul,maxBytes:mx},IO.fRes,[],function(r){return {ok:false,files:[],reason:r};}).then(normF);};' +
+  // 🔴 `<a download>` の救済(箱の中だけ)
+  'if(window.parent!==window){try{' +
+  'var bl={};var U=window.URL;var oc=U.createObjectURL;var orv=U.revokeObjectURL;' +
+  'U.createObjectURL=function(o){var u=oc.apply(U,arguments);try{if(o instanceof window.Blob)bl[u]=o;}catch(e){}return u;};' +
+  'U.revokeObjectURL=function(u){delete bl[u];return orv.apply(U,arguments);};' +
+  "var fromData=function(h){var c=h.indexOf(',');if(c<0)return null;var meta=h.slice(5,c);var body=h.slice(c+1);" +
+  "var b64=/;base64$/i.test(meta);var mime=meta.replace(/;base64$/i,'').split(';')[0]||'text/plain';" +
+  'try{if(b64){var s=window.atob(body);var u8=new Uint8Array(s.length);for(var i=0;i<s.length;i++)u8[i]=s.charCodeAt(i);' +
+  'return {mime:mime,data:u8.buffer};}return {mime:mime,data:decodeURIComponent(body)};}catch(e){return null;}};' +
+  // 🔑 押した時点で Blob を掴む(直後に revoke されても届く)
+  "var grab=function(a){var h=a.getAttribute('href')||'';var nm=a.getAttribute('download')||'';" +
+  "if(/^blob:/i.test(h)){var b=bl[h];if(!b)return false;api.requestDownload({name:nm,mime:b.type,data:b});return true;}" +
+  'if(/^data:/i.test(h)){var p=fromData(h);if(!p)return false;api.requestDownload({name:nm,mime:p.mime,data:p.data});return true;}' +
+  'return false;};' +
+  "var isDl=function(a){return !!a&&a.hasAttribute('download')&&/^(blob|data):/i.test(a.getAttribute('href')||'');};" +
+  "document.addEventListener('click',function(ev){var t=ev.target;var a=t&&t.closest?t.closest('a[download]'):null;" +
+  'if(!isDl(a))return;if(grab(a))ev.preventDefault();},true);' +
+  // ⚠ 文書に繋いでいない `<a>` の `click()` は文書まで届かない ── そこだけ直に捕まえる(繋いだ物は上の見張りへ流す)
+  'var AP=window.HTMLAnchorElement.prototype;var oclk=AP.click;' +
+  'AP.click=function(){if(!this.isConnected&&isDl(this)&&grab(this))return;return oclk.apply(this,arguments);};' +
+  '}catch(e){}}';
+
 /**
  * 箱の中で走る台本(ES5。外側のテンプレートリテラルと衝突する記法を使わない)。
  * - `pkc-widget-theme` を受けたら `--pkc-*`・`data-pkc-tone`・`color-scheme` を当て、`onTheme` の購読者へ知らせる
  * - 起動時に親へ `pkc-widget-ready` を 1 回送る(初回のテーマを受け取る)
- * - `window.pkcWidget`(`id` / `getTheme` / `onTheme` / `storage` / `readNoteContext` / `readTables` / `readFrontmatter`)を置く
+ * - `window.pkcWidget`(`id` / `getTheme` / `onTheme` / `storage` / `readNoteContext` / `readTables` / `readFrontmatter` /
+ *   `requestDownload` / `requestFile`)を置く
  * ⚠ 受けるのは**親から来た**合図だけ(`e.source === parent`)。
  */
 const THEME_PRELUDE_SOURCE =
-  '(function(iframeId,wid,names,THEME,READY,CREQ,CRES,CTO){' +
+  '(function(iframeId,wid,names,THEME,READY,CREQ,CRES,CTO,IO){' +
   "'use strict';" +
   'var subs=[];var cur={tone:null,tokens:{}};' +
   'function copy(o){var r={};for(var k in o){if(Object.prototype.hasOwnProperty.call(o,k))r[k]=o[k];}return r;}' +
@@ -174,6 +288,7 @@ const THEME_PRELUDE_SOURCE =
   'api.readNoteContext=function(){return ask();};' +
   'api.readTables=function(){return ask().then(function(c){return c.tables;});};' +
   'api.readFrontmatter=function(){return ask().then(function(c){return c.frontmatter;});};' +
+  WIDGET_IO_PRELUDE_SOURCE +
   // 🔑 id の在る箱だけ:前の script(保存の prelude)が差し替えた localStorage と同じ物を指す
   'if(wid!==null){try{api.storage=window.localStorage;}catch(e){api.storage=null;}}' +
   "try{Object.defineProperty(window,'pkcWidget',{value:Object.freeze(api),writable:false,enumerable:true,configurable:true});}" +
@@ -188,6 +303,8 @@ const THEME_PRELUDE_SOURCE =
   'var list=subs.slice();for(var j=0;j<list.length;j++){try{list[j](api.getTheme());}catch(e){}}}' +
   "window.addEventListener('message',function(e){if(e.source!==window.parent)return;var d=e.data;" +
   "if(d&&d.type===CRES&&typeof d.reqId==='number'){var f=pend[d.reqId];if(f)f(d.context);return;}" +
+  // 🔑 ファイルの入出力の答え(#2097)── 頼んだ種類の答えだけを受ける(番号が合っても種類が違えば捨てる)
+  "if(d&&(d.type===IO.dlRes||d.type===IO.fRes)&&typeof d.reqId==='number'){var g=iop[d.reqId];if(g&&g.t===d.type)g.f(d);return;}" +
   'if(!d||d.type!==THEME)return;apply(d);});' +
   // ⚠ 文書の解析より前に送る ── 早く受け取れば、最初の描画から親の配色で出る(白く光らない)
   'try{window.parent.postMessage({type:READY,id:iframeId},\'*\');}catch(e){}' +
@@ -204,7 +321,8 @@ export function widgetThemePreludeScript(iframeId: string, widgetId: string | nu
     THEME_PRELUDE_SOURCE +
     `(${inlineJson(iframeId)},${inlineJson(widgetId)},${inlineJson(WIDGET_THEME_TOKENS.map(([n]) => n))},` +
     `${inlineJson(WIDGET_THEME_MSG_TYPE)},${inlineJson(WIDGET_READY_MSG_TYPE)},` +
-    `${inlineJson(WIDGET_CONTEXT_REQ_MSG_TYPE)},${inlineJson(WIDGET_CONTEXT_RES_MSG_TYPE)},${String(WIDGET_CONTEXT_TIMEOUT_MS)});` +
+    `${inlineJson(WIDGET_CONTEXT_REQ_MSG_TYPE)},${inlineJson(WIDGET_CONTEXT_RES_MSG_TYPE)},${String(WIDGET_CONTEXT_TIMEOUT_MS)},` +
+    `${inlineJson(WIDGET_IO_PRELUDE_ARGS)});` +
     '</script>'
   );
 }

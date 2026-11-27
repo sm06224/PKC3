@@ -29,6 +29,15 @@
  *     (`sandbox="allow-scripts"` のみ)。外部は `page.route` の偽の CDN / API で受ける ── 許可したら**実際に読めた**ことを見る
  * 15. 案内帯の「権限を開く」→ 2 つとも許可 → 即置き直され、案内帯が消え、script が読めて通信が返る(sandbox は不変)
  * 16. システムの「許可」→「添付 HTML ウィジェットの追加権限」に出る →「許可を取り消す」→ ノートへ戻ると再び止まる
+ *
+ * #2097(v4.1 Phase 1 / PR-4)── 同じ起動の続き(起動を増やさない):
+ * 17. `id=` の無い直書きの ```html の中で、素の `<a download href="blob:…">` を押す → 自動では保存されず確認バーが出る
+ *     (sandbox は allow-scripts のみ)→「PC へ保存」で実際に .csv がダウンロードされ、中身が一致する
+ * 18. `pkcWidget.requestDownload` →「このノートへ添付」→ 添付ノートができ、本文にリンクが入る
+ * 19. 要注意の拡張子(report.html)は確認バーに注意が出る →「やめる」で cancel が返る
+ * 20. `pkcWidget.requestFile` →「PC から選ぶ」(ファイル選択)で渡した CSV を箱の中で読める
+ * 21. `pkcWidget.requestFile` →「このノートの添付から選ぶ」で 18 の添付を選ぶ → 箱の中で読める
+ * ⚠ 確認バーのボタンは出した直後(0.4 秒)押せない(すり替え対策)── 押せるようになるのを待ってから実クリックする。
  */
 import { test, expect, type Frame, type Page } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -186,6 +195,9 @@ test('id= の在る html のウィジェットは状態を保ち、配色に追�
 
   // ── #2090 ── 11〜13 は同じ起動の続き(起動を増やさない)
   await assetWidget(page);
+
+  // ── #2097 ── 17〜21 は同じ起動の続き(起動を増やさない。⚠ SW を外す `widgetPermissions` より前に置く)
+  await widgetFileIo(page);
 
   // ── #2090 ② ── 14〜16 は同じ起動の続き(起動を増やさない)
   await widgetPermissions(page);
@@ -437,6 +449,122 @@ async function assetWidget(page: Page): Promise<void> {
     expect(errs, '単体の HTML でエラーが出た').toEqual([]);
     await p2.close();
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** ファイルの入出力の道具(#2097)。⚠ `id=` の無い直書きの ```html に置く(全部の箱が対象であることを見る)。 */
+const IO_TOOL =
+  '<button id="dl">a で保存</button> <button id="dl2">API で保存</button> <button id="risk">要注意</button> <button id="up">読む</button>\n' +
+  '<p id="res">-</p><pre id="out">-</pre>\n' +
+  '<script>\n' +
+  "function $(i){return document.getElementById(i);}\n" +
+  "$('dl').onclick=function(){var b=new Blob(['名前,値\\nA,1\\n'],{type:'text/csv'});var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='out.csv';document.body.appendChild(a);a.click();a.remove();$('res').textContent='clicked';};\n" +
+  "$('dl2').onclick=function(){pkcWidget.requestDownload({name:'memo.csv',mime:'text/csv',data:'x,y\\n1,2\\n'}).then(function(r){$('res').textContent=r.action;});};\n" +
+  "$('risk').onclick=function(){pkcWidget.requestDownload({name:'report.html',mime:'text/html',data:'<p>r</p>'}).then(function(r){$('res').textContent='risk:'+r.action;});};\n" +
+  "$('up').onclick=function(){pkcWidget.requestFile({accept:'.csv'}).then(function(r){$('out').textContent=r.ok?r.files[0].name+'|'+new TextDecoder().decode(r.files[0].data):'NG:'+(r.reason||'');});};\n" +
+  '</script>';
+
+const ioFrame = (page: Page): ReturnType<Page['locator']> => page.locator('[data-pkc-field="detail-body"] iframe.pkc-html-render');
+
+async function ioText(page: Page, sel: string): Promise<string | null> {
+  const el = await ioFrame(page).elementHandle();
+  const f = el === null ? null : await el.contentFrame();
+  return f === null ? null : f.locator(sel).textContent().catch(() => null);
+}
+
+async function ioClick(page: Page, sel: string): Promise<void> {
+  const f = await (await ioFrame(page).elementHandle())!.contentFrame();
+  await f!.locator(sel).click();
+}
+
+async function widgetFileIo(page: Page): Promise<void> {
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('入出力のノート');
+  await page.locator('[data-pkc-field="editor-body"]').fill('入出力\n\n```html\n' + IO_TOOL + '\n```\n');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+  await expect(ioFrame(page)).toHaveCount(1, { timeout: 15_000 });
+  expect(await ioFrame(page).getAttribute('sandbox'), 'sandbox が緩んだ').toBe('allow-scripts');
+  await expect.poll(() => ioText(page, '#res'), { timeout: 10_000 }).toBe('-');
+  const bar = page.locator('[data-pkc-field="detail-body"] [data-pkc-field="widget-io-bar"]');
+  const downloads: string[] = [];
+  const onDl = (d: { suggestedFilename(): string }): void => {
+    downloads.push(d.suggestedFilename());
+  };
+  page.on('download', onDl);
+  const dir = await mkdtemp(join(tmpdir(), 'pkc3-widget-io-'));
+  try {
+    // 17. 素の <a download> → 確認バー(自動では保存しない)→「PC へ保存」
+    await ioClick(page, '#dl');
+    await expect.poll(() => ioText(page, '#res')).toBe('clicked');
+    await expect(bar, '<a download> の救済で確認バーが出ない').toHaveCount(1, { timeout: 10_000 });
+    await expect(bar).toContainText('「out.csv」');
+    await page.waitForTimeout(500);
+    expect(downloads, '押す前に保存された(ドライブバイ)').toEqual([]);
+    expect(await ioFrame(page).getAttribute('sandbox')).toBe('allow-scripts');
+    await expect(bar.locator('[data-pkc-field="widget-io-save"]'), '確認バーのボタンが押せるようにならない').toBeEnabled();
+    const [dl] = await Promise.all([page.waitForEvent('download'), clickReal(page, bar.locator('[data-pkc-field="widget-io-save"]'))]);
+    expect(dl.suggestedFilename()).toBe('out.csv');
+    const file = join(dir, 'out.csv');
+    await dl.saveAs(file);
+    expect(await readFile(file, 'utf8')).toBe('名前,値\nA,1\n');
+    await expect(bar).toHaveCount(0);
+
+    // 18. requestDownload →「このノートへ添付」
+    await ioClick(page, '#dl2');
+    await expect(bar).toContainText('「memo.csv」', { timeout: 10_000 });
+    await expect(bar.locator('[data-pkc-field="widget-io-attach"]')).toBeEnabled();
+    await clickReal(page, bar.locator('[data-pkc-field="widget-io-attach"]'));
+    await expect(
+      page.locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"]').filter({ hasText: 'memo.csv' }),
+      '添付ノートができない',
+    ).toHaveCount(1, { timeout: 15_000 });
+    await writesLanded(page);
+    await expect(page.locator('[data-pkc-field="detail-body"]'), '本文に添付のリンクが入らない').toContainText('memo.csv');
+    await expect(bar).toHaveCount(0);
+    /**
+     * ⚠ 添付するとノートの本文が描き直され、箱も読み直される(左の列の「添付」ボタンで添付したときと同じ既存の挙動。
+     *   実測: 本文の器 `.pkc-md-rendered` ごと作り直される)── 箱へ返す `attach` の答えは単体の test(widget-bridge.test.ts)で見る。
+     *   ここでは読み直された箱が次の操作に使えることを確かめてから進む。
+     */
+    await expect(ioFrame(page)).toHaveCount(1, { timeout: 15_000 });
+    await expect.poll(() => ioText(page, '#res'), { timeout: 10_000 }).toBe('-');
+
+    // 19. 要注意の拡張子 → 注意が出る →「やめる」
+    await ioClick(page, '#risk');
+    await expect(bar.locator('[data-pkc-field="widget-io-risk"]')).toContainText('スクリプトや実行コード', { timeout: 10_000 });
+    await expect(bar.locator('[data-pkc-field="widget-io-cancel"]')).toBeEnabled();
+    await clickReal(page, bar.locator('[data-pkc-field="widget-io-cancel"]'));
+    await expect.poll(() => ioText(page, '#res')).toBe('risk:cancel');
+
+    // 20. requestFile →「PC から選ぶ」
+    await ioClick(page, '#up');
+    await expect(bar).toContainText('対象: .csv', { timeout: 10_000 });
+    await expect(bar.locator('[data-pkc-field="widget-io-pick-pc"]'), '確認バーのボタンが押せるようにならない').toBeEnabled();
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser'),
+      clickReal(page, bar.locator('[data-pkc-field="widget-io-pick-pc"]')),
+    ]);
+    await chooser.setFiles({ name: 'in.csv', mimeType: 'text/csv', buffer: Buffer.from('a,b\n3,4\n', 'utf8') });
+    await expect.poll(() => ioText(page, '#out'), { timeout: 10_000 }).toBe('in.csv|a,b\n3,4\n');
+    await expect(bar).toHaveCount(0);
+
+    // 21. requestFile →「このノートの添付から選ぶ」(18 で添付した memo.csv)
+    await ioClick(page, '#up');
+    const pickNote = bar.locator('[data-pkc-field="widget-io-pick-note"]');
+    await expect(pickNote, 'このノートの添付が候補に出ない').toBeVisible({ timeout: 10_000 });
+    await expect(pickNote).toBeEnabled();
+    await clickReal(page, pickNote);
+    const item = bar.locator('[data-pkc-field="widget-io-note-asset"]');
+    await expect(item).toHaveCount(1);
+    await item.check();
+    await expect(bar.locator('[data-pkc-field="widget-io-note-give"]')).toBeEnabled();
+    await clickReal(page, bar.locator('[data-pkc-field="widget-io-note-give"]'));
+    await expect.poll(() => ioText(page, '#out'), { timeout: 10_000 }).toBe('memo.csv|x,y\n1,2\n');
+    expect(downloads, '余計なダウンロードが起きた').toEqual(['out.csv']);
+  } finally {
+    page.off('download', onDl);
     await rm(dir, { recursive: true, force: true });
   }
 }
