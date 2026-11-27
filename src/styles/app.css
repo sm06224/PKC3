@@ -5006,6 +5006,37 @@ dd[data-pkc-field='inspector-toc'] {
   opacity: 1;
   cursor: default;
 }
+/* 🔴 添付 HTML ウィジェットの案内帯(#2090 ②)── CSP で止めた外部の読み込み・通信を 1 行で言い、「権限を開く」を添える。
+ * 色は意味(注意)にだけ使う ── 地は無彩色、左端の線で示す */
+.pkc-md-rendered .pkc-widget-perm-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: 0 0 4px;
+  padding: 2px 8px;
+  border-left: 3px solid var(--warn);
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: var(--btn-fs-sm);
+}
+.pkc-md-rendered .pkc-widget-perm-notice > button {
+  font-size: var(--btn-fs-sm);
+  padding: 0 8px;
+  min-height: 0;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+/* 設定画面の権限の名前(添付 HTML ウィジェットの追加権限) */
+.pkc-widget-permission-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  font-size: 0.85em;
+  color: var(--fg);
+}
 /* BEGIN dark-text-colors */
 /* 🔴 暗いテーマの文字色(`:文字:red:` と、文字色 ▾ の 6 色)── 明るい地向けの濃さのままだと暗い地で沈むので、
  * 暗いテーマだけ明るい同系色へ差し替える(本文の書き方は変えない。WCAG AA 4.5:1 は tests/features/dark-text-colors.test.ts で検算) */

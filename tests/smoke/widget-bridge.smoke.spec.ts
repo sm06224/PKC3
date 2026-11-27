@@ -23,6 +23,12 @@
  *     ⚠ 新しいページの文書として読み込む(`setContent`)── アプリの起動を足さない(`scripts/smoke-budget.mjs`)。
  *       この文書はブラウザの保存を使えない(opaque)ので、その場限りの保存へ落ちる側を見る。
  *       `file://` で開いてブラウザの保存に残る側は、単体の純関数の test と PR の手元の確認で見る。
+ *
+ * #2090 ②(v4.1 Phase 1 / PR-3)── 同じ起動の続き(起動を増やさない):
+ * 14. 外部の script と `fetch` を使う HTML を添付してウィジェットにする → 既定は CSP で止まり、案内帯が出る
+ *     (`sandbox="allow-scripts"` のみ)。外部は `page.route` の偽の CDN / API で受ける ── 許可したら**実際に読めた**ことを見る
+ * 15. 案内帯の「権限を開く」→ 2 つとも許可 → 即置き直され、案内帯が消え、script が読めて通信が返る(sandbox は不変)
+ * 16. システムの「許可」→「添付 HTML ウィジェットの追加権限」に出る →「許可を取り消す」→ ノートへ戻ると再び止まる
  */
 import { test, expect, type Frame, type Page } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -90,6 +96,9 @@ const widgetKeys = (page: Page): Promise<string[]> =>
   });
 
 test('id= の在る html のウィジェットは状態を保ち、配色に追従し、初期化できる / id= の無い枠は何も保存しない', async ({ page }) => {
+  // ⚠ 1 起動の道中に #2090 ②(権限の往復: 添付・許可・設定画面で取り消し・再読み込み)を相乗りさせたので 30 秒枠を超える
+  //   (起動を増やさない代わりに道中が延びた ── `attach.smoke.spec.ts` の `test.setTimeout(120_000)` が前例)
+  test.setTimeout(120_000);
   const errors = collectPageErrors(page);
   await gotoApp(page);
   await createEntry(page, 'text');
@@ -178,7 +187,17 @@ test('id= の在る html のウィジェットは状態を保ち、配色に追�
   // ── #2090 ── 11〜13 は同じ起動の続き(起動を増やさない)
   await assetWidget(page);
 
-  expect(errors).toEqual([]);
+  // ── #2090 ② ── 14〜16 は同じ起動の続き(起動を増やさない)
+  await widgetPermissions(page);
+
+  /**
+   * ⚠ 14・16 で**意図して止めた** CSP の記録(偽の CDN / API への遮断)だけを除く ── 名指しで絞る(他のエラーは 0 件のまま)。
+   * 🔑 止めた記録が**在ること**も見る(既定と取り消し後の 2 回 × script / 通信)── 0 なら「止まった」の主張が空振りしている。
+   */
+  const intended = errors.filter((e) => e.includes('pkc3-smoke.test') && e.includes('Content Security Policy'));
+  expect(intended.filter((e) => e.includes('cdn.pkc3-smoke.test')).length, '既定・取り消し後に script を止めていない').toBeGreaterThanOrEqual(2);
+  expect(intended.filter((e) => e.includes('api.pkc3-smoke.test')).length, '既定・取り消し後に通信を止めていない').toBeGreaterThanOrEqual(2);
+  expect(errors.filter((e) => !intended.includes(e))).toEqual([]);
 });
 
 /** 本文(読む面で開いているノート)の原文を、編集の欄から読む。 */
@@ -367,9 +386,9 @@ async function assetWidget(page: Page): Promise<void> {
   await expect.poll(() => assetValue(page)).toBe('2');
   const keys = await widgetKeys(page);
   expect(keys.some((k) => /\.counter-tool\.count$/.test(k)), '添付のウィジェットの保存の鍵が無い').toBe(true);
-  // バーの 3 つ(保存・初期化・HTML で保存)
+  // バーの 4 つ(保存・初期化・HTML で保存・権限 ── 権限は添付の HTML だけ。#2090 ②)
   const box = page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-asset]');
-  await expect(box.locator('[data-pkc-field="widget-bar"] button')).toHaveText(['ノートへ保存', '状態を初期化', 'HTML で保存']);
+  await expect(box.locator('[data-pkc-field="widget-bar"] button')).toHaveText(['ノートへ保存', '状態を初期化', 'HTML で保存', '権限']);
 
   // 再読み込みしても 2 のまま
   await page.reload();
@@ -420,4 +439,145 @@ async function assetWidget(page: Page): Promise<void> {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/** 外部の script と通信を使う道具(⚠ 宛先は `page.route` で受ける偽の CDN / API ── 外のネットワークへは出ない)。 */
+const CDN = 'https://cdn.pkc3-smoke.test';
+const API = 'https://api.pkc3-smoke.test';
+/**
+ * ⚠ script は**少し遅らせて差し込む**(`<script src>` を本文に直に書かない)── 解析中に即座に出る要求は、
+ *   別のプロセスで動く箱に playwright が付く前に出て `route` を素通りすることがある(実測: 許可後も偽の CDN に
+ *   1 度も当たらず本物のネットワークへ出た。後から出る `fetch` は当たった)。CSP の判定は同じ `script-src`。
+ */
+const PERM_TOOL_HTML =
+  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>perm</title></head><body>' +
+  '<p id="st">init</p><p id="net">-</p>' +
+  '<script>' +
+  'setTimeout(function () {' +
+  "var s = document.createElement('script');" +
+  `s.src = '${CDN}/lib.js';` +
+  "s.onload = function () { document.getElementById('st').textContent = window.__pkcLib === 'ok' ? 'loaded' : 'blocked'; };" +
+  "s.onerror = function () { document.getElementById('st').textContent = 'blocked'; };" +
+  'document.head.appendChild(s);' +
+  `fetch('${API}/ping').then(function (r) { return r.text(); })` +
+  ".then(function (t) { document.getElementById('net').textContent = t; })" +
+  ".catch(function () { document.getElementById('net').textContent = 'fail'; });" +
+  '}, 300);' +
+  '</script></body></html>';
+
+const permFrame = (page: Page): ReturnType<Page['locator']> =>
+  page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-asset] iframe.pkc-widget-frame');
+
+async function permState(page: Page): Promise<{ st: string | null; net: string | null }> {
+  const el = await permFrame(page).elementHandle();
+  const f = el === null ? null : await el.contentFrame();
+  if (f === null) return { st: null, net: null };
+  return {
+    st: await f.locator('#st').textContent().catch(() => null),
+    net: await f.locator('#net').textContent().catch(() => null),
+  };
+}
+
+async function widgetPermissions(page: Page): Promise<void> {
+  /**
+   * ⚠ **この段だけ service worker を外す**(起動は増やさない ── 再読み込み 1 回)。
+   * 本体の SW の管理下では、箱(`srcdoc` は親の SW を引き継ぐ)から出る no-cors の `<script src>` の要求が
+   * playwright の `route` を通らず本物のネットワークへ出る(実測: 許可後に `ERR_TUNNEL_CONNECTION_FAILED` ──
+   * CSP は通したが偽の CDN に当たらない。`external-images.smoke.spec.ts` の #264 段② の注記と同じ制約)。
+   * 🔑 `fetch` は SW 下でも `route` に当たったが、script も「実際に読めた」を見るため SW を外す。
+   *   SW の有無は CSP の判定に関係しない(箱の CSP は `srcdoc` の meta が決める)。⚠ この関数は道中の最後に置く。
+   */
+  await page.route('**/sw.js', (route) => route.abort());
+  await page.evaluate(async () => {
+    for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+  });
+  await page.reload();
+  await bootedHere(page);
+  expect(await page.evaluate(() => navigator.serviceWorker.controller), 'SW が外れていない').toBeNull();
+
+  const hits: string[] = [];
+  await page.context().route(`${CDN}/**`, (route) => {
+    hits.push('cdn');
+    return route.fulfill({ status: 200, contentType: 'application/javascript', body: "window.__pkcLib = 'ok';" });
+  });
+  await page.context().route(`${API}/**`, (route) => {
+    hits.push('api');
+    return route.fulfill({ status: 200, contentType: 'text/plain', headers: { 'access-control-allow-origin': '*' }, body: 'pong' });
+  });
+
+  // 14. 道具を添付して、記法を本文へ貼る(⚠ 前のノートと同じ道 ── 記法は添付の画面の字を使う)
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('権限のノート');
+  await page.locator('[data-pkc-field="editor-body"]').fill('メモ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'perm-tool.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(PERM_TOOL_HTML, 'utf8'),
+  });
+  await expect(page.locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"]').filter({ hasText: 'perm-tool.html' })).toHaveCount(1, { timeout: 15_000 });
+  await writesLanded(page);
+  await openByTitle(page, 'perm-tool.html');
+  const fence = (await page.locator('[data-pkc-field="copy-widget-fence"]').getAttribute('data-pkc-asset-ref')) ?? '';
+  expect(fence).toMatch(/^```html asset:ast-[0-9a-f]{64} id="perm-tool"\n```$/);
+  const assetKey = /asset:(ast-[0-9a-f]{64})/.exec(fence)![1]!;
+  await openByTitle(page, '権限のノート');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`権限の道具\n\n${fence}\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+
+  const box = page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-asset]');
+  await expect(permFrame(page)).toHaveCount(1, { timeout: 15_000 });
+  expect(await permFrame(page).getAttribute('sandbox')).toBe('allow-scripts');
+  // 🔴 既定は止まる(script は読めず、通信は失敗)── 偽の CDN / API へ 1 度も届かない
+  await expect.poll(() => permState(page), { timeout: 10_000 }).toEqual({ st: 'blocked', net: 'fail' });
+  expect(hits, '既定で外へ出た').toEqual([]);
+  const notice = box.locator('[data-pkc-field="widget-perm-notice"]');
+  await expect(notice, '止めた案内帯が出ない').toBeVisible({ timeout: 10_000 });
+  await expect(notice).toContainText('外部スクリプトの読み込み');
+  await expect(notice).toContainText('外部への通信');
+  const permBtn = box.locator('[data-pkc-field="widget-permissions"]');
+  await expect(permBtn).toHaveText('権限');
+
+  // 15. 「権限を開く」→ 2 つとも許可
+  await clickReal(page, notice.locator('[data-pkc-field="widget-perm-notice-open"]'));
+  const dialog = page.locator('[data-pkc-region="app-dialog"][open]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('サンドボックス隔離は維持され');
+  await dialog.locator('input[data-pkc-check-id="external-scripts"]').check();
+  await dialog.locator('input[data-pkc-check-id="network"]').check();
+  await clickReal(page, '[data-pkc-field="dialog-ok"]');
+  await expect.poll(() => permState(page), { timeout: 15_000 }).toEqual({ st: 'loaded', net: 'pong' });
+  expect(await permFrame(page).getAttribute('sandbox'), '権限で sandbox が緩んだ').toBe('allow-scripts');
+  await expect(notice, '許可して置き直しても案内帯が残る').toHaveCount(0);
+  await expect(permBtn).toHaveText('権限 (2)');
+  expect(hits).toContain('cdn');
+  expect(hits).toContain('api');
+  // 許可はこの端末の localStorage だけ(内容ハッシュの鍵)
+  expect(
+    await page.evaluate(() => localStorage.getItem('pkc3.widget-grants.network')),
+  ).toBe(JSON.stringify([assetKey]));
+
+  // 16. システムの「許可」から取り消す
+  await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
+  const region = page.locator('[data-pkc-region="settings-widget-permissions"]');
+  const row = region.locator(`li[data-pkc-asset-key="${assetKey}"]`);
+  await expect(row, '設定の一覧に出ない').toHaveCount(1, { timeout: 15_000 });
+  await expect(row.locator('[data-pkc-field="widget-permission-badge"]')).toHaveText(['外部スクリプト・スタイルの読み込み', '外部への通信']);
+  await clickReal(page, row.locator('[data-pkc-action="revoke-widget-permission"]'));
+  await expect(row, '押しても一覧から消えない').toHaveCount(0, { timeout: 15_000 });
+  await expect(region.locator('[data-pkc-field="widget-permissions-list"]')).toContainText('まだ追加権限を許可したウィジェットはありません');
+  // ノートへ戻ると、再び止まる(双方向の往復が実ブラウザで完結する)
+  // 一覧からノートを開き直す(⚠ 設定画面に「詳細へ戻る」の押し所は無い ── ノートを選べば読む画面へ戻る)
+  await openByTitle(page, '権限のノート');
+  hits.length = 0;
+  await expect.poll(() => permState(page), { timeout: 15_000 }).toEqual({ st: 'blocked', net: 'fail' });
+  expect(hits, '取り消した後も外へ出た').toEqual([]);
+  await expect(permBtn).toHaveText('権限');
+  await expect(notice).toBeVisible({ timeout: 10_000 });
+  await page.context().unroute(`${CDN}/**`);
+  await page.context().unroute(`${API}/**`);
+  await page.unroute('**/sw.js');
 }

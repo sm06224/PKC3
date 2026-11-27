@@ -1,6 +1,6 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
-import { installWidgetBridge, setWidgetNoteHost } from '@adapter/ui/render/widget-bridge';
+import { installWidgetBridge, remountAssetWidgets, routeWidgetBlocked, setWidgetNoteHost, widgetPermissionGate } from '@adapter/ui/render/widget-bridge';
 import { hasWidgetStateBlock } from '@features/markdown/widget-state-block';
 import { errorText, diagramExportErrorText } from '@features/error-text';
 import { APP_GROUP_REORDER_OK_LABEL, FOLDER_EXPORT_NOTE } from '@features/entry-actions';
@@ -6064,6 +6064,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
       appAgentGrants.revoke(scope);
       showStatus('ブラウザの AI への許可を取り消しました');
     },
+    /**
+     * 🔴 **添付 HTML ウィジェットの追加権限を取り消す**(#2090 ②)。⚠ 判断は `widget-bridge.ts` の 1 本
+     *   (`remountAssetWidgets` ── 権限が変わった器だけ厳格な CSP で置き直す)。許可は state に持たないので自分で描き直す。
+     */
+    revokeWidgetPermission: (assetKey) => {
+      widgetPermissionGate().revoke(assetKey);
+      remountAssetWidgets(assetKey);
+      center.render(dispatcher.getState());
+      showStatus('ウィジェットの追加権限を取り消しました');
+    },
+    revokeAllWidgetPermissions: () => {
+      widgetPermissionGate().revokeAll();
+      remountAssetWidgets(null);
+      center.render(dispatcher.getState());
+      showStatus('ウィジェットの追加権限をすべて取り消しました');
+    },
     revokeExtension: (assetKey) => {
       appExtensionGrants.revoke(assetKey);
       /**
@@ -7201,9 +7217,11 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
    *     理由が画面のどこにも無い)。⚠ この中継が種別を落としても、
    *     受け側が optional なら tsc は黙る ── だから必須引数にしてある。
    */
-  installHtmlSandboxBlockedReporter((_iframe, blocked, kinds) => {
+  installHtmlSandboxBlockedReporter((iframe, blocked, kinds) => {
+    // 🔑 添付 HTML ウィジェットの案内帯(#2090 ②)を先に出し、残りだけ一般の案内へ ── 判断は `routeWidgetBlocked`
+    const rest = routeWidgetBlocked(iframe, kinds);
     const lid = dispatcher.getState().selectedLid;
-    if (lid) center.noteBlockedBox(lid, blocked, kinds);
+    if (lid && (blocked > 0 || rest.length > 0)) center.noteBlockedBox(lid, blocked, rest);
   });
   /**
    * 🔴 **最近開いたノートを憶える**(#215 残り①)。⚠ 判断は

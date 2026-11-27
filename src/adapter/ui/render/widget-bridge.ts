@@ -72,7 +72,19 @@ import {
 } from '@features/markdown/widget-context';
 import { buildStandaloneWidgetHtml, widgetExportFileName } from '@features/markdown/widget-export';
 import { downloadBlob } from '@adapter/platform/download';
-import { confirmInApp } from './app-dialog';
+import {
+  blockedWidgetPermissions,
+  DEFAULT_WIDGET_PERMISSIONS,
+  grantedWidgetPermissions,
+  hasWidgetPermission,
+  WIDGET_PERMISSION_LABELS,
+  WIDGET_PERMISSION_SAFETY_NOTES,
+  WIDGET_PERMISSIONS,
+  widgetPermissionNoticeText,
+  type WidgetPermissionSet,
+} from '@features/markdown/widget-permissions';
+import { appWidgetPermissions, type WidgetPermissionGate } from '@adapter/platform/widget-permission-grants';
+import { confirmChecksInApp, confirmInApp } from './app-dialog';
 import { watchVisible } from './visible-watch';
 import { typingQuietIn } from './typing-gate';
 import { registerLiveScope, type MermaidScope } from './mermaid-hydrate';
@@ -105,6 +117,162 @@ export interface WidgetNoteHost {
 }
 
 let noteHost: WidgetNoteHost | null = null;
+
+/**
+ * 🔴 **添付 HTML ウィジェットの追加権限の台帳**(#2090 ②)。既定はアプリの台帳 ── test は差し替える。
+ * ⚠ 読むのは `WIDGET_ASSET_ATTR` を持つ器だけ(本文に直書きした ` ```html ` には一切権限を付けない)。
+ */
+let permissionGate: WidgetPermissionGate = appWidgetPermissions;
+
+/** 権限の台帳を差し替える(test 用。`null` でアプリの台帳へ戻す)。 */
+export function setWidgetPermissionGate(gate: WidgetPermissionGate | null): void {
+  permissionGate = gate ?? appWidgetPermissions;
+}
+
+/** いまの台帳(設定画面と同じ物を読む)。 */
+export function widgetPermissionGate(): WidgetPermissionGate {
+  return permissionGate;
+}
+
+/**
+ * 🔴 **この器に効かせる権限**。添付 HTML ウィジェット(`WIDGET_ASSET_ATTR` に鍵)だけ台帳を引く ── それ以外は常に全部オフ。
+ * ⚠ 判定はここ 1 か所(箱の組み立て・焼き直し・単体 HTML の保存が同じ答えを使う)。
+ */
+export function widgetPermissionsForHost(host: Element): WidgetPermissionSet {
+  const key = host.getAttribute(WIDGET_ASSET_ATTR);
+  if (key === null || key === '') return DEFAULT_WIDGET_PERMISSIONS;
+  return permissionGate.get(key);
+}
+
+/** 置いた添付 HTML ウィジェットの器(鍵・置いたときの権限・置き直し)。⚠ 器が外れたら `hydrateWidgets` の寿命で消す。 */
+interface AssetMount {
+  readonly assetKey: string;
+  readonly perms: WidgetPermissionSet;
+  readonly remount: () => void;
+}
+const assetMounts = new Map<HTMLElement, AssetMount>();
+
+/**
+ * 鍵 → 置いたノートの題名(設定画面の一覧に名前を出すため。このタブの間だけの控え)。
+ * ⚠ 台帳(`localStorage`)には名前を書かない ── 判断の記録に本文由来の字を残さない。
+ */
+const assetNoteTitles = new Map<string, string>();
+
+/** 設定画面の一覧の名前(このタブで置いたことのある添付 HTML ウィジェットだけ引ける)。 */
+export function widgetAssetLabel(assetKey: string): string | null {
+  return assetNoteTitles.get(assetKey) ?? null;
+}
+
+const samePerms = (a: WidgetPermissionSet, b: WidgetPermissionSet): boolean =>
+  a.externalScripts === b.externalScripts && a.network === b.network;
+
+/**
+ * 🔴 **権限が変わった添付 HTML ウィジェットを置き直す 1 本**(「権限」ダイアログ・設定画面の取り消しの両方が呼ぶ)。
+ * @param assetKey `null` = 全部の添付 HTML ウィジェット
+ * @param force 権限が変わっていなくても置き直す
+ * @returns 置き直した数
+ */
+export function remountAssetWidgets(assetKey: string | null, force: boolean = false): number {
+  let n = 0;
+  for (const [host, m] of [...assetMounts]) {
+    if (!host.isConnected) continue;
+    if (assetKey !== null && m.assetKey !== assetKey) continue;
+    if (!force && samePerms(m.perms, permissionGate.get(m.assetKey))) continue;
+    m.remount();
+    n += 1;
+  }
+  return n;
+}
+
+/** 案内帯の印。 */
+export const WIDGET_PERM_NOTICE_FIELD = 'widget-perm-notice';
+
+/**
+ * 🔴 **箱が「CSP で止めた」と申告してきたときの受け口**(`main.ts` の `installHtmlSandboxBlockedReporter` が呼ぶ)。
+ * 添付 HTML ウィジェットで、許せば通る権限が**まだ許されていない**ときだけ、その器に 1 行の案内帯と「権限を開く」を出す。
+ * ⚠ 直書きの ` ```html ` の箱(器に鍵が無い)・登録していない箱には何も出さない(`false` を返す)。
+ * @returns 案内帯を出した / 更新したら `true`
+ */
+export function notifyWidgetBlocked(iframe: HTMLIFrameElement, kinds: readonly string[]): boolean {
+  if (!iframe.hasAttribute(WIDGET_FRAME_ATTR)) return false;
+  const host = iframe.parentElement;
+  if (host === null) return false;
+  const m = assetMounts.get(host);
+  const key = host.getAttribute(WIDGET_ASSET_ATTR);
+  if (m === undefined || key === null || key === '' || m.assetKey !== key) return false;
+  const now = permissionGate.get(key);
+  const missing = blockedWidgetPermissions(kinds).filter((p) => !hasWidgetPermission(now, p));
+  if (missing.length === 0) return false;
+  const doc = host.ownerDocument;
+  let notice = host.querySelector<HTMLElement>(`:scope > [data-pkc-field="${WIDGET_PERM_NOTICE_FIELD}"]`);
+  if (notice === null) {
+    notice = doc.createElement('div');
+    notice.className = 'pkc-widget-perm-notice';
+    notice.setAttribute('data-pkc-field', WIDGET_PERM_NOTICE_FIELD);
+    notice.setAttribute('role', 'status');
+    const text = doc.createElement('span');
+    text.setAttribute('data-pkc-field', 'widget-perm-notice-text');
+    const open = doc.createElement('button');
+    open.type = 'button';
+    open.textContent = '権限を開く';
+    open.setAttribute('data-pkc-variant', 'ghost');
+    open.setAttribute('data-pkc-field', 'widget-perm-notice-open');
+    open.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void openWidgetPermissionDialog(open, key);
+    });
+    notice.append(text, open);
+    // 🔑 箱の直前(バーの下)に置く
+    host.insertBefore(notice, iframe);
+  }
+  const prev = (notice.getAttribute('data-pkc-missing') ?? '').split(' ').filter((x) => x !== '');
+  const all = WIDGET_PERMISSIONS.filter((p) => prev.includes(p) || missing.includes(p));
+  notice.setAttribute('data-pkc-missing', all.join(' '));
+  const text = notice.querySelector('[data-pkc-field="widget-perm-notice-text"]');
+  if (text !== null) text.textContent = widgetPermissionNoticeText(all);
+  return true;
+}
+
+/**
+ * 🔴 **止めた申告の振り分け**(`main.ts` はこれを呼ぶだけ ── 判断を `main.ts` に書かない)。
+ * 添付 HTML ウィジェットの案内帯で言えた種別は、ノート上部の一般の案内(「アプリとして登録」を勧める行)へ回さない
+ * (同じ出来事を 2 か所で違う道に案内しない)。
+ * @returns 一般の案内へ回す種別
+ */
+export function routeWidgetBlocked(iframe: HTMLIFrameElement, kinds: readonly string[]): readonly string[] {
+  if (kinds.length === 0 || !notifyWidgetBlocked(iframe, kinds)) return kinds;
+  return kinds.filter((k) => blockedWidgetPermissions([k]).length === 0);
+}
+
+/**
+ * 🔴 **権限のダイアログ**(操作バーの「権限」・案内帯の「権限を開く」)。
+ * 保存したら台帳を書き、権限が変わった同じ鍵の器をすべて置き直す(`remountAssetWidgets`)。
+ * @returns 置き直した数(やめた・変わらなかったら 0)
+ */
+export async function openWidgetPermissionDialog(anchor: HTMLElement, assetKey: string): Promise<number> {
+  if (assetKey === '') return 0;
+  const gate = permissionGate;
+  const now = gate.get(assetKey);
+  const { answer, checked } = await confirmChecksInApp(anchor, {
+    title: 'ウィジェットの権限',
+    lead: 'この添付 HTML ウィジェットに許す権限を選んでください。',
+    items: WIDGET_PERMISSIONS.map((p) => ({
+      id: p,
+      label: WIDGET_PERMISSION_LABELS[p].label,
+      description: WIDGET_PERMISSION_LABELS[p].description,
+      checked: hasWidgetPermission(now, p),
+    })),
+    notes: WIDGET_PERMISSION_SAFETY_NOTES,
+    okLabel: '保存',
+  });
+  if (answer !== 'ok') return 0;
+  for (const p of WIDGET_PERMISSIONS) {
+    const want = checked[p] === true;
+    if (want !== hasWidgetPermission(gate.get(assetKey), p)) gate.set(assetKey, p, want);
+  }
+  return remountAssetWidgets(assetKey);
+}
 
 /** 本文との口を渡す(`null` で外す ── test 用)。 */
 export function setWidgetNoteHost(host: WidgetNoteHost | null): void {
@@ -412,12 +580,41 @@ export function attachWidgetBar(
     readonly remount: () => void;
     /** 「HTML で保存」を押したとき(⚠ 押した時点の状態・配色で組む)。 */
     readonly download?: () => void;
+    /**
+     * 添付 HTML ウィジェットの鍵(#2090 ②)── 在るときだけ「権限」を出す。
+     * ⚠ 直書きの ` ```html ` には渡さない(権限の UI を出さない)。
+     */
+    readonly assetKey?: string | null;
   },
 ): { readonly sync: () => void; readonly remove: () => void } {
   const doc = host.ownerDocument;
   const bar = doc.createElement('div');
   bar.className = 'pkc-widget-bar';
   bar.setAttribute('data-pkc-field', 'widget-bar');
+  const permKey = opts.assetKey ?? null;
+  const perm = permKey === null || permKey === '' ? null : doc.createElement('button');
+  const syncPerm = (): void => {
+    if (perm === null || permKey === null) return;
+    const n = grantedWidgetPermissions(permissionGate.get(permKey)).length;
+    perm.textContent = n === 0 ? '権限' : `権限 (${String(n)})`;
+    perm.title =
+      n === 0
+        ? 'このウィジェットに外部スクリプトの読み込み・外部への通信を許可します(既定はすべて止めています)'
+        : `このウィジェットに許可している権限: ${grantedWidgetPermissions(permissionGate.get(permKey))
+            .map((p) => WIDGET_PERMISSION_LABELS[p].label)
+            .join('・')}`;
+  };
+  if (perm !== null && permKey !== null) {
+    perm.type = 'button';
+    perm.setAttribute('data-pkc-variant', 'ghost');
+    perm.setAttribute('data-pkc-field', 'widget-permissions');
+    perm.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void openWidgetPermissionDialog(perm, permKey).then(() => syncPerm());
+    });
+    syncPerm();
+  }
   const download = opts.download;
   const dl = download === undefined ? null : doc.createElement('button');
   if (dl !== null && download !== undefined) {
@@ -439,10 +636,11 @@ export function attachWidgetBar(
   const remount = opts.remount;
   const widgetId = opts.widgetId;
   if (widgetId === null) {
-    // 🔑 状態を持たない箱 ── 「HTML で保存」だけ
+    // 🔑 状態を持たない箱 ── 「HTML で保存」(と、添付の HTML なら「権限」)だけ
     if (dl !== null) bar.append(dl);
+    if (perm !== null) bar.append(perm);
     host.prepend(bar);
-    return { sync: () => undefined, remove: () => bar.remove() };
+    return { sync: syncPerm, remove: () => bar.remove() };
   }
   const save = doc.createElement('button');
   save.type = 'button';
@@ -470,6 +668,7 @@ export function attachWidgetBar(
           ? 'まだ保存する状態がありません(ウィジェットを操作すると保存できるようになります)'
           : 'ウィジェットの状態をノートの本文に書き残します(別の端末への同期や書き出した HTML でも、続きから使えます)';
     btn.disabled = !local && !bodyHasBlock();
+    syncPerm();
   };
   save.addEventListener('click', (ev) => {
     ev.preventDefault();
@@ -536,6 +735,7 @@ export function attachWidgetBar(
   });
   bar.append(save, btn);
   if (dl !== null) bar.append(dl);
+  if (perm !== null) bar.append(perm);
   host.prepend(bar);
   sync();
   return { sync, remove: () => bar.remove() };
@@ -648,6 +848,8 @@ export function hydrateWidgets(root: ParentNode | readonly ParentNode[]): Mermai
     frame: HTMLIFrameElement;
     loaded: Promise<void>;
     unregister: () => void;
+    /** 添付 HTML ウィジェットの置き直し(`assetMounts` に登録した物 ── 外すときに照合する)。 */
+    assetRemount: (() => void) | null;
   }
   const mounted = new Map<HTMLElement, Mounted>();
   /** 器 → 「状態を初期化」のバー(⚠ 置き直しても 1 本のまま)。 */
@@ -661,6 +863,9 @@ export function hydrateWidgets(root: ParentNode | readonly ParentNode[]): Mermai
     if (!m) return;
     m.unregister();
     m.frame.remove();
+    // 🔑 案内帯は置き直しで消す(権限を許して置き直したら、止まらなければもう出ない)
+    host.querySelector(`:scope > [data-pkc-field="${WIDGET_PERM_NOTICE_FIELD}"]`)?.remove();
+    if (assetMounts.get(host)?.remount === m.assetRemount) assetMounts.delete(host);
     if (!keepBar) {
       bars.get(host)?.remove();
       bars.delete(host);
@@ -691,15 +896,21 @@ export function hydrateWidgets(root: ParentNode | readonly ParentNode[]): Mermai
     f.title = 'ウィジェット';
     f.style.cssText = 'width:100%;border:0;height:0;display:block;';
     const ext = host.getAttribute('data-pkc-widget-ext') === '1';
-    f.srcdoc = buildHtmlSandboxDoc(content, iframeId, ext, parts.prelude);
+    const assetKey = host.getAttribute(WIDGET_ASSET_ATTR);
+    /**
+     * 🔴 **権限は添付 HTML ウィジェットだけ**(`widgetPermissionsForHost`)── 直書きの ` ```html ` は常に全部オフ。
+     * ⚠ `sandbox="allow-scripts"` は権限に関係なく変えない(`allow-same-origin` は絶対に付けない)。
+     */
+    const perms = widgetPermissionsForHost(host);
+    f.srcdoc = buildHtmlSandboxDoc(content, iframeId, ext, parts.prelude, perms);
     if (parts.lid !== null && parts.widgetId !== null) {
       const wid2 = parts.widgetId;
+      // 🔴 焼き直しも**その時点の**権限を引き直す(古い権限で焼き直さない ── 取り消した後に開いた口で起き上がらせない)
       keepWidgetSeedFresh(f, parts.lid, wid2, parts.seed, (seed) =>
-        buildHtmlSandboxDoc(content, iframeId, ext, widgetPrelude(iframeId, wid2, seed)),
+        buildHtmlSandboxDoc(content, iframeId, ext, widgetPrelude(iframeId, wid2, seed), widgetPermissionsForHost(host)),
       );
     }
     let bar = bars.get(host) ?? null;
-    const assetKey = host.getAttribute(WIDGET_ASSET_ATTR);
     // 🔑 バーは `id=` の在る箱(保存・初期化・HTML で保存)と、添付の HTML の箱(HTML で保存だけ。#2090)に出す
     if (bar === null && parts.lid !== null && (parts.widgetId !== null || assetKey !== null)) {
       const lidForBar = parts.lid;
@@ -720,9 +931,12 @@ export function hydrateWidgets(root: ParentNode | readonly ParentNode[]): Mermai
               seed,
               theme,
               allowExternalImages: ext,
+              // 🔑 押した時点で許している権限をそのまま引き継ぐ(未許可なら厳格な CSP のまま)
+              permissions: widgetPermissionsForHost(host),
             }),
           );
         },
+        assetKey,
       });
       bars.set(host, bar);
     }
@@ -741,10 +955,22 @@ export function hydrateWidgets(root: ParentNode | readonly ParentNode[]): Mermai
             },
           })
         : () => undefined;
+    let assetRemount: (() => void) | null = null;
+    if (assetKey !== null && assetKey !== '') {
+      const again = (): void => {
+        unmount(host, true);
+        place(host);
+      };
+      assetRemount = again;
+      assetMounts.set(host, { assetKey, perms, remount: again });
+      const title = parts.lid === null ? null : (noteHost?.titleOf?.(parts.lid) ?? null);
+      if (title !== null && title !== '') assetNoteTitles.set(assetKey, title);
+    }
     mounted.set(host, {
       frame: f,
       loaded: new Promise<void>((resolve) => f.addEventListener('load', () => setTimeout(resolve, 300), { once: true })),
       unregister,
+      assetRemount,
     });
     restoreSandboxHeights([f]);
     host.setAttribute('data-pkc-widget-state', 'ready');

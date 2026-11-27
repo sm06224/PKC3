@@ -87,6 +87,8 @@ import { createOpenPlaceSection } from './settings/open-place';
 import { createAppOpenTargetSection } from './settings/app-open-target';
 import { createExternalImagesSection } from './settings/external-images';
 import { createSameOriginSection } from './settings/same-origin';
+import { createWidgetPermissionsSection } from './settings/widget-permissions';
+import { widgetAssetLabel, widgetPermissionGate } from './widget-bridge';
 import { createExtensionsSection } from './settings/extensions';
 import { createAgentsSection } from './settings/agents';
 import { appFlags } from '@adapter/platform/flag-store';
@@ -311,6 +313,8 @@ export class SettingsRenderer {
       createAppOpenTargetSection(region),
       createExternalImagesSection(region, externalImages),
       createSameOriginSection(sameOriginGrants),
+      // 🔴 添付 HTML ウィジェットの追加権限(#2090 ②)── 台帳は widget-bridge と同じ物を読む(test の差し替えも同じ口)
+      createWidgetPermissionsSection(widgetPermissionGate, widgetAssetLabel),
       createExtensionsSection(extensionGrants),
       createAgentsSection(agentGrants, agentTabStatus, agentOriginGrants),
       createEmbedOriginsSection(embedOrigins, () => appFlags.isOn(FLAG_EMBED.name)),

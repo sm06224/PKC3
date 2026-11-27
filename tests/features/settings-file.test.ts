@@ -120,6 +120,8 @@ describe('端末側の鍵は全数が仕分けてある(#414)', () => {
       'pkc3.external-images',
       'pkc3.extension-grants',
       'pkc3.same-origin-grants',
+      'pkc3.widget-grants.external-scripts',
+      'pkc3.widget-grants.network',
       'pkc3.embed-origins',
       'pkc3.notices.seen',
       'pkc3.notices.off',
