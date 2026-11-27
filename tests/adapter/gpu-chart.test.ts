@@ -35,6 +35,10 @@ import { parseGpuChartSpec, type GpuChartSpec } from '../../src/features/chart/g
 import { renderMarkdown } from '../../src/features/markdown/markdown-render';
 import { hydrateFigures } from '../../src/adapter/ui/render/detail';
 import { noteTyping, resetTyping } from '../../src/adapter/ui/render/typing-gate';
+import { CHART_CONTEXT_ROOT_MARGIN, liveChartContextWatches } from '../../src/adapter/ui/render/chart-context-watch';
+import { hydrateAllNow } from '../../src/adapter/ui/render/mermaid-hydrate';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 interface FakeSurface extends GpuSurface {
   opts: GpuSurfaceOptions;
@@ -605,5 +609,372 @@ describe('書き出しの焼き込み', () => {
     expect(r.cssWidth).toBe(720);
     expect(calls.fillRect).toBeGreaterThanOrEqual(4);
     await expect(renderGpuChartPng('{"type":"line","source":"asset:k"}')).rejects.toThrow('添付の CSV');
+  });
+});
+
+// ───────────────────────────── v4.1 PR-8: スクロール連動・補間・印刷の静止画
+
+/** コマの予約を手で回す(rAF の本数を数える)。 */
+function rafQueue(): { pending: Map<number, (t: number) => void>; run(t: number): void; hooks: { raf: (cb: (t: number) => void) => number; caf: (id: number) => void } } {
+  const pending = new Map<number, (t: number) => void>();
+  let id = 0;
+  return {
+    pending,
+    run(t) {
+      const cbs = [...pending.values()];
+      pending.clear();
+      for (const cb of cbs) cb(t);
+    },
+    hooks: {
+      raf: (cb) => {
+        id += 1;
+        pending.set(id, cb);
+        return id;
+      },
+      caf: (i) => {
+        pending.delete(i);
+      },
+    },
+  };
+}
+
+const BARS = (vals: number[]): GpuChartSpec =>
+  spec(JSON.stringify({ type: 'bar', engine: 'gpu', labels: vals.map((_, i) => `L${i}`), datasets: [{ label: '値', data: vals }] }));
+
+describe('🔴 データの切り替えの補間(静止時の rAF = 0)', () => {
+  it('animate: 220ms だけコマを回し、終わったら予約が 0 本・最後は行き先のデータ', () => {
+    const q = rafQueue();
+    setGpuChartTestHooks({ createSurface: fakeFactory, ...q.hooks, reducedMotion: () => false });
+    const v = mountGpuChart(host, BARS([1, 2, 3]));
+    sized(v);
+    const s = surfaces[0]!;
+    expect(q.pending.size).toBe(0); // 置いただけではコマを回さない
+    const before = s.invalidates;
+    v.updateData(BARS([10, 20, 30]), { animate: true, resetViewport: true });
+    expect(v.animating).toBe(true);
+    expect(q.pending.size).toBe(1);
+    q.run(1000); // 始まりの時刻
+    q.run(1100); // 途中
+    expect(v.animating).toBe(true);
+    expect(q.pending.size).toBe(1);
+    q.run(1000 + 220);
+    expect(v.animating).toBe(false);
+    expect(q.pending.size).toBe(0);
+    expect(s.invalidates - before).toBe(3); // 途中 2 コマ + 最後の 1 コマ
+    // 静止したら何もしない
+    q.run(2000);
+    expect(s.invalidates - before).toBe(3);
+    expect(v.element.querySelector('[data-pkc-gpu-chart-stage]')!.getAttribute('aria-label')).toContain('値');
+    v.dispose();
+  });
+
+  it('prefers-reduced-motion: reduce では補間せず即時に切り替える(rAF 0 本・invalidate 1 回)', () => {
+    const q = rafQueue();
+    setGpuChartTestHooks({ createSurface: fakeFactory, ...q.hooks, reducedMotion: () => true });
+    const v = mountGpuChart(host, BARS([1, 2, 3]));
+    const s = surfaces[0]!;
+    const before = s.invalidates;
+    v.updateData(BARS([10, 20, 30]), { animate: true });
+    expect(q.pending.size).toBe(0);
+    expect(v.animating).toBe(false);
+    expect(s.invalidates - before).toBe(1);
+    v.dispose();
+  });
+
+  it('形が合わない(点の数が違う)ときは即時・途中の割り込みは古い予約を消す・dispose でも消す', () => {
+    const q = rafQueue();
+    setGpuChartTestHooks({ createSurface: fakeFactory, ...q.hooks, reducedMotion: () => false });
+    const v = mountGpuChart(host, BARS([1, 2, 3]));
+    v.updateData(BARS([1, 2]), { animate: true });
+    expect(q.pending.size).toBe(0);
+    v.updateData(BARS([5, 6]), { animate: true });
+    expect(q.pending.size).toBe(1);
+    v.updateData(BARS([7, 8]), { animate: true }); // 割り込み
+    expect(q.pending.size).toBe(1);
+    v.dispose();
+    expect(q.pending.size).toBe(0);
+    expect(v.animating).toBe(false);
+  });
+});
+
+/** 現在地の見張りを動かせる IntersectionObserver(器の「見えた」はすぐ・本文の目印は手で報告)。 */
+let ctxIos: CtxIo[] = [];
+class CtxIo {
+  targets = new Set<Element>();
+  disconnected = false;
+  constructor(
+    readonly cb: (e: unknown[]) => void,
+    readonly opts: { rootMargin?: string } = {},
+  ) {
+    ctxIos.push(this);
+  }
+  get forContext(): boolean {
+    return this.opts.rootMargin === CHART_CONTEXT_ROOT_MARGIN;
+  }
+  observe(el: Element): void {
+    this.targets.add(el);
+    if (!this.forContext) this.cb([{ target: el, isIntersecting: true, boundingClientRect: { top: 0, bottom: 1 }, rootBounds: { top: 0 } }]);
+  }
+  unobserve(el: Element): void {
+    this.targets.delete(el);
+  }
+  disconnect(): void {
+    this.disconnected = true;
+    this.targets.clear();
+  }
+  /** `at` 番目の目印までを読んだ(それより前は上へ過ぎ、at は帯の中)。 */
+  readTo(els: Element[], at: number): void {
+    this.cb(
+      els.map((target, i) => ({
+        target,
+        isIntersecting: i === at,
+        boundingClientRect: i < at ? { top: -200, bottom: -100 } : { top: 600, bottom: 620 },
+        rootBounds: { top: 0 },
+      })),
+    );
+  }
+}
+
+const BOUND_BODY = [
+  '```chart live',
+  '{"type":"bar","title":"四半期","bind":"heading"}',
+  '```',
+  '## Q1',
+  '| 月 | 売上 |',
+  '|---|---|',
+  '| 1月 | 10 |',
+  '| 2月 | 20 |',
+  '## Q2',
+  '| 月 | 件数 |',
+  '|---|---|',
+  '| 4月 | 3 |',
+  '| 5月 | 4 |',
+  '## Q3',
+  '表はありません',
+].join('\n');
+
+function boundNote(body = BOUND_BODY): { root: HTMLElement; scope: ReturnType<typeof hydrateGpuChart>; chart: HTMLElement; heads: Element[] } {
+  const root = document.createElement('div');
+  root.setAttribute('data-pkc-field', 'detail-body');
+  root.className = 'pkc-md-rendered';
+  root.innerHTML = renderMarkdown(body, { sourceLineAnchors: true });
+  host.append(root);
+  const scope = hydrateGpuChart(root, { getNoteBody: () => body, noteLid: 'n1', scrollRoot: null });
+  const chart = root.querySelector<HTMLElement>(`[${GPU_CHART_SRC_ATTR}]`)!;
+  return { root, scope, chart, heads: [...root.querySelectorAll('h2')] };
+}
+
+const keyOf = (chart: HTMLElement): string | null => chart.querySelector('[data-pkc-gpu-chart]')!.getAttribute('data-pkc-gpu-chart-bind-key');
+const ariaOf = (chart: HTMLElement): string => chart.querySelector('[data-pkc-gpu-chart-stage]')!.getAttribute('aria-label') ?? '';
+const click = (chart: HTMLElement, sel: string): void => chart.querySelector<HTMLButtonElement>(sel)!.click();
+
+describe('🔴 スクロール連動(見出しの節)', () => {
+  beforeEach(() => {
+    ctxIos = [];
+    vi.stubGlobal('IntersectionObserver', CtxIo);
+    setGpuChartTestHooks({ createSurface: fakeFactory, reducedMotion: () => true });
+  });
+
+  it('読み進めると連動先とデータが切り替わる・データの無い節は古い絵を隠して理由を出す', () => {
+    const { scope, chart, heads } = boundNote();
+    expect(chart.getAttribute('data-pkc-gpu-chart-state')).toBe('ready');
+    expect(chart.getAttribute('data-pkc-gpu-chart-bind')).toBe('heading');
+    const label = chart.querySelector('[data-pkc-field="gpu-chart-bind-label"]')!;
+    expect(label.textContent).toBe('連動: Q1 (1 / 3)');
+    expect(ariaOf(chart)).toContain('売上');
+    const io = ctxIos.find((i) => i.forContext)!;
+    expect([...io.targets]).toEqual(heads);
+    io.readTo(heads, 1);
+    expect(label.textContent).toBe('連動: Q2 (2 / 3)');
+    expect(keyOf(chart)).toBe('1');
+    expect(ariaOf(chart)).toContain('件数');
+    io.readTo(heads, 2);
+    const view = chart.querySelector('[data-pkc-gpu-chart]')!;
+    expect(view.hasAttribute('data-pkc-gpu-chart-empty')).toBe(true);
+    expect(view.querySelector('[data-pkc-field="gpu-chart-empty"]')!.textContent).toBe('この節には対象データがありません');
+    io.readTo(heads, 0);
+    expect(view.hasAttribute('data-pkc-gpu-chart-empty')).toBe(false);
+    expect(view.querySelector('[data-pkc-field="gpu-chart-empty"]')).toBeNull();
+    expect(ariaOf(chart)).toContain('売上');
+    scope.dispose();
+  });
+
+  it('固定中はスクロールしても切り替わらず、追従に戻すと今読んでいる節へ揃う', () => {
+    const { scope, chart, heads } = boundNote();
+    const io = ctxIos.find((i) => i.forContext)!;
+    const follow = chart.querySelector<HTMLButtonElement>('[data-pkc-field="gpu-chart-follow"]')!;
+    expect(follow.getAttribute('aria-pressed')).toBe('false');
+    expect(follow.textContent).toBe('追従 ON');
+    follow.click();
+    expect(follow.getAttribute('aria-pressed')).toBe('true');
+    expect(follow.textContent).toBe('固定中');
+    io.readTo(heads, 1);
+    expect(keyOf(chart)).toBe('0');
+    follow.click();
+    expect(follow.getAttribute('aria-pressed')).toBe('false');
+    expect(keyOf(chart)).toBe('1');
+    scope.dispose();
+  });
+
+  it('前へ / 次へ: 固定中はグラフだけめくる・追従中は本文もその見出しへ動かす', () => {
+    const { scope, chart, heads } = boundNote();
+    const scrolled: Element[] = [];
+    for (const h of heads) (h as HTMLElement).scrollIntoView = (() => scrolled.push(h)) as never;
+    const prev = chart.querySelector<HTMLButtonElement>('[data-pkc-gpu-chart-op="bind-prev"]')!;
+    expect(prev.disabled).toBe(true);
+    click(chart, '[data-pkc-gpu-chart-op="bind-next"]');
+    expect(keyOf(chart)).toBe('1');
+    expect(scrolled).toEqual([heads[1]]);
+    click(chart, '[data-pkc-field="gpu-chart-follow"]'); // 固定
+    click(chart, '[data-pkc-gpu-chart-op="bind-next"]');
+    expect(keyOf(chart)).toBe('2');
+    expect(scrolled).toHaveLength(1);
+    const next = chart.querySelector<HTMLButtonElement>('[data-pkc-gpu-chart-op="bind-next"]')!;
+    expect(next.disabled).toBe(true);
+    click(chart, '[data-pkc-gpu-chart-op="bind-jump"]'); // ラベルで本文へ
+    expect(scrolled).toEqual([heads[1], heads[2]]);
+    scope.dispose();
+  });
+
+  /** 本文の根の直下で、グラフの器を包む塊(上端に固定する物)。 */
+  const topBlock = (root: HTMLElement, chart: HTMLElement): Element => [...root.children].find((c) => c.contains(chart))!;
+
+  it('上端に固定 ⇄ 固定を解除(双方向)── 固定するのは本文の根の直下の塊', () => {
+    const { root, scope, chart } = boundNote();
+    const block = topBlock(root, chart);
+    expect(block).not.toBe(chart); // 器は差分描画の塊に包まれている(器に付けても sticky は効かない)
+    const stick = chart.querySelector<HTMLButtonElement>('[data-pkc-field="gpu-chart-sticky"]')!;
+    expect(block.classList.contains('pkc-gpu-chart-sticky')).toBe(true); // 既定は固定
+    expect(chart.classList.contains('pkc-gpu-chart-sticky')).toBe(false);
+    expect(stick.getAttribute('aria-pressed')).toBe('true');
+    expect(stick.textContent).toBe('固定を解除');
+    stick.click();
+    expect(block.classList.contains('pkc-gpu-chart-sticky')).toBe(false);
+    expect(stick.getAttribute('aria-pressed')).toBe('false');
+    expect(stick.textContent).toBe('上端に固定');
+    stick.click();
+    expect(block.classList.contains('pkc-gpu-chart-sticky')).toBe(true);
+    scope.dispose();
+    expect(block.classList.contains('pkc-gpu-chart-sticky')).toBe(false);
+  });
+
+  it('包む塊が何段あっても、本文の根の直下の塊に付ける', () => {
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-field', 'detail-body');
+    root.innerHTML = renderMarkdown(BOUND_BODY, { sourceLineAnchors: true });
+    const chartHost = root.querySelector<HTMLElement>(`[${GPU_CHART_SRC_ATTR}]`)!;
+    const extra = document.createElement('div');
+    chartHost.replaceWith(extra);
+    extra.append(chartHost);
+    host.append(root);
+    const scope = hydrateGpuChart(root, { getNoteBody: () => BOUND_BODY, noteLid: 'n1', scrollRoot: null });
+    const block = topBlock(root, chartHost);
+    expect(block.classList.contains('pkc-gpu-chart-sticky')).toBe(true);
+    expect(extra.classList.contains('pkc-gpu-chart-sticky')).toBe(false);
+    expect(root.querySelectorAll('.pkc-gpu-chart-sticky')).toHaveLength(1);
+    scope.dispose();
+  });
+
+  it('"sticky": false なら最初は流れる配置', () => {
+    const { root, scope, chart } = boundNote(BOUND_BODY.replace('"bind":"heading"', '"bind":{"mode":"heading","sticky":false}'));
+    expect(topBlock(root, chart).classList.contains('pkc-gpu-chart-sticky')).toBe(false);
+    expect(chart.querySelector('[data-pkc-field="gpu-chart-sticky"]')!.getAttribute('aria-pressed')).toBe('false');
+    scope.dispose();
+  });
+
+  it('🔴 dispose / 器が外れたら見張りを止める・bind の無いノートでは見張りを 1 つも作らない', () => {
+    const { scope, chart } = boundNote();
+    expect(liveChartContextWatches()).toBe(1);
+    chart.remove();
+    scope.prune();
+    expect(liveChartContextWatches()).toBe(0);
+    expect(ctxIos.find((i) => i.forContext)!.disconnected).toBe(true);
+    scope.dispose();
+    ctxIos = [];
+    const plain = boundNote('## A\n```chart live\n{"type":"bar","datasets":[{"data":[1,2]}]}\n```\n');
+    expect(ctxIos.some((i) => i.forContext)).toBe(false);
+    expect(liveChartContextWatches()).toBe(0);
+    plain.scope.dispose();
+  });
+
+  it('本文を渡さない面(埋め込み・プレビュー)では連動しない ── データが無ければ理由を出す', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = renderMarkdown(BOUND_BODY);
+    host.append(root);
+    const scope = hydrateGpuChart(root);
+    await flush();
+    const chart = root.querySelector(`[${GPU_CHART_SRC_ATTR}]`)!;
+    expect(chart.getAttribute('data-pkc-gpu-chart-state')).toBe('failed');
+    expect(chart.getAttribute('data-pkc-gpu-chart-error')).toContain('ノートを読む画面');
+    expect(ctxIos.some((i) => i.forContext)).toBe(false);
+    scope.dispose();
+  });
+
+  it('連動するデータが本文に 1 つも無ければ、書き方を添えて理由を出す', () => {
+    const { scope, chart } = boundNote('```chart live\n{"type":"bar","bind":"page"}\n```\n本文だけ\n');
+    expect(chart.getAttribute('data-pkc-gpu-chart-state')).toBe('failed');
+    expect(chart.getAttribute('data-pkc-gpu-chart-error')).toContain('+++');
+    scope.dispose();
+  });
+
+  it('本文が変わったら(保存)次の現在地で時点のデータを作り直す', () => {
+    let body = BOUND_BODY;
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-field', 'detail-body');
+    root.innerHTML = renderMarkdown(body, { sourceLineAnchors: true });
+    host.append(root);
+    const scope = hydrateGpuChart(root, { getNoteBody: () => body, noteLid: 'n1', scrollRoot: null });
+    const chart = root.querySelector<HTMLElement>(`[${GPU_CHART_SRC_ATTR}]`)!;
+    body = body.replace('| 月 | 件数 |', '| 月 | 来客 |');
+    const io = ctxIos.find((i) => i.forContext)!;
+    io.readTo([...root.querySelectorAll('h2')], 1);
+    expect(ariaOf(chart)).toContain('来客');
+    scope.dispose();
+  });
+});
+
+describe('🔴 印刷の前の静止画(flush)', () => {
+  it('画面の外の器も置いてから 2D の PNG を差す・GPU には触らない・刷り終えたら外して revoke', async () => {
+    ioAuto = false;
+    const root = document.createElement('div');
+    root.innerHTML = renderMarkdown('```chart live\n{"type":"line","datasets":[{"label":"温度","data":[1,3,2]}]}\n```\n');
+    host.append(root);
+    const scope = hydrateGpuChart(root);
+    expect(surfaces).toHaveLength(0); // まだ見えていない
+    const { ctx: c2 } = fake2d();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => c2 as never);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((cb: BlobCallback) => cb(new Blob(['png'], { type: 'image/png' })));
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:print');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    await hydrateAllNow(root); // 印刷が呼ぶ口(名簿に載っている)
+    expect(surfaces).toHaveLength(1);
+    const s = surfaces[0]!;
+    const inv = s.invalidates;
+    const img = root.querySelector<HTMLImageElement>('img.pkc-gpu-chart-print-img')!;
+    expect(img).not.toBeNull();
+    expect(img.getAttribute('src')).toBe('blob:print');
+    expect(img.alt).toContain('温度');
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(s.invalidates).toBe(inv);
+    expect(s.disposed).toBe(0);
+    // もう一度刷る用意 ── 古い静止画は返して差し替える(積もらせない)
+    await scope.flush!(root);
+    expect(root.querySelectorAll('img.pkc-gpu-chart-print-img')).toHaveLength(1);
+    expect(revoke).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new Event('afterprint'));
+    expect(root.querySelector('img.pkc-gpu-chart-print-img')).toBeNull();
+    expect(revoke).toHaveBeenCalledTimes(2);
+    scope.dispose();
+  });
+
+  it('@media print で canvas の代わりに静止画を出す(画面では出さない)', () => {
+    const css = readFileSync(resolve(__dirname, '../../src/styles/app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(css).toMatch(/(^|\n)\.pkc-gpu-chart-print-img\s*\{\s*display:\s*none;/);
+    // 印刷の規則は app.css の規約どおり末尾の @media print にある(静止画を出す規則を持つ @media print を探す)
+    const blocks = css.split('@media print').slice(1);
+    const media = blocks.find((b) => b.includes('.pkc-gpu-chart-print-img')) ?? '';
+    expect(media).not.toBe('');
+    expect(media).toMatch(/\.pkc-gpu-chart:has\(> \.pkc-gpu-chart-print-img\) > \.pkc-gpu-chart-stage\s*\{\s*display:\s*none;/);
+    expect(media).toMatch(/\.pkc-gpu-chart-print-img\s*\{\s*display:\s*block;/);
   });
 });

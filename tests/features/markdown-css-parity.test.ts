@@ -254,6 +254,11 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-gpu-chart-spacer': 'src/adapter/ui/render/gpu-chart.ts',
   'pkc-gpu-chart-stage': 'src/adapter/ui/render/gpu-chart.ts',
   'pkc-gpu-chart-title': 'src/adapter/ui/render/gpu-chart.ts',
+  'pkc-gpu-chart-bind': 'src/adapter/ui/render/gpu-chart-bound.ts',
+  'pkc-gpu-chart-bind-label': 'src/adapter/ui/render/gpu-chart-bound.ts',
+  'pkc-gpu-chart-sticky': 'src/adapter/ui/render/gpu-chart-bound.ts',
+  'pkc-gpu-chart-empty': 'src/adapter/ui/render/gpu-chart.ts',
+  'pkc-gpu-chart-print-img': 'src/adapter/ui/render/gpu-chart.ts',
   // 保存つきの器の原文の受け皿(本体の読む面だけ ── `liveWidgets`。既定の描画では出ない)
   'pkc-widget-source': 'src/features/markdown/widget-bridge.ts',
   // 表のセルを押したときに binder が差し込む入力欄(#418 段①)

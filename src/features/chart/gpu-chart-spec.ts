@@ -79,7 +79,41 @@ export interface GpuChartSpec {
   readonly barSlot: number;
   /** 取りこぼした物(グラフの下に 1 行で見せる)。 */
   readonly notes: readonly string[];
+  /**
+   * 🔑 **スクロール連動の指定**(`"bind"`。v4.1 PR-8、#2095 中盤)── 見出し・改ページ(`+++`)・ログの日付に合わせてデータを切り替える。
+   * ⚠ 無い ` ```chart ` では項目ごと持たない(今までの仕様の形を 1 つも変えない)。
+   */
+  readonly bind?: ChartBindSpec;
+  /** 強調する x(区分の番号。ログの日付連動で「その日」を示す ── 軸の層がアクセント色の帯を引く)。 */
+  readonly highlightX?: number;
+  /** 連動の明示データ(`"frames"`)── 見出し名 / ページ番号 / 日付 → その時点のデータ(知っている key だけ写した素の設定)。 */
+  readonly frameDefs?: ChartFrameDefs;
 }
+
+/** 連動の種類(見出しの節 / 改ページ / ログの日付)。⚠ 一覧はここに 1 つだけ。 */
+export const CHART_BIND_MODES = ['heading', 'page', 'log-day'] as const;
+export type ChartBindMode = (typeof CHART_BIND_MODES)[number];
+
+export interface ChartBindSpec {
+  readonly mode: ChartBindMode;
+  /** `mode === 'heading'` の対象見出しレベル(1〜6、既定 2)。 */
+  readonly level: number;
+  /** スクロール中も画面上端へ固定表示するか(既定 true。操作バーからいつでも解除できる)。 */
+  readonly sticky: boolean;
+  /** `mode === 'log-day'` で表示する日付の幅(日数、1〜90、既定 7)。 */
+  readonly windowDays: number;
+}
+
+/** 明示データ(`"frames"`)── 辞書(鍵 → 設定)か配列(添字 → 設定)。中身は知っている key だけを写した素の設定。 */
+export type ChartFrameDefs =
+  | { readonly kind: 'map'; readonly items: ReadonlyMap<string, Readonly<Record<string, unknown>>> }
+  | { readonly kind: 'list'; readonly items: readonly (Readonly<Record<string, unknown>> | null)[] };
+
+/** 明示データの数の上限(見出し・ページ・日付の数)。 */
+export const GPU_CHART_MAX_FRAMES = 500;
+export const CHART_BIND_DEFAULT_LEVEL = 2;
+export const CHART_BIND_DEFAULT_WINDOW_DAYS = 7;
+export const CHART_BIND_MAX_WINDOW_DAYS = 90;
 
 export type GpuChartParseResult = { readonly ok: true; readonly spec: GpuChartSpec } | { readonly ok: false; readonly error: string };
 
@@ -115,7 +149,7 @@ export function shouldUseGpuChart(rest: string, source: string): boolean {
   const text = source.trim();
   if (text === '' || text[0] !== '{') return false;
   // 🔑 鍵の印が 1 つも無く、点の上限を超えうる長さも無い原文は JSON を読まない
-  const marked = /"(?:interactive|engine|type|source)"/.test(text);
+  const marked = /"(?:interactive|engine|type|source|bind)"/.test(text);
   if (!marked && text.length <= MAX_POINTS * 2) return false;
   let raw: unknown;
   try {
@@ -126,6 +160,8 @@ export function shouldUseGpuChart(rest: string, source: string): boolean {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return false;
   const o = raw as Record<string, unknown>;
   if (o.interactive === true || o.engine === 'gpu' || o.type === 'heatmap') return true;
+  // 🔑 スクロール連動(PR-8)は GPU の描画の口(`updateData`)で切り替える ── 指定があれば必ず GPU へ
+  if (o.bind !== undefined) return true;
   if (typeof o.source === 'string' && o.source.startsWith('asset:')) return true;
   if (o.type !== 'line' && o.type !== 'scatter' && o.type !== 'bar') return false;
   if (!Array.isArray(o.datasets)) return false;
@@ -219,6 +255,82 @@ export function parseGpuChartSpec(source: string): GpuChartParseResult {
   }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return fail('中身は { } で囲んだ設定にしてください');
   const o = raw as Record<string, unknown>;
+  if (o.bind === undefined) {
+    if (o.frames !== undefined) return fail('frames は bind(スクロール連動)と一緒に書いてください');
+    return parseGpuChartObject(o);
+  }
+  // 🔑 スクロール連動(PR-8)── 種類の指定を検め、データは無くてもよい(本文の表・明示データから作る)
+  const bind = parseChartBind(o.bind);
+  if (typeof bind === 'string') return fail(bind);
+  if (o.source !== undefined) return fail('bind(スクロール連動)と source(添付の CSV)は一緒に使えません');
+  if (o.type === 'heatmap') return fail('bind(スクロール連動)は line / scatter / bar のグラフで使えます');
+  const frameDefs = parseFrameDefs(o.frames);
+  if (typeof frameDefs === 'string') return fail(frameDefs);
+  const hasData = Array.isArray(o.datasets) && o.datasets.length > 0;
+  const r = hasData ? parseGpuChartObject(o) : parseGpuChartObject({ ...o, datasets: [{ data: [0] }] });
+  if (!r.ok) return r;
+  const spec: GpuChartSpec = {
+    ...r.spec,
+    ...(hasData ? {} : { series: [], labels: [], barSlot: 0.8 }),
+    bind,
+    ...(frameDefs === null ? {} : { frameDefs }),
+  };
+  return { ok: true, spec };
+}
+
+/** `"bind"` を検める(文字列の略記 `"heading"` / `"page"` / `"log-day"` も受ける)。読めなければ理由の文。 */
+export function parseChartBind(v: unknown): ChartBindSpec | string {
+  const isMode = (m: unknown): m is ChartBindMode => typeof m === 'string' && (CHART_BIND_MODES as readonly string[]).includes(m);
+  const allowed = `bind は ${CHART_BIND_MODES.map((m) => `"${m}"`).join(' / ')} のどれかにしてください`;
+  if (typeof v === 'string') {
+    if (!isMode(v)) return allowed;
+    return { mode: v, level: CHART_BIND_DEFAULT_LEVEL, sticky: true, windowDays: CHART_BIND_DEFAULT_WINDOW_DAYS };
+  }
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return allowed;
+  const b = v as Record<string, unknown>;
+  if (!isMode(b.mode)) return allowed;
+  const lv = toNum(b.level);
+  const level = Number.isInteger(lv) && lv >= 1 && lv <= 6 ? lv : CHART_BIND_DEFAULT_LEVEL;
+  const wd = toNum(b.windowDays);
+  const windowDays = Number.isNaN(wd)
+    ? CHART_BIND_DEFAULT_WINDOW_DAYS
+    : Math.max(1, Math.min(CHART_BIND_MAX_WINDOW_DAYS, Math.round(wd)));
+  return { mode: b.mode, level, sticky: b.sticky !== false, windowDays };
+}
+
+/** 明示データ 1 件で写す key(⚠ `type` / `bind` / `frames` / `source` は写さない ── 種類は全体の指定に揃える)。 */
+const FRAME_KEYS = ['labels', 'datasets', 'xs', 'title'] as const;
+
+function frameDefOf(v: unknown): Readonly<Record<string, unknown>> | null {
+  if (v === null || typeof v !== 'object') return null;
+  // 配列だけの略記(`[1, 2, 3]`)は 1 系列の data とみなす
+  if (Array.isArray(v)) return { datasets: [{ data: v.slice(0, GPU_CHART_MAX_POINTS) }] };
+  const o = v as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of FRAME_KEYS) if (o[k] !== undefined) out[k] = o[k];
+  return Object.keys(out).length === 0 ? null : out;
+}
+
+/** `"frames"` を検める(辞書か配列)。無ければ `null`、読めなければ理由の文。 */
+export function parseFrameDefs(v: unknown): ChartFrameDefs | null | string {
+  if (v === undefined) return null;
+  if (Array.isArray(v)) return { kind: 'list', items: v.slice(0, GPU_CHART_MAX_FRAMES).map(frameDefOf) };
+  if (v === null || typeof v !== 'object') return 'frames は { "見出し名": { … } } か [ { … }, … ] の形で書いてください';
+  const items = new Map<string, Readonly<Record<string, unknown>>>();
+  for (const [k, d] of Object.entries(v as Record<string, unknown>)) {
+    if (items.size >= GPU_CHART_MAX_FRAMES) break;
+    const def = frameDefOf(d);
+    if (def !== null) items.set(clampText(k).trim(), def);
+  }
+  return { kind: 'map', items };
+}
+
+/**
+ * 設定の中身(JSON を読んだ後の素の値)を検める ── 本文の表・明示データから作るフレーム(`gpu-chart-bind.ts`)も同じ 1 本を通す。
+ * ⚠ `bind` / `frames` は見ない(連動の指定は `parseGpuChartSpec` が検める)。
+ */
+export function parseGpuChartObject(o: Record<string, unknown>): GpuChartParseResult {
+  const fail = (error: string): GpuChartParseResult => ({ ok: false, error: `グラフを描けません: ${error}` });
   if (!isType(o.type)) return fail(`type は ${GPU_CHART_TYPES.join(' / ')} のどれかにしてください`);
   const type = o.type;
   const notes: string[] = [];

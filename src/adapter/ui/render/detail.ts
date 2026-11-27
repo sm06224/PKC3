@@ -33,7 +33,7 @@ import { hydrate3d, mount3dViewer, resolveSceneModel, type Hydrate3dOptions } fr
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
-import { hydrateGpuChart } from './gpu-chart';
+import { hydrateGpuChart, type HydrateGpuChartOptions } from './gpu-chart';
 import { hydratePlotly } from './plotly-raster';
 import { hydrateReact } from './react-sandbox';
 import { hydrateWidgets, remountStaleWidgets, WIDGET_LID_ATTR } from './widget-bridge';
@@ -94,7 +94,7 @@ export function hydrateFigures(
   root: ParentNode | readonly ParentNode[],
   opts?: HydrateOptions,
   /** ` ```3d ` の `asset:鍵` を引く口(v4.0 PR-12)。渡さない面ではモデルだけ断る。 */
-  opts3d?: Hydrate3dOptions,
+  opts3d?: Hydrate3dOptions & HydrateGpuChartOptions,
 ): MermaidScope[] {
   // ⚠ **数式もここに束ねる**(#707)── 面は 6 か所あるので、別の口を作ると
   //    そのうち 1 つで数式だけ字のまま残る(まさに mermaid が踏んだ形)。
@@ -2140,7 +2140,7 @@ export class DetailRenderer {
         //    `<img>` の ObjectURL を revoke してしまう)
         if (applied.inserted.length > 0) {
           void this.hydrateAssetRefs(applied.inserted, this.hydrateToken, opts);
-          this.mermaidScopes.push(...hydrateFigures(applied.inserted, undefined, this.figureOpts()));
+          this.mermaidScopes.push(...hydrateFigures(applied.inserted, undefined, this.readFigureOpts(lid, body)));
         }
         // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
         //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
@@ -4440,6 +4440,21 @@ export class DetailRenderer {
    * 🔴 **図の塊へ渡す付帯の口**(v4.0 PR-12)── ` ```3d ` の `model: "asset:鍵"` を、この面の添付の貸し出し
    * (`this.assets`)から引く。⚠ 種類は添付の登録情報(`listMimes`)を先に見る(Blob の `type` は空のことがある)。
    */
+  /**
+   * 🔴 **読む面の図の口**(v4.1 PR-8)── `figureOpts` に、スクロール連動グラフ(`"bind"`)が読む本文・lid・スクロールの器を足す。
+   * ⚠ 本文は**読むたびに引く**: 描き終えた本文(`paintedBody`)がこのノートの物ならそれ、描いている最中なら今描いている本文。
+   *   保存して本文が変われば、グラフの塊が差し替わらなくても次の現在地で時点のデータを作り直す。
+   * ⚠ 読む面だけが渡す ── 埋め込み・編集のプレビューでは連動の見張りを張らない。
+   */
+  private readFigureOpts(lid: string, body: string): HydrateGpuChartOptions {
+    return {
+      ...this.figureOpts(),
+      noteLid: lid,
+      scrollRoot: this.scroller,
+      getNoteBody: () => (this.bodyHost?.getAttribute(PAINTED_ATTR) === lid && this.paintedBody !== null ? this.paintedBody : body),
+    };
+  }
+
   private figureOpts(): Hydrate3dOptions {
     const assets = this.assets;
     if (!assets) return {};

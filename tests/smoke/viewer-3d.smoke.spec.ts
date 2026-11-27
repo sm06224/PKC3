@@ -315,6 +315,92 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   await expect(hHost.locator('[data-pkc-gpu-chart]')).toHaveAttribute('data-pkc-gpu-chart-backend', /^(webgpu|webgl2|2d)$/, { timeout: 30_000 });
   await expect(hHost.locator('[data-pkc-gpu-chart-info="points"]')).toHaveText('2,500 点');
 
+  // ⚠ ⑦ を足して 30 秒を超えた ── 起動の予算(1 本 = 1 起動)を増やさないため、同じ 1 本の中で時間だけを延ばす
+  //   (`attach.smoke.spec.ts` の `test.setTimeout(120_000)` と同じ前例)
+  test.setTimeout(90_000);
+  // ⑦ 🔴 スクロール連動(v4.1 PR-8、#2095 中盤)── 見出し 3 節(各節に別の数の表)と "bind": "heading" のグラフ。
+  //    読み進めると連動先とデータが切り替わる / 固定中は切り替わらず、追従に戻すと今の節へ揃う / 上端に固定 ⇄ 解除
+  const section = (name: string, col: string, vals: number[]): string =>
+    [`## ${name}`, '', `| 月 | ${col} |`, '|---|---:|', ...vals.map((v, i) => `| ${i + 1}月 | ${v} |`), '', filler].join('\n');
+  const boundBody = [
+    '```chart live',
+    '{"type":"bar","title":"四半期","bind":"heading","height":220}',
+    '```',
+    '',
+    section('Q1', '売上', [10, 40, 20]),
+    section('Q2', '来客数', [5, 9, 30]),
+    section('Q3', '返品', [7, 3, 1]),
+  ].join('\n\n');
+  await writeNote(page, '連動グラフ', boundBody);
+  const bHost = page.locator('[data-pkc-field="detail-body"] [data-pkc-gpu-chart-src]').first();
+  await expect(bHost).toHaveAttribute('data-pkc-gpu-chart-state', 'ready', { timeout: 15_000 });
+  await expect(bHost).toHaveAttribute('data-pkc-gpu-chart-bind', 'heading');
+  const bChart = bHost.locator('[data-pkc-gpu-chart]');
+  await expect(bChart).toHaveAttribute('data-pkc-gpu-chart-backend', /^(webgpu|webgl2|2d)$/, { timeout: 30_000 });
+  const bLabel = bChart.locator('[data-pkc-field="gpu-chart-bind-label"]');
+  const bStage = bChart.locator('[data-pkc-gpu-chart-stage]');
+  await expect(bLabel).toHaveText('連動: Q1 (1 / 3)');
+  await expect(bStage).toHaveAttribute('aria-label', /売上/);
+  // 上端に固定(既定)── 本文の根の直下の塊(器を包む塊)が sticky
+  const stuck = page.locator('[data-pkc-field="detail-body"] > .pkc-gpu-chart-sticky');
+  await expect(stuck).toHaveCount(1);
+  await expect(stuck.locator('[data-pkc-gpu-chart-src]')).toHaveCount(1);
+  await expect(stuck).toHaveCSS('position', 'sticky');
+  const heads = page.locator('[data-pkc-field="detail-body"] h2');
+  await expect(heads).toHaveCount(3);
+  const readTo = async (i: number): Promise<void> => {
+    await heads.nth(i).evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  };
+  await page.waitForTimeout(400);
+  const bb0 = (await bStage.boundingBox())!;
+  const bClip = { x: bb0.x + 2, y: bb0.y + 2, width: bb0.width - 4, height: bb0.height - 4 };
+  const q1Px = await pixels(page, bClip);
+  // 下の節へ読み進める → Q2 のデータへ(グラフは上端に残って見えている)
+  await readTo(1);
+  await expect(bLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
+  await expect(bStage).toHaveAttribute('aria-label', /来客数/);
+  const sb2 = (await bStage.boundingBox())!;
+  const rb = (await scroller.boundingBox())!;
+  expect(sb2.y, '上端に固定したグラフが画面の外へ流れた').toBeGreaterThanOrEqual(rb.y - 1);
+  expect(sb2.y, '上端に固定したグラフが画面の外へ流れた').toBeLessThan(rb.y + rb.height / 2);
+  await page.waitForTimeout(500);
+  const sb2b = (await bStage.boundingBox())!;
+  const q2Clip = { x: sb2b.x + 2, y: sb2b.y + 2, width: sb2b.width - 4, height: sb2b.height - 4 };
+  await expect.poll(async () => changed(q1Px, await pixels(page, q2Clip)), { message: '節が変わってもグラフの絵が変わらない' }).toBeGreaterThan(50);
+  // 固定 → 別の節へ → 切り替わらない
+  const follow = bChart.locator('[data-pkc-field="gpu-chart-follow"]');
+  await clickReal(page, follow);
+  await expect(follow).toHaveAttribute('aria-pressed', 'true');
+  await expect(follow).toHaveText('固定中');
+  await readTo(2);
+  await page.waitForTimeout(600);
+  await expect(bLabel).toHaveText('連動: Q2 (2 / 3)');
+  await expect(bStage).toHaveAttribute('aria-label', /来客数/);
+  // 追従に戻す → 今読んでいる節(Q3)へ
+  await clickReal(page, follow);
+  await expect(follow).toHaveAttribute('aria-pressed', 'false');
+  await expect(bLabel).toHaveText('連動: Q3 (3 / 3)', { timeout: 5_000 });
+  await expect(bStage).toHaveAttribute('aria-label', /返品/);
+  // 上端に固定 ⇄ 固定を解除(双方向)
+  const stick = bChart.locator('[data-pkc-field="gpu-chart-sticky"]');
+  await expect(stick).toHaveAttribute('aria-pressed', 'true');
+  await clickReal(page, stick);
+  await expect(stick).toHaveAttribute('aria-pressed', 'false');
+  await expect(stuck).toHaveCount(0);
+  const slotBlock = page.locator('[data-pkc-field="detail-body"] > *').filter({ has: page.locator('[data-pkc-gpu-chart-src]') });
+  await expect(slotBlock).toHaveCount(1);
+  await expect(slotBlock).not.toHaveCSS('position', 'sticky');
+  // 流れる配置では、読み進めた先でグラフは画面の外にある
+  await expect.poll(async () => (await bStage.boundingBox())!.y).toBeLessThan(rb.y - 50);
+  await clickReal(page, stick);
+  await expect(stick).toHaveAttribute('aria-pressed', 'true');
+  await expect(stuck).toHaveCSS('position', 'sticky');
+  // 前へ: 追従中は本文もその見出しへ動き、グラフは Q2 に(⚠ 固定の押し直しで本文が動いたので、Q3 まで読み直してから)
+  await readTo(2);
+  await expect(bLabel).toHaveText('連動: Q3 (3 / 3)', { timeout: 5_000 });
+  await clickReal(page, bChart.locator('[data-pkc-gpu-chart-op="bind-prev"]'));
+  await expect(bLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
+
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
