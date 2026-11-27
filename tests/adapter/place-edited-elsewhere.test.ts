@@ -193,8 +193,25 @@ describe('全数: 板の受け手は 1 本の門を通る(#1087)', () => {
     return code.slice(i, j === -1 ? undefined : j);
   };
 
+  /**
+   * 🔴 `add-place`(右クリックの「ここに付箋を置く」)とキャンバス背景のダブルクリック(Polish PR-C)は、
+   *   同じ 1 本(`addPlaceAt`)を通り、その 1 本が門を通る(二重の書換経路を作らない)。
+   */
+  it('🔴 add-place とキャンバス背景のダブルクリックは addPlaceAt の 1 本を通り、その 1 本が門を通る', () => {
+    expect(bodyOf('add-place')).toContain('addPlaceAt(');
+    const i = code.indexOf('function addPlaceAt(');
+    expect(i).toBeGreaterThan(-1);
+    const fn = code.slice(i, code.indexOf('\n}\n', i));
+    expect(fn).toContain('placeEditedElsewhereGate(');
+    expect(fn).toContain("type: 'ADD_PLACE'");
+    const j = code.indexOf('const onDblClick = ');
+    expect(j).toBeGreaterThan(-1);
+    expect(code.slice(j, j + 1500)).toContain('addPlaceAt(');
+    // ⚠ ADD_PLACE を直に撃つ空の付箋の口は addPlaceAt だけ(entry= / template= の口は別の引数を運ぶ)
+    expect(code.match(/type: 'ADD_PLACE', lid, x, y \}/g)).toHaveLength(1);
+  });
+
   it.each([
-    'add-place',
     'add-place-template',
     'place-rect',
     'raise-place',

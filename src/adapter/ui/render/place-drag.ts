@@ -42,9 +42,20 @@ import { screenBodyOf } from '@adapter/state/app-state';
 import { editedElsewhereReason, elsewhereCheckNotNeeded, type EditLockPort } from '@adapter/state/edited-elsewhere';
 import { lidOfNode } from '@adapter/ui/actions/lid-of-node';
 import { clampGroupDelta, parsePlaceGroup } from '@features/markdown/place-notation';
-import { placeRotateOf, resizeRotated } from '@features/markdown/place-rotate';
-import { clearConnectLayer, PLACE_FOCUS_ATTR } from './place-board';
-import { canvasZoomOf, isCanvasHost, SELECTED_ATTR } from './canvas-viewport';
+import { placeRotateOf, resizeRotated, rotatedBounds } from '@features/markdown/place-rotate';
+import { boundsOf, computeSnapGuides, snapThresholdFor } from '@features/canvas/snap-guides';
+import type { CanvasRect } from '@features/canvas/viewport';
+import { clearConnectLayer, PLACE_FOCUS_ATTR, rectOf, syncPlaceLinesLive } from './place-board';
+import {
+  canvasZoomOf,
+  clearCanvasGuides,
+  createEdgePanner,
+  isCanvasHost,
+  SELECTED_ATTR,
+  showCanvasGuides,
+  syncCanvasMinimapLive,
+  type EdgePanner,
+} from './canvas-viewport';
 
 /** 押すと掴むの境目(px)。 */
 const DRAG_SLOP = 4;
@@ -120,6 +131,26 @@ interface Drag {
   /** 🔴 無限キャンバスか(負の所へ動かせる)。 */
   readonly infinite: boolean;
   moved: boolean;
+  /** 🔴 最後の手の位置(Polish PR-C ── オートパンのコマ・Alt の切替で、手が止まっていても置き直す)。 */
+  lastClientX: number;
+  lastClientY: number;
+  /** 🔴 Alt を押しているか(押している間はスナップしない)。 */
+  alt: boolean;
+  /** 🔴 オートパンで送った分(ワールド px)── 手の下に付箋を留めるため、動かした量に足す。 */
+  panX: number;
+  panY: number;
+  /** 🔴 いま当てている動かした量(ワールド px。吸い付きと下限を済ませた値)── 離したときはこれを書く(見た目と書く値を食い違わせない)。 */
+  appliedDx: number;
+  appliedDy: number;
+  /** 🔴 吸い付く相手(動かしていない付箋の四角)と、動かす全員の起点の外接四角。初めて動いたときに 1 回だけ測る。 */
+  snap: { readonly targets: readonly CanvasRect[]; readonly start: CanvasRect | null } | null;
+  /** 🔴 オートパン(無限キャンバスで位置を掴んだときだけ)。 */
+  panner: EdgePanner | null;
+}
+
+/** 回した付箋は回した外接四角で見る(線・ミニマップ・カリングと同じ)。 */
+function worldRect(r: { x: number; y: number; w: number; h: number; rot?: number }): CanvasRect {
+  return r.rot !== undefined && r.rot !== 0 ? rotatedBounds(r, r.rot) : { x: r.x, y: r.y, w: r.w, h: r.h };
 }
 
 /**
@@ -204,6 +235,44 @@ export function installPlaceDrag(
     | null = null;
   let pendingCleanup: (() => void) | null = null;
 
+  /**
+   * 🔴 **線とミニマップの追従は 1 コマ 1 回**(v4.0 仕上げ Polish PR-C)── 手が動くたびに要求を貯め、次のコマでまとめて引き直す。
+   * ⚠ 動かしていない間は要求しない(定常コスト 0)。外すときは必ず取り消す。
+   */
+  const win = doc.defaultView;
+  let syncRaf: number | null = null;
+  const syncHosts = new Set<HTMLElement>();
+  const flushLiveSync = (): void => {
+    syncRaf = null;
+    const hosts = [...syncHosts];
+    syncHosts.clear();
+    for (const h of hosts) {
+      if (!h.isConnected) continue;
+      syncPlaceLinesLive(h);
+      syncCanvasMinimapLive(h);
+    }
+  };
+  const requestLiveSync = (host: HTMLElement | null): void => {
+    if (host === null) return;
+    syncHosts.add(host);
+    if (syncRaf !== null) return;
+    if (win !== null && typeof win.requestAnimationFrame === 'function') syncRaf = win.requestAnimationFrame(flushLiveSync);
+    else flushLiveSync();
+  };
+  const cancelLiveSync = (): void => {
+    if (syncRaf !== null && win !== null) win.cancelAnimationFrame(syncRaf);
+    syncRaf = null;
+    syncHosts.clear();
+  };
+
+  /** 掴みの後始末(オートパンを止め、補助線を消す)。⚠ 離した / 取りやめ / 外した、のどれでも必ず通す。 */
+  const endDragExtras = (d: Drag): void => {
+    d.panner?.stop();
+    d.panner = null;
+    clearCanvasGuides(d.host);
+    clearCanvasGuides(d.block.parentElement);
+  };
+
   const onPointerDown = (e: PointerEvent): void => {
     swallowClick = false;
     if (e.button !== 0) return;
@@ -250,6 +319,15 @@ export function installPlaceDrag(
       zoom: canvasZoomOf(block.parentElement),
       infinite: isCanvasHost(block.parentElement),
       moved: false,
+      lastClientX: e.clientX,
+      lastClientY: e.clientY,
+      alt: e.altKey,
+      panX: 0,
+      panY: 0,
+      appliedDx: 0,
+      appliedDy: 0,
+      snap: null,
+      panner: null,
     };
     try {
       grip.setPointerCapture(e.pointerId);
@@ -297,6 +375,68 @@ export function installPlaceDrag(
     if (el !== null) d.block = el;
   };
 
+  /**
+   * 🔴 **吸い付く相手を測る**(初めて動いたときに 1 回)── 動かしていない付箋の四角と、動かす全員の起点の外接四角。
+   * ⚠ 起点は属性ではなく掴んだ時点の値(`startX` / `startY` ── 描き直し前の掴み直しでも離した先から測る)。
+   */
+  const measureSnap = (d: Drag): NonNullable<Drag['snap']> => {
+    const host = d.block.parentElement;
+    const moving = new Set<HTMLElement>([d.block, ...d.others.map((m) => m.block)]);
+    const targets: CanvasRect[] = [];
+    if (host !== null) {
+      for (const el of host.querySelectorAll<HTMLElement>(':scope > .pkc-format-block.pkc-place')) {
+        if (!moving.has(el)) targets.push(worldRect(rectOf(el)));
+      }
+    }
+    const start = boundsOf(
+      [d as { block: HTMLElement; startX: number; startY: number }, ...d.others].map((m) =>
+        worldRect({ ...rectOf(m.block), x: m.startX, y: m.startY }),
+      ),
+    );
+    return { targets, start };
+  };
+
+  /**
+   * 🔴 **位置を掴んでいるときの 1 コマ**(Polish PR-C)── 手の位置 + オートパンで送った分から動かした量を出し、
+   * 下限(`clampGroupDelta`)→ スナップ(Alt を押していなければ)→ もう一度下限、の順で当てる。
+   * 🔑 当てた量は `appliedDx` / `appliedDy` に残す ── 離したときはこれを書く(見た目と書く値を食い違わせない)。
+   */
+  const applyMove = (d: Drag): void => {
+    const dx = (d.lastClientX - d.startClientX) / d.zoom + d.panX;
+    const dy = (d.lastClientY - d.startClientY) / d.zoom + d.panY;
+    const starts = [d, ...d.others].map((m) => ({ x: m.startX, y: m.startY }));
+    // 🔑 グループは全員で同じだけ動く(形を崩さない)。1 枚だけなら今までと同じ `max(0, start + d)`
+    let c = clampGroupDelta(starts, dx, dy, { infinite: d.infinite });
+    const host = d.block.parentElement;
+    if (!d.alt) {
+      d.snap ??= measureSnap(d);
+      const start = d.snap.start;
+      if (start !== null && d.snap.targets.length > 0) {
+        const box = { x: start.x + c.dx, y: start.y + c.dy, w: start.w, h: start.h };
+        const s = computeSnapGuides(box, d.snap.targets, snapThresholdFor(d.zoom));
+        const want = { dx: c.dx + s.snapDx, dy: c.dy + s.snapDy };
+        const c2 = clampGroupDelta(starts, want.dx, want.dy, { infinite: d.infinite });
+        // ⚠ 下限で止まった軸の補助線は出さない(揃っていない線を見せない)
+        const guides = s.guides.filter((g) => (g.axis === 'x' ? c2.dx === want.dx : c2.dy === want.dy));
+        c = c2;
+        if (host !== null) showCanvasGuides(host, guides);
+      } else if (host !== null) {
+        clearCanvasGuides(host);
+      }
+    } else {
+      clearCanvasGuides(host);
+    }
+    d.appliedDx = c.dx;
+    d.appliedDy = c.dy;
+    d.block.style.left = `${d.startX + c.dx}px`;
+    d.block.style.top = `${d.startY + c.dy}px`;
+    for (const m of d.others) {
+      m.block.style.left = `${m.startX + c.dx}px`;
+      m.block.style.top = `${m.startY + c.dy}px`;
+    }
+    requestLiveSync(host);
+  };
+
   const onPointerMove = (e: PointerEvent): void => {
     if (drag === null || e.pointerId !== drag.pointerId) return;
     follow(drag);
@@ -305,6 +445,9 @@ export function installPlaceDrag(
     // ⚠ 押すと掴むの境目は**画面の px** で見る(倍率で割ると、縮小した板では掴みにくくなる)
     if (!drag.moved && Math.abs(sx) < DRAG_SLOP && Math.abs(sy) < DRAG_SLOP) return;
     drag.moved = true;
+    drag.lastClientX = e.clientX;
+    drag.lastClientY = e.clientY;
+    drag.alt = e.altKey;
     const dx = sx / drag.zoom;
     const dy = sy / drag.zoom;
     if (drag.mode === 'size') {
@@ -315,21 +458,24 @@ export function installPlaceDrag(
         drag.block.style.height = `${r.h}px`;
         drag.block.style.left = `${r.x}px`;
         drag.block.style.top = `${r.y}px`;
-        return;
+      } else {
+        drag.block.style.width = `${Math.max(MIN_W, drag.startW + dx)}px`;
+        drag.block.style.height = `${Math.max(MIN_H, drag.startH + dy)}px`;
       }
-      drag.block.style.width = `${Math.max(MIN_W, drag.startW + dx)}px`;
-      drag.block.style.height = `${Math.max(MIN_H, drag.startH + dy)}px`;
+      requestLiveSync(drag.block.parentElement);
       return;
     }
-    // 🔑 グループは全員で同じだけ動く(形を崩さない)。1 枚だけなら今までと同じ `max(0, start + d)`
-    const c = clampGroupDelta([drag, ...drag.others].map((m) => ({ x: m.startX, y: m.startY })), dx, dy, {
-      infinite: drag.infinite,
-    });
-    drag.block.style.left = `${drag.startX + c.dx}px`;
-    drag.block.style.top = `${drag.startY + c.dy}px`;
-    for (const m of drag.others) {
-      m.block.style.left = `${m.startX + c.dx}px`;
-      m.block.style.top = `${m.startY + c.dy}px`;
+    applyMove(drag);
+    // 🔴 無限キャンバスでは、枠の端へ寄せたら画面を送る(付箋は手の下に留める)
+    if (drag.infinite) {
+      const d = drag;
+      d.panner ??= createEdgePanner(d.host ?? d.block.parentElement!, (vx, vy) => {
+        if (drag !== d) return;
+        d.panX += vx / d.zoom;
+        d.panY += vy / d.zoom;
+        applyMove(d);
+      });
+      d.panner?.update(e.clientX, e.clientY);
     }
   };
 
@@ -341,6 +487,8 @@ export function installPlaceDrag(
   });
 
   const restore = (d: Drag): void => {
+    // 🔴 線とミニマップも元の位置へ戻す(次のコマで 1 回)
+    requestLiveSync(d.block.parentElement);
     if (d.mode === 'size') {
       if (d.rot !== 0) {
         d.block.style.left = `${d.startX}px`;
@@ -506,10 +654,19 @@ export function installPlaceDrag(
     if (drag === null || e.pointerId !== drag.pointerId) return;
     const d = drag;
     drag = null;
+    endDragExtras(d);
     if (!d.moved) return;
     swallowClick = true;
     // 🔴 書く前に、作り直された板へ掴みを移す(古い要素の行番号で書かない ── #1499)
     follow(d);
+    // 🔴 離した手の位置で最後の 1 コマを当てる(吸い付き・オートパンの分も込みで、書く値を見た目と揃える)
+    if (d.mode === 'move') {
+      d.lastClientX = e.clientX;
+      d.lastClientY = e.clientY;
+      d.alt = e.altKey;
+      applyMove(d);
+      clearCanvasGuides(d.block.parentElement);
+    }
     /**
      * 🔴 離した瞬間に ● ⊕ の層を消す(#1464 段 2)── 掴んでいる間もマウスは板の上に在るので
      *   層は必ず在り、残したまま書くと直後の描き直しが**全塊の作り直し**へ倒れる
@@ -551,10 +708,8 @@ export function installPlaceDrag(
       registerPendingDrop(d, { type: 'RESIZE_PLACE', lid: t.lid, line: t.line, w, h });
       return;
     }
-    // 🔑 グループは全員で同じだけ(`onPointerMove` と同じ `clampGroupDelta` ── 見た目と書く値を食い違わせない)
-    const c = clampGroupDelta([d, ...d.others].map((m) => ({ x: m.startX, y: m.startY })), dx, dy, {
-      infinite: d.infinite,
-    });
+    // 🔑 グループは全員で同じだけ ── 当てた量(`applyMove` の下限・吸い付き・オートパン込み)をそのまま書く(見た目と書く値を食い違わせない)
+    const c = { dx: d.appliedDx, dy: d.appliedDy };
     // ⚠ 下限は `clampGroupDelta` が決める(通常表示は 0、キャンバスは負の端)── ここで 0 に丸め直さない
     const x = Math.round(d.startX + c.dx);
     const y = Math.round(d.startY + c.dy);
@@ -592,6 +747,7 @@ export function installPlaceDrag(
 
   const onPointerCancel = (): void => {
     if (drag === null) return;
+    endDragExtras(drag);
     follow(drag); // 作り直されていれば、見えている方を戻す
     restore(drag); // 途中で切れたら戻す(本文はまだ書いていない)
     drag = null;
@@ -616,6 +772,7 @@ export function installPlaceDrag(
       m.block.style.left = `${m.startX}px`;
       m.block.style.top = `${m.startY}px`;
     }
+    requestLiveSync(n.block.parentElement);
   };
 
   /**
@@ -650,7 +807,45 @@ export function installPlaceDrag(
     fireUnlessElsewhere(t.lid, () => dispatcher.dispatch({ type: 'MOVE_PLACES', lid: t.lid, moves }));
   }
 
+  /**
+   * 🔴 **マウスで掴んでいる最中のキー**(Polish PR-C)── `Esc` で取りやめ(見た目・線・ミニマップを元へ)、
+   * `Alt` の押し離しでスナップを外す / 戻す(手が止まっていても、その場で置き直す)。
+   * @returns 受けた
+   */
+  const onDragKey = (e: KeyboardEvent): boolean => {
+    const d = drag;
+    if (d === null) return false;
+    if (e.key === 'Escape' && e.type === 'keydown') {
+      e.preventDefault();
+      e.stopImmediatePropagation(); // 🔴 開いているノートまで閉じない
+      endDragExtras(d);
+      follow(d);
+      restore(d);
+      drag = null;
+      // ⚠ 取りやめた後の離す指の click を、塊の中の押し物へ落とさない
+      swallowClick = d.moved;
+      return true;
+    }
+    if (e.key === 'Alt') {
+      e.preventDefault(); // ⚠ Alt を離したときにブラウザのメニューへ焦点を取られない
+      const alt = e.type === 'keydown';
+      if (d.alt !== alt && d.moved && d.mode === 'move') {
+        d.alt = alt;
+        applyMove(d);
+      } else {
+        d.alt = alt;
+      }
+      return true;
+    }
+    return false;
+  };
+
+  const onKeyUp = (e: KeyboardEvent): void => {
+    onDragKey(e);
+  };
+
   const onKeyDown = (e: KeyboardEvent): void => {
+    if (onDragKey(e)) return;
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const grip = (e.target as Element | null)?.closest<HTMLElement>('[data-pkc-field="place-grip"]');
     const block = grip?.closest<HTMLElement>('.pkc-format-block.pkc-place') ?? null;
@@ -697,6 +892,7 @@ export function installPlaceDrag(
       m.block.style.left = `${m.startX + c.dx}px`;
       m.block.style.top = `${m.startY + c.dy}px`;
     }
+    requestLiveSync(block.parentElement);
     if (nudge.timer !== null) clearTimeout(nudge.timer);
     nudge.timer = setTimeout(commitNudge, NUDGE_SETTLE_MS);
   };
@@ -707,8 +903,14 @@ export function installPlaceDrag(
   doc.addEventListener('pointercancel', onPointerCancel);
   doc.addEventListener('click', onClick, true);
   doc.addEventListener('keydown', onKeyDown, true);
+  doc.addEventListener('keyup', onKeyUp, true);
   return () => {
     cancelNudge(); // ⚠ 外した後に timer が dispatch しない
+    if (drag !== null) {
+      endDragExtras(drag);
+      drag = null;
+    }
+    cancelLiveSync(); // ⚠ 外した後に rAF が線を引き直さない
     if (pendingCleanup !== null) {
       pendingCleanup();
       pendingCleanup = null;
@@ -719,5 +921,6 @@ export function installPlaceDrag(
     doc.removeEventListener('pointercancel', onPointerCancel);
     doc.removeEventListener('click', onClick, true);
     doc.removeEventListener('keydown', onKeyDown, true);
+    doc.removeEventListener('keyup', onKeyUp, true);
   };
 }

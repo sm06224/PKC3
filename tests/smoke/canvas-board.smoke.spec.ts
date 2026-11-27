@@ -164,6 +164,7 @@ test('🔴 無限キャンバス: 切替・ズーム・パン・倍率を割り�
    * ⚠ 選択・カメラはノートごとの記憶なので、3 つはそれぞれ新しいノートで始める(前の段の状態を持ち込まない)。
    */
   await multiSelectAndAlign(page);
+  await liveDragSnapAndAdd(page);
   await freehandPlace(page);
   await graphToBoard(page);
   await narrowMinimap(page);
@@ -246,6 +247,83 @@ async function multiSelectAndAlign(page: import('@playwright/test').Page): Promi
   await detail.locator('[data-pkc-field="canvas-viewport"]').focus();
   await page.keyboard.press('Escape');
   await expect(detail.locator('[data-pkc-canvas-selected]')).toHaveCount(0);
+}
+
+/**
+ * 🔴 **Polish PR-C** ── ①掴んでいる最中(`mouse.up` の前)に線の d とミニマップの付箋が追従する
+ * ②隣の付箋と揃う所でスナップ補助線が出て、離すと消える(書くのは吸い付いた値)
+ * ③縮小中に何も無い背景をダブルクリックすると、その所に付箋が 1 枚増える(座標は倍率を割り戻す)。
+ */
+async function liveDragSnapAndAdd(page: import('@playwright/test').Page): Promise<void> {
+  const { detail, bar, vp } = await openBoard(page, '追従の板', BOARD);
+  const c1 = detail.locator('#c1');
+  const line = detail.locator('[data-pkc-field="place-lines"] path[data-pkc-line-from]').first();
+  const card = vp.locator('[data-pkc-field="canvas-minimap"] rect[data-pkc-minimap-card]').first();
+  const guides = detail.locator('[data-pkc-field="canvas-guides"]');
+  const d0 = await line.getAttribute('d');
+  const m0 = await card.getAttribute('y');
+  await expect(guides).toHaveCount(0);
+
+  const grip = detail.locator('#c1 [data-pkc-field="place-grip"]');
+  const g = (await grip.boundingBox())!;
+  const v = (await vp.boundingBox())!;
+  const sx = g.x + g.width / 2;
+  const sy = g.y + g.height / 2;
+  // c1(y=40 h=120)を下へ 158 → 上端 198 が c2 の上端 200 に吸い付く(x は 180 で揃う所が無い)
+  const ex = sx + 60;
+  const ey = sy + 158;
+  // ⚠ 端の 40px はオートパンが効く ── 道中がずっと内側に在ることを先に確かめる
+  for (const [x, y] of [[sx, sy], [ex, ey]] as const) {
+    expect(x > v.x + 48 && x < v.x + v.width - 48 && y > v.y + 48 && y < v.y + v.height - 48, `掴む道が枠の端に近い(${x},${y} / ${JSON.stringify(v)})`).toBe(true);
+  }
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  await page.mouse.move(ex, ey, { steps: 10 });
+  // 🔴 離す前に、線とミニマップが付いてくる(修正前は離すまで固定だった)
+  await expect.poll(() => line.getAttribute('d'), { message: '掴んでいる間、線が付箋に付いてこない' }).not.toBe(d0);
+  await expect.poll(() => card.getAttribute('y'), { message: '掴んでいる間、ミニマップの付箋が付いてこない' }).not.toBe(m0);
+  // 🔴 スナップ補助線(横の線 y=200)
+  await expect(guides, 'スナップ補助線が出ない').toHaveCount(1);
+  await expect(guides.locator('line[data-pkc-guide-axis="y"]').first()).toHaveAttribute('y1', '200');
+  const stroke = await guides.locator('line').first().evaluate((el) => getComputedStyle(el).strokeDasharray);
+  expect(stroke, '補助線が点線でない').not.toBe('none');
+  await page.mouse.up();
+  await expect(guides, '離した後も補助線が残っている').toHaveCount(0);
+  await expect(c1, '吸い付いた y= が本文に書かれていない').toHaveAttribute('data-pkc-y', '200', { timeout: 5000 });
+  await expect(c1).toHaveAttribute('data-pkc-x', '180');
+
+  // ── 縮小(80%)して、何も無い背景をダブルクリック ──
+  await clickReal(page, bar.locator('[data-pkc-canvas-cmd="zoom-out"]'));
+  await expect(bar.locator('[data-pkc-canvas-cmd="zoom-reset"]')).toHaveText('80%');
+  const places = detail.locator('.pkc-format-block.pkc-place');
+  await expect(places).toHaveCount(2);
+  const v2 = (await vp.boundingBox())!;
+  // ⚠ 整数で押す ── Chrome の MouseEvent.clientX / Y は整数に丸められる(小数で押すと期待値だけ 1px ずれる)
+  const bx = Math.round(v2.x + 60);
+  const by = Math.round(v2.y + 60);
+  const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x as number, y as number)?.getAttribute('data-pkc-field') ?? null, [bx, by]);
+  expect(['canvas-viewport', 'detail-body'], `ダブルクリックする所が背景でない(${String(hit)})`).toContain(hit);
+  const want = await detail.locator('[data-pkc-field="detail-body"]').evaluate((host, [x, y]) => {
+    const r = host.getBoundingClientRect();
+    return { x: Math.round(((x as number) - r.left) / 0.8), y: Math.round(((y as number) - r.top) / 0.8) };
+  }, [bx, by]);
+  await page.mouse.dblclick(bx, by);
+  await expect(places, '背景のダブルクリックで付箋が増えない').toHaveCount(3, { timeout: 5000 });
+  const added = detail.locator(`.pkc-format-block.pkc-place[data-pkc-x="${want.x}"][data-pkc-y="${want.y}"]`);
+  const all = await places.evaluateAll((els) => els.map((e) => `${e.getAttribute('data-pkc-x')},${e.getAttribute('data-pkc-y')}`).join(' / '));
+  const dbg = await detail.locator('[data-pkc-field="detail-body"]').evaluate((h) => {
+    const r = h.getBoundingClientRect();
+    return `host ${r.left},${r.top} cl ${h.clientLeft},${h.clientTop} sc ${h.scrollLeft},${h.scrollTop} tf ${h.style.transform}`;
+  });
+  await expect(added, `ダブルクリックした所(${want.x}, ${want.y})に置かれていない: ${all} | ${dbg} | click ${bx},${by}`).toHaveCount(1);
+  // 見た目も押した所に左上が来る(倍率を割り戻している)
+  const ab = (await added.boundingBox())!;
+  expect(Math.abs(ab.x - bx), '置いた付箋が押した所から横にずれた').toBeLessThan(2);
+  expect(Math.abs(ab.y - by), '置いた付箋が押した所から縦にずれた').toBeLessThan(2);
+  // 対照群: 付箋の上のダブルクリックでは増えない
+  await detail.locator('#c2').getByText('ふたつめ').dblclick();
+  await page.keyboard.press('Escape');
+  await expect(places).toHaveCount(3);
 }
 
 /** 🔴 スマホ幅(390px)ではミニマップを既定で出さない(押すと出る)。 */

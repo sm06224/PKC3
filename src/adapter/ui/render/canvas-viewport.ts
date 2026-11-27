@@ -68,7 +68,10 @@ import {
 } from '@features/canvas/selection';
 import { isCanvasLayout } from '@features/markdown/document-globals';
 import { rotatedBounds } from '@features/markdown/place-rotate';
-import { rectOf } from './place-board';
+import { computeEdgePanVelocity, EDGE_PAN_MARGIN_PX, EDGE_PAN_MAX_SPEED } from '@features/canvas/edge-pan';
+import type { SnapGuide } from '@features/canvas/snap-guides';
+import { OVERLAY_ATTR } from './apply-blocks';
+import { liveRectOf, rectOf } from './place-board';
 import { openFreehand, type FreehandSession } from './canvas-draw';
 
 const PLACE_SELECTOR = '.pkc-format-block.pkc-place';
@@ -100,6 +103,8 @@ export type CanvasCommand =
 /** 選んでいる付箋の印(`"1"`)。⚠ `place-drag.ts` が読む(選んだ全員を一緒に動かす)。 */
 export const SELECTED_ATTR = 'data-pkc-canvas-selected';
 export const MARQUEE_FIELD = 'canvas-marquee';
+/** 🔴 スナップ補助線の層(v4.0 仕上げ Polish PR-C)。器(ステージ)の子で、ワールド座標で描く。 */
+export const GUIDES_FIELD = 'canvas-guides';
 export const ALIGN_MENU_FIELD = 'canvas-align-menu';
 /** 整列のメニューの項目(`data-pkc-canvas-align="left"` など)。 */
 export const ALIGN_ATTR = 'data-pkc-canvas-align';
@@ -675,6 +680,21 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
   let mini: number | null = null;
   let space = false;
   let swallow = false;
+  /** 🔴 範囲選択を端まで引いたときのオートパン(Polish PR-C)。引いていない間は作らない(定常コスト 0)。 */
+  let bandPan: EdgePanner | null = null;
+  /** 範囲選択の四角を、最後の手の位置で描き直す(オートパンで始点が動いたときも)。 */
+  const drawBand = (b: NonNullable<typeof band>, clientX: number, clientY: number): void => {
+    if (b.el === null) return;
+    const p = vpPoint(c, clientX, clientY);
+    b.el.style.left = `${Math.round(Math.min(p.x, b.sx))}px`;
+    b.el.style.top = `${Math.round(Math.min(p.y, b.sy))}px`;
+    b.el.style.width = `${Math.round(Math.abs(p.x - b.sx))}px`;
+    b.el.style.height = `${Math.round(Math.abs(p.y - b.sy))}px`;
+  };
+  const stopBandPan = (): void => {
+    bandPan?.stop();
+    bandPan = null;
+  };
 
   const onKey = (e: KeyboardEvent): void => {
     if (!vp.isConnected) {
@@ -787,12 +807,19 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
         band.el.setAttribute('aria-hidden', 'true');
         vp.append(band.el);
       }
-      const x = Math.min(p.x, band.sx);
-      const y = Math.min(p.y, band.sy);
-      band.el.style.left = `${Math.round(x)}px`;
-      band.el.style.top = `${Math.round(y)}px`;
-      band.el.style.width = `${Math.round(Math.abs(p.x - band.sx))}px`;
-      band.el.style.height = `${Math.round(Math.abs(p.y - band.sy))}px`;
+      drawBand(band, e.clientX, e.clientY);
+      // 🔴 端まで引いたら画面を送る ── 始点はワールドに留める(送った分だけ画面の始点をずらす)
+      if (bandPan === null) {
+        bandPan = createEdgePanner(host, (vx, vy, x, y) => {
+          if (band === null) return;
+          band.sx -= vx;
+          band.sy -= vy;
+          band.cx -= vx;
+          band.cy -= vy;
+          drawBand(band, x, y);
+        });
+      }
+      bandPan?.update(e.clientX, e.clientY);
       return;
     }
     if (pan === null || e.pointerId !== pan.id) return;
@@ -811,6 +838,7 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
     if (band !== null && e.pointerId === band.id) {
       const b = band;
       band = null;
+      stopBandPan();
       if (b.el === null) {
         // 押しただけ(引いていない)── Shift なしなら選択を外す
         if (!b.add && c.selected.size > 0) setSelection(c, []);
@@ -877,6 +905,7 @@ function wire(c: Canvas, viewOf: () => BoardView | undefined): () => void {
   vp.addEventListener('mousedown', onAux);
   vp.addEventListener('wheel', onWheel, { passive: false });
   return () => {
+    stopBandPan();
     vp.removeEventListener('pointerenter', onEnter);
     vp.removeEventListener('pointerleave', onLeave);
     vp.removeEventListener('pointerdown', onDown);
@@ -1067,6 +1096,185 @@ export function flushCanvasFrame(host: HTMLElement): number {
   const n = applyCulling(c);
   drawMinimapView(c);
   return n;
+}
+
+/**
+ * 🔴 **掴んでいる最中に、ミニマップの付箋と表示枠をその場で描き直す**(v4.0 仕上げ Polish PR-C)。
+ * 付箋の見えている四角(`liveRectOf` ── `style` を先に読む)で、動いた付箋のシルエットだけ書き直し、写像と表示枠を当て直す。
+ * ⚠ キャンバスでない器・ミニマップを閉じているときは何もしない(仕事 0)。測った四角(`c.rects`)も書き直すので、
+ *   離した後の描き直しまでの間も、カリングとミニマップが動かした先を指す。
+ * @returns 書き直した付箋の数
+ */
+export function syncCanvasMinimapLive(host: HTMLElement): number {
+  const c = views.get(host)?.canvas;
+  if (c == null || !minimapShown(c.minimap)) return 0;
+  const cards = c.minimap.querySelectorAll<SVGRectElement>('rect[data-pkc-minimap-card]');
+  let changed = 0;
+  for (let i = 0; i < c.rects.length; i += 1) {
+    const entry = c.rects[i]!;
+    const lr = liveRectOf(entry.el);
+    const r: CanvasRect = lr.rot !== undefined && lr.rot !== 0 ? rotatedBounds(lr, lr.rot) : lr;
+    const old = entry.rect;
+    if (old.x === r.x && old.y === r.y && old.w === r.w && old.h === r.h) continue;
+    entry.rect = r;
+    changed += 1;
+    const card = cards[i];
+    if (card === undefined) continue;
+    card.setAttribute('x', String(r.x));
+    card.setAttribute('y', String(r.y));
+    card.setAttribute('width', String(Math.max(1, r.w)));
+    card.setAttribute('height', String(Math.max(1, r.h)));
+  }
+  if (changed > 0) drawMinimapView(c);
+  return changed;
+}
+
+/**
+ * 🔴 **画面の移動量(px)でカメラを送る**(手で引くのと同じ向き ── 右へ正なら中身が右へ動く)。
+ * @returns 送った(キャンバスだった)か
+ */
+export function panCanvasBy(host: HTMLElement, dx: number, dy: number): boolean {
+  const c = views.get(host)?.canvas;
+  if (c == null) return false;
+  c.cam = panCamera(c.cam, dx, dy);
+  applyCamera(c, views.get(host));
+  return true;
+}
+
+/** 器のキャンバスの枠(キャンバスでなければ `null`)。 */
+export function canvasViewportOf(host: Element | null): HTMLElement | null {
+  if (!(host instanceof HTMLElement)) return null;
+  return views.get(host)?.canvas?.vp ?? null;
+}
+
+/** 動きを減らす設定のときの最高速(画面 px / コマ)── 操作は止めず、ゆっくり送る。 */
+const EDGE_PAN_REDUCED_SPEED = 4;
+
+/** 端のオートパン 1 本。`update` で手の位置を渡し、`stop` で必ず止める。 */
+export interface EdgePanner {
+  update(clientX: number, clientY: number): void;
+  stop(): void;
+  /** 回っているか(rAF を待っているか)。 */
+  readonly running: boolean;
+}
+
+/**
+ * 🔴 **ドラッグ端のオートパン**(v4.0 仕上げ Polish PR-C)── 手が枠の内側 40px に入っている間だけ rAF で画面を送る。
+ * ⚠ 定常コスト 0: 端から離れた / `stop` / 枠が外れた / キャンバスでなくなった、のどれでも**その場で** rAF を止める。
+ *   端に入っていない間は 1 コマも要求しない。
+ * 🔑 速さは `computeEdgePanVelocity` の 1 本。動きを減らす設定では最高速を落とす(止めはしない ── 端まで運べなくなる)。
+ * @param onStep 1 コマ送った後に呼ぶ(送った量 `vx` `vy` は画面 px、`x` `y` は最後の手の位置)
+ */
+export function createEdgePanner(
+  host: HTMLElement,
+  onStep: (vx: number, vy: number, clientX: number, clientY: number) => void,
+): EdgePanner | null {
+  const vp = canvasViewportOf(host);
+  if (vp === null) return null;
+  const win = vp.ownerDocument.defaultView;
+  if (win === null || typeof win.requestAnimationFrame !== 'function') return null;
+  let reduced = false;
+  try {
+    reduced = win.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    // 問い合わせられない環境は「減らさない」のまま
+  }
+  const max = reduced ? EDGE_PAN_REDUCED_SPEED : EDGE_PAN_MAX_SPEED;
+  let raf: number | null = null;
+  let x = 0;
+  let y = 0;
+  const velocity = (): { vx: number; vy: number } =>
+    computeEdgePanVelocity(x, y, vp.getBoundingClientRect(), EDGE_PAN_MARGIN_PX, max);
+  const stop = (): void => {
+    if (raf !== null) win.cancelAnimationFrame(raf);
+    raf = null;
+  };
+  const tick = (): void => {
+    raf = null;
+    if (!vp.isConnected || !isCanvasHost(host)) return;
+    const v = velocity();
+    if (v.vx === 0 && v.vy === 0) return;
+    panCanvasBy(host, -v.vx, -v.vy);
+    onStep(v.vx, v.vy, x, y);
+    raf = win.requestAnimationFrame(tick);
+  };
+  return {
+    update(clientX: number, clientY: number): void {
+      x = clientX;
+      y = clientY;
+      const v = velocity();
+      if (v.vx === 0 && v.vy === 0) {
+        stop(); // 🔑 端から離れた瞬間に止める
+        return;
+      }
+      if (raf === null) raf = win.requestAnimationFrame(tick);
+    },
+    stop,
+    get running(): boolean {
+      return raf !== null;
+    },
+  };
+}
+
+/**
+ * 🔴 **スナップ補助線を出す**(v4.0 仕上げ Polish PR-C)── 器(ステージ)の子の `<svg>` 1 枚に、ワールド座標で点線を引く。
+ * ⚠ 重ね物の印(`OVERLAY_ATTR`)を付ける ── 付けないと、掴んでいる最中の描き直しが「外から子が増えた」と読む。
+ * 🔑 補助線が無ければ層ごと外す(`clearCanvasGuides`)── 動かしていない間は DOM に 1 つも残さない。
+ */
+export function showCanvasGuides(host: HTMLElement, guides: readonly SnapGuide[]): void {
+  if (guides.length === 0) {
+    clearCanvasGuides(host);
+    return;
+  }
+  const doc = host.ownerDocument;
+  let svg = host.querySelector<SVGSVGElement>(`:scope > [data-pkc-field="${GUIDES_FIELD}"]`);
+  if (svg === null) {
+    svg = doc.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('data-pkc-field', GUIDES_FIELD);
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute(OVERLAY_ATTR, '');
+    host.append(svg);
+  }
+  const next: Element[] = [];
+  for (const g of guides) {
+    const ln = doc.createElementNS(SVG_NS, 'line');
+    const vertical = g.axis === 'x';
+    ln.setAttribute('x1', String(vertical ? g.pos : g.from));
+    ln.setAttribute('y1', String(vertical ? g.from : g.pos));
+    ln.setAttribute('x2', String(vertical ? g.pos : g.to));
+    ln.setAttribute('y2', String(vertical ? g.to : g.pos));
+    ln.setAttribute('data-pkc-guide-axis', g.axis);
+    next.push(ln);
+  }
+  svg.replaceChildren(...next);
+}
+
+/** 補助線を消す(層ごと外す)。@returns 外した層の数 */
+export function clearCanvasGuides(host: Element | null): number {
+  if (host === null) return 0;
+  const layers = host.querySelectorAll(`:scope > [data-pkc-field="${GUIDES_FIELD}"]`);
+  for (const l of layers) l.remove();
+  return layers.length;
+}
+
+/**
+ * 🔴 **キャンバスの何も無い背景か**(ダブルクリックで付箋を置く所。Polish PR-C)。
+ * 枠そのもの・器そのものだけを背景とみなす ── 付箋・線の当たり・ミニマップ・バー・手書きの面の上では `null`。
+ * ⚠ 手書きを開いている間も `null`(描く手を奪わない)。
+ * @returns 背景なら器(ステージ)、違えば `null`
+ */
+export function canvasBackgroundHost(target: Element | null): HTMLElement | null {
+  if (target === null) return null;
+  let host: HTMLElement | null = null;
+  if (target.getAttribute('data-pkc-field') === VIEWPORT_FIELD) {
+    host = target.querySelector<HTMLElement>(`:scope > [${CANVAS_ATTR}]`);
+  } else if (target instanceof HTMLElement && target.hasAttribute(CANVAS_ATTR)) {
+    host = target;
+  }
+  if (host === null) return null;
+  const c = views.get(host)?.canvas;
+  if (c == null || c.draw !== null) return null;
+  return host;
 }
 
 /** 器から板の見え方を外す(器を捨てるとき)。 */
