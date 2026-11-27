@@ -13,6 +13,7 @@
  */
 import { appTranscriptFollow } from './transcript-follow';
 import { DAY_NAV_FIELD, paintDayNav } from './day-nav';
+import { buildPrintLayoutSegment } from './note-layout';
 import { renderMarkdown } from '@features/markdown/markdown-render';
 import { isOnePaneEditorMode, isRichEditorMode } from '@features/editor-mode';
 import { flipTaskInDraft } from '@features/markdown/body-rewrite';
@@ -2499,7 +2500,12 @@ export class DetailRenderer {
           const split = document.createElement('span');
           split.setAttribute('data-pkc-field', 'copy-split');
           split.append(md, copyMore, copySource);
-          bar.append(this.barButton, split, find, cols);
+          /**
+           * 🔴 **印刷レイアウト表示の 2 択を帯にも置く**(右の情報ペインが畳まれる 1100px 以下で 1 クリックにするため。
+           *   CSS が 1100px 超では隠す)。⚠ 情報ペインと同じ部品・同じ受け手(`toggle-print-layout`)。
+           */
+          const printSeg = buildPrintLayoutSegment(document, 'bar-print-layout');
+          bar.append(this.barButton, split, find, cols, printSeg);
         } else {
           // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
           // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する

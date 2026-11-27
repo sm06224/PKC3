@@ -92,18 +92,60 @@ export function applyPrintLayout(root: HTMLElement, on: boolean): void {
 /** 印刷レイアウト表示の切替ボタンの `data-pkc-action`(情報ペイン・binder が同じ綴りを引く)。 */
 export const TOGGLE_PRINT_LAYOUT_ACTION = 'toggle-print-layout';
 
+/** 2 択の各ボタンが持つ選択の印(`off` = 通常 / `on` = 印刷レイアウト)。 */
+export const PRINT_LAYOUT_CHOICE_ATTR = 'data-pkc-print-layout-choice';
+
 /**
- * 切替ボタンの見た目を、いまの状態に合わせる(`aria-pressed` と字)。
- * ⚠ 値が変わらなければ書かない。字は「いまどちらの表示か」を言う(押すと反対側へ切り替わる)。
+ * 🔴 **印刷レイアウト表示の 2 択ボタン**(`通常` | `印刷レイアウト`)を組む。
+ * 情報ペイン・ページ設定のパネル・読む面の帯が**同じ部品**を使う(字・説明・押し方を 1 か所に)。
+ * 各ボタンは `toggle-print-layout`(押した側へそろえる。既にその側なら何も変わらない)。
+ * @param field 器の `data-pkc-field`(置き場所ごとに名前を分ける)
+ */
+export function buildPrintLayoutSegment(doc: Document, field: string): HTMLElement {
+  const group = doc.createElement('span');
+  group.setAttribute('data-pkc-field', field);
+  group.setAttribute('data-pkc-print-layout-segment', '');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', '本文の表示');
+  for (const [choice, text] of [['off', '通常'], ['on', '印刷レイアウト']] as const) {
+    const b = doc.createElement('button');
+    b.type = 'button';
+    b.setAttribute('data-pkc-action', 'toggle-print-layout'); // = TOGGLE_PRINT_LAYOUT_ACTION(字のまま書く ── 出口の全数検査が綴りで追う)
+    b.setAttribute(PRINT_LAYOUT_CHOICE_ATTR, choice);
+    b.textContent = text;
+    paintPrintLayoutButton(b, isPrintLayoutOn(doc.documentElement));
+    group.append(b);
+  }
+  return group;
+}
+
+/** 2 択の器の中のボタンをまとめて塗る。 */
+export function paintPrintLayoutSegment(group: HTMLElement, on: boolean): void {
+  for (const b of group.querySelectorAll<HTMLButtonElement>(`button[data-pkc-action="${TOGGLE_PRINT_LAYOUT_ACTION}"]`))
+    paintPrintLayoutButton(b, on);
+}
+
+/**
+ * 切替ボタンの見た目を、いまの状態に合わせる(`aria-pressed` と説明)。
+ * ⚠ 値が変わらなければ書かない。2 択のボタン(`data-pkc-print-layout-choice`)は字が固定で、自分の側が選ばれているとき押された状態になる。
  */
 export function paintPrintLayoutButton(b: HTMLButtonElement, on: boolean): void {
-  const pressed = on ? 'true' : 'false';
+  const choice = b.getAttribute(PRINT_LAYOUT_CHOICE_ATTR);
+  const mine = choice === null ? on : (choice === 'on') === on;
+  const pressed = mine ? 'true' : 'false';
   if (b.getAttribute('aria-pressed') !== pressed) b.setAttribute('aria-pressed', pressed);
-  const text = on ? '印刷レイアウト' : '通常表示';
-  if (b.textContent !== text) b.textContent = text;
-  const title = on
-    ? '本文を印刷する1 枚の紙のように表示しています。押すと通常表示に戻ります'
-    : '押すと、本文を印刷する紙の大きさ・余白で、1 枚の紙のように表示します(フル HD・4:3 などの画面用のページ設定では A4 縦を紙の基準にします)';
+  let title: string;
+  if (choice === null) {
+    const text = on ? '印刷レイアウト' : '通常表示';
+    if (b.textContent !== text) b.textContent = text;
+    title = on
+      ? '本文を印刷する1 枚の紙のように表示しています。押すと通常表示に戻ります'
+      : '押すと、本文を印刷する紙の大きさ・余白で、1 枚の紙のように表示します(フル HD・4:3 などの画面用のページ設定では A4 縦を紙の基準にします)';
+  } else if (choice === 'on') {
+    title = '本文を印刷する紙の大きさ・余白で、1 枚の紙のように表示します(フル HD・4:3 などの画面用のページ設定では A4 縦を紙の基準にします)';
+  } else {
+    title = '本文を通常の画面表示にします';
+  }
   if (b.title !== title) b.title = title;
 }
 

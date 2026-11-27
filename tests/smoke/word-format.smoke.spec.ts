@@ -156,6 +156,7 @@ test.describe('2 ペイン編集', () => {
     const pb = (await panel.boundingBox())!;
     const ob = (await opener.boundingBox())!;
     expect(pb.y, 'ポップオーバーが ▾ の下に出ていない').toBeGreaterThanOrEqual(ob.y + ob.height - 1);
+    expect(Math.abs(pb.x - ob.x), `ポップオーバーの左端が ▾ の左端から離れている(${pb.x} / ${ob.x})`).toBeLessThanOrEqual(2);
     await page.screenshot({ path: test.info().outputPath('page-setup-panel.png') });
 
     // 用紙・余白 → 下書きの前書き・情報ペインと一致(編集中でも選べる)
@@ -173,9 +174,9 @@ test.describe('2 ペイン編集', () => {
     await expect(ta).toHaveValue(/page_margin: narrow/);
 
     // 印刷レイアウト表示を入れる → 情報ペインのボタンも入になり、保存した本文で改ページの区切りが見える
-    await clickReal(page, page.locator(PANEL).locator('[data-pkc-action="toggle-print-layout"]'));
+    await clickReal(page, page.locator(PANEL).locator('[data-pkc-action="toggle-print-layout"][data-pkc-print-layout-choice="on"]'));
     expect(await page.evaluate(() => document.documentElement.getAttribute('data-pkc-print-layout'))).toBe('1');
-    await expect(pane.locator('[data-pkc-action="toggle-print-layout"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(pane.locator('[data-pkc-action="toggle-print-layout"][data-pkc-print-layout-choice="on"]')).toHaveAttribute('aria-pressed', 'true');
     // Esc で閉じ、編集は続いている
     await page.keyboard.press('Escape');
     await expect(page.locator(PANEL)).toBeHidden();
@@ -187,7 +188,7 @@ test.describe('2 ペイン編集', () => {
     await expect(view).toHaveAttribute('data-pkc-page-format', 'a4-landscape');
     const hr = view.locator('hr.pkc-section-break');
     await expect(hr).toHaveCount(1);
-    expect(await hr.evaluate((el) => getComputedStyle(el).borderTopStyle)).toBe('dashed');
+    expect(await hr.evaluate((el) => getComputedStyle(el, '::after').content)).toBe('counter(pkc-sheet) " ページ目"');
     await page.screenshot({ path: test.info().outputPath('print-layout-after.png') });
 
     // ── ⑥ スマホ幅(同じ起動の続き。編集に入り直す)
@@ -264,7 +265,7 @@ test('🔴 1 画面編集(ライブ)でも、行の欄に居たまま文字色�
   await expect(live.locator('span.pkc-inline-mark')).toHaveCount(0);
   await expect(live).toContainText('色を付ける字');
 
-  // ページ設定 ▾ はライブでも開けて、選ぶと本文の先頭の情報に入る
+  // ページ設定 ▾ はライブでも開けて、選ぶと前書きに入る
   await clickReal(page, `${BAR} [data-pkc-action="open-page-setup"]`);
   await expect(page.locator(PANEL)).toBeVisible();
   await page.locator(PANEL).locator('select[data-pkc-note-layout-field="pageColumns"]').selectOption('2');

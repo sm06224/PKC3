@@ -293,7 +293,7 @@ function makeBar(doc: Document): HTMLElement {
     separator(doc),
     button(doc, 'align', '整列 ▾', '選んだ付箋を揃えます'),
     button(doc, 'group', 'グループにする', '選んだ付箋をグループにします(どれか 1 枚を動かすと全員が動きます)'),
-    button(doc, 'default', 'いつもキャンバスで開く', 'このノートを開いたとき、最初から無限キャンバスで表示します(前書きに layout: canvas と書きます)'),
+    button(doc, 'default', 'いつもキャンバスで開く', 'このノートを開いたとき、最初から無限キャンバスで表示します(前書き(frontmatter) に layout: canvas と書きます)'),
   );
   return bar;
 }
