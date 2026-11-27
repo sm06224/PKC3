@@ -14,8 +14,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createNeonGlow, GLOW_QUERY, NEAR_ATTR, NEON_FIELDS, NEON_ZONES, zoneOf, type NeonGlow } from '../../src/adapter/ui/render/neon-glow';
-import { NEON_RADIUS } from '../../src/features/neon/near-cards';
+import { createNeonGlow, GLOW_QUERY, NEAR_ATTR, NEON_FIELDS, NEON_ZONES, OUT_ATTR, zoneOf, type NeonGlow, type NeonTimers } from '../../src/adapter/ui/render/neon-glow';
+import { NEON_ENTER_DELAY_MS, NEON_ENTER_DURATION_MS, NEON_LEAVE_DURATION_MS, NEON_RADIUS } from '../../src/features/neon/near-cards';
 import { atBlock, blocksFor, stripComments, withoutMedia } from '../helpers/css-blocks';
 
 /** `@media screen and (forced-colors: none)` の n 番目(1 始まり)の塊を、閉じの波括弧まで切り出す。 */
@@ -680,8 +680,10 @@ describe('CSS(原文)', () => {
     const { body } = atBlock(css, '@media screen and (forced-colors: none)');
     expect(body, '近いカードの印に限っていない').toContain('[data-pkc-glow-near]');
     for (const pseudo of ['::before', '::after']) {
-      const rules = [...body.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => m[1]!.trim().endsWith(pseudo));
+      // 描く規則(`content` を持つ)は 1 つ。⚠ 点き方・消え方(#2096)の `opacity` / `transition` / `@starting-style` の規則は別に数える(下の describe)
+      const rules = [...body.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => m[1]!.trim().endsWith(pseudo) && /content:/.test(m[2]!));
       expect(rules.length, `${pseudo} の規則が無い`).toBe(1);
+      expect(rules[0]![1], `${pseudo}: 余韻の印(glow-out)の間も描かない(消える前に疑似要素ごと消える)`).toContain('[data-pkc-glow-out]');
       const d = rules[0]![2]!;
       expect(d, `${pseudo}: 飾りが押し所を奪う`).toMatch(/pointer-events:\s*none/);
       if (pseudo === '::before') {
@@ -707,6 +709,8 @@ describe('CSS(原文)', () => {
     }
     expect(blocks, '光の塊が 3 つでない(疑似要素の輪郭 / 横スクロールの器の背景 / 本文のブロック・入力欄)').toBe(3);
     expect(outside, '画面の外にも光の規則がある').not.toContain('[data-pkc-glow-near]');
+    expect(outside, '画面の外にも余韻の規則がある').not.toContain('[data-pkc-glow-out]');
+    expect(outside, '画面の外に @starting-style がある').not.toContain('@starting-style');
   });
 
   it('🔴 横スクロールの器(`.pkc-md-block`)は疑似要素でなく器自身の背景で輪郭を描く(疑似要素は overflow に切られる)', () => {
@@ -715,7 +719,7 @@ describe('CSS(原文)', () => {
     expect(body).toMatch(/\[data-pkc-log-card\]:not\(\.pkc-md-block, \.pkc-details\)/);
     // 器の 4 つの辺の型(途中 / 先頭 / 末尾 / 単独)すべてに光の層がある
     const second = nthNoneBlock(css, 2);
-    for (const edge of ['first', 'last', 'solo']) expect(second, `器の ${edge} に光の層が無い`).toContain(`[data-pkc-log-card='${edge}'][data-pkc-glow-near]`);
+    for (const edge of ['first', 'last', 'solo']) expect(second, `器の ${edge} に光の層が無い`).toContain(`[data-pkc-log-card='${edge}']:is([data-pkc-glow-near], [data-pkc-glow-out])`);
     expect(second).toContain('var(--sf), var(--ng)');
     expect(second, '疑似要素で描いている').not.toMatch(/::before|::after/);
   });
@@ -1000,6 +1004,12 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
       .filter((m) => m[1]!.replace(/\s+/g, ' ').includes(sel))
       .map((m) => m[2]!)
       .join('\n');
+  /** 共通の `::before`(線を描く規則)の対象の並び。⚠ 点き方の規則(`[glow-near]::before` の `opacity`)ではなく、`content` を持つ描く規則。 */
+  const drawList = (): string => {
+    const at = css.indexOf(":is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out])::before {\n    content:");
+    expect(at, '描く規則が見つからない(空振り)').toBeGreaterThan(0);
+    return css.slice(css.lastIndexOf(':is(', at - 1), at);
+  };
   const TYPES = "[type='checkbox'], [type='radio'], [type='range'], [type='file'], [type='color']";
   const FOCUS_INPUT = `input:not(${TYPES}):focus-visible`;
 
@@ -1063,16 +1073,14 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
   });
 
   it('🔴 フォーカスが勝つ: 入力欄の近接は `:not(:focus-visible)` / 包み(追記欄・SQL)の線は `:not(:focus-within)`', () => {
-    expect(css).toMatch(/:is\(input, textarea, select\)\[data-pkc-glow-near\]\[data-pkc-glow-near\]:not\(:focus-visible\)\s*\{/);
-    const at = css.indexOf("[data-pkc-glow-near][data-pkc-glow-near]::before");
-    const list = css.slice(css.lastIndexOf(':is(', at), at);
+    expect(css).toContain(":is(input, textarea, select):is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out]):not(:focus-visible) {");
+    const list = drawList();
     expect(list).toContain("[data-pkc-field='sql-input-wrap']:not(:focus-within)");
-    expect(css).toContain("[data-pkc-field='append-form'][data-pkc-glow-near][data-pkc-glow-near]:not(:focus-within)");
+    expect(css).toContain("[data-pkc-field='append-form']:is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out]):not(:focus-within)");
   });
 
   it('🔴 新しい対象(コードの枠・図のカード・折りたたみ・追記欄・SQL の包み)は共通の `::before` の線に入る(ログの器・ログの折りたたみは除く)', () => {
-    const at = css.indexOf("[data-pkc-glow-near][data-pkc-glow-near]::before");
-    const list = css.slice(css.lastIndexOf(':is(', at), at);
+    const list = drawList();
     for (const t of [
       '.pkc-details:not([data-pkc-log-card])',
       ".pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card])",
@@ -1082,7 +1090,7 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
       expect(list, `${t} が共通の線に無い`).toContain(t);
     // 追記欄の枠は疑似要素でなく背景 3 層(`position: relative` を足すと取っ手の押し所を覆う)
     expect(list).not.toContain('append-form');
-    const form = decls("[data-pkc-field='append-form'][data-pkc-glow-near][data-pkc-glow-near]:not(:focus-within)");
+    const form = decls("[data-pkc-field='append-form']:is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out]):not(:focus-within)");
     expect(form).toMatch(/background-clip:\s*padding-box,\s*border-box,\s*border-box/);
     expect(decls("[data-pkc-field='append-form']"), '追記欄の枠が位置づけ(取っ手の押し所を覆う)になった').not.toMatch(/position:\s*relative/);
   });
@@ -1095,14 +1103,14 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
     expect(frame, '右へはみ出している(読む面が横スクロールする)').not.toMatch(/margin-inline-end:\s*-/);
     expect(frame).toMatch(/margin-inline-start:\s*-2px/);
     expect(decls("[data-pkc-prose]:not([data-pkc-writing='vertical']) > " + table.replace(/^/, '')), '読み幅の余白があるとき、その余白から 2px 引く').toMatch(/margin-inline-start:\s*calc\(var\(--prose-indent, 0px\) - 2px\)/);
-    const glowRule = decls(`${table}[data-pkc-glow-near]`);
+    const glowRule = decls(`${table}:is([data-pkc-glow-near], [data-pkc-glow-out])`);
     expect(glowRule).toMatch(/background-clip:\s*padding-box,\s*border-box/);
     expect(glowRule, '内側の地(線形)→ 光(放射)の順').toMatch(/linear-gradient\(var\(--surface\), var\(--surface\)\),\s*radial-gradient/);
     expect(glowRule).not.toMatch(/::before|::after/);
   });
 
   it('🔴 引用は左の線だけ光る(幅 3px の疑似要素。他の辺には出ない)', () => {
-    const d = decls("blockquote:not(.pkc-section-callout)[data-pkc-glow-near][data-pkc-glow-near]::before");
+    const d = decls("blockquote:not(.pkc-section-callout):is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out])::before");
     expect(d).toMatch(/width:\s*3px/);
     expect(d).toMatch(/inset-inline-start:\s*-3px/);
     expect(d).toMatch(/pointer-events:\s*none/);
@@ -1126,5 +1134,325 @@ describe('CSS(原文): 本文のブロック・入力欄・フォーカス', () 
     for (const t of screenOnly) expect(outside, `${t} が画面の外(印刷)にもある`).not.toContain(t);
     expect(withoutMedia(css), '画面の外にも光の規則がある').not.toContain('[data-pkc-glow-near]');
     expect(outside).not.toContain('border: 2px solid transparent');
+  });
+});
+
+/**
+ * 🔴 **点き方・消え方(#2096)**── 素通りは光らせず余韻も残さない / 光った後に離れた物は余韻の印(`OUT_ATTR`)と最後の局所座標を残し、
+ * `NEON_LEAVE_DURATION_MS` 後に消す / 片付けのタイマーは高々 1 本・0 件で止まる / 付けない環境・破棄・画面の外は余韻なしで即座に消す。
+ * 時刻は `performance.now` を、タイマーは差し替え口(`NeonTimers`)を手で進める。
+ */
+describe('🔴 点き方・消え方(#2096)', () => {
+  let clock = 0;
+  let nextId = 1;
+  let timers: { id: number; fn: () => void; at: number }[] = [];
+  const fake: NeonTimers = {
+    set: (fn, ms) => {
+      const id = nextId++;
+      timers.push({ id, fn, at: clock + ms });
+      return id;
+    },
+    clear: (id) => {
+      timers = timers.filter((t) => t.id !== id);
+    },
+  };
+  /** 時刻を進め、期限の来たタイマーを鳴らす。 */
+  const advance = (ms: number): void => {
+    clock += ms;
+    for (;;) {
+      const due = timers.filter((t) => t.at <= clock).sort((a, b) => a.at - b.at)[0];
+      if (due === undefined) break;
+      timers = timers.filter((t) => t !== due);
+      due.fn();
+    }
+  };
+  const state = (el: HTMLElement): string => `${el.hasAttribute(NEAR_ATTR) ? 'near' : ''}${el.hasAttribute(OUT_ATTR) ? 'out' : ''}` || 'none';
+  beforeEach(() => {
+    clock = 1000;
+    timers = [];
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  });
+  /** 3 枚とも光らせて(ポインタ (300, 110))、溜めの時間を過ごす。 */
+  const litAll = (rig: Rig, m = media(true)): ReturnType<typeof media> => {
+    glow = createNeonGlow(document, () => m, fake);
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    expect(rig.cards.slice(0, 3).map(state), '検査の前提: 先頭の 3 枚が光る').toEqual(['near', 'near', 'near']);
+    return m;
+  };
+  const away = (rig: Rig): void => {
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 600, false));
+    runFrame();
+  };
+
+  it('時間の正本は 45 / 220 / 260ms', () => {
+    expect([NEON_ENTER_DELAY_MS, NEON_ENTER_DURATION_MS, NEON_LEAVE_DURATION_MS]).toEqual([45, 220, 260]);
+  });
+
+  it('🔴 素通り(溜めの間に離れた): 余韻の印も付けず、局所座標も即座に消す。タイマーも張らない', () => {
+    const rig = makeLog();
+    litAll(rig);
+    advance(NEON_ENTER_DELAY_MS - 1);
+    away(rig);
+    expect(rig.cards.map(state), '素通りなのに余韻が出た(チカつく)').toEqual(['none', 'none', 'none']);
+    expect(rig.cards[0]!.style.getPropertyValue('--gx'), '素通りなのに座標が残った').toBe('');
+    expect(timers.length, '素通りなのにタイマーを張った').toBe(0);
+    expect(glow!.fading()).toBe(0);
+  });
+
+  it('🔴 光った後に離れた: 余韻の印 + 最後の局所座標を残し、NEON_LEAVE_DURATION_MS 後に全部消える。タイマーは 3 枚でも 1 本', () => {
+    const rig = makeLog();
+    litAll(rig);
+    advance(NEON_ENTER_DELAY_MS);
+    away(rig);
+    expect(rig.cards.map(state)).toEqual(['out', 'out', 'out']);
+    expect(rig.cards[0]!.style.getPropertyValue('--gx'), '余韻なのに座標を消した(光の中心が画面の外へ飛ぶ)').toBe('200px');
+    expect(rig.cards[0]!.style.getPropertyValue('--gy')).toBe('10px');
+    expect(glow!.fading()).toBe(3);
+    expect(timers.length, '片付けのタイマーが 1 本でない').toBe(1);
+    advance(NEON_LEAVE_DURATION_MS - 1);
+    expect(rig.cards.map(state), '期限の前に消えた').toEqual(['out', 'out', 'out']);
+    advance(1);
+    expect(rig.cards.map(state), '期限が来ても余韻の印が残った').toEqual(['none', 'none', 'none']);
+    expect(rig.cards.map((c) => c.style.getPropertyValue('--gx') + c.style.getPropertyValue('--gy')), '座標が残った').toEqual(['', '', '']);
+    expect(timers.length, 'タイマーが残った(常駐)').toBe(0);
+    expect(glow!.fading()).toBe(0);
+    expect(frames.length, '余韻の後に rAF が残った').toBe(0);
+  });
+
+  it('🔴 ゾーンから出た(pointerleave)ときも余韻を残す。ゾーンのリスナーは外れ、余韻の後は何も残らない', () => {
+    const rig = makeLog();
+    litAll(rig);
+    advance(100);
+    rig.zone.dispatchEvent(pointer('pointerleave', 0, 0, false));
+    expect(glow!.inZone()).toBe(false);
+    expect(rig.cards.map(state)).toEqual(['out', 'out', 'out']);
+    advance(NEON_LEAVE_DURATION_MS);
+    expect(rig.cards.map(state)).toEqual(['none', 'none', 'none']);
+    expect(timers.length).toBe(0);
+  });
+
+  it('🔴 余韻の途中で再び近づくと、余韻の印が外れて近い印へ戻り、古い期限が来ても消えない。すぐ離れても余韻を残す', () => {
+    const rig = makeLog();
+    litAll(rig);
+    advance(NEON_ENTER_DELAY_MS);
+    away(rig);
+    advance(100);
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 110, false));
+    runFrame();
+    expect(rig.cards.map(state), '戻らない').toEqual(['near', 'near', 'near']);
+    expect(glow!.fading()).toBe(0);
+    expect(timers.length, '余韻が 0 件なのにタイマーが残った').toBe(0);
+    advance(NEON_LEAVE_DURATION_MS * 2);
+    expect(rig.cards.map(state), '古い期限で消えた').toEqual(['near', 'near', 'near']);
+    expect(rig.cards[0]!.style.getPropertyValue('--gx')).toBe('200px');
+    // 戻った直後に離れる(溜めは済んでいる扱い)── ブツ切れにせず余韻
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 600, false));
+    runFrame();
+    expect(rig.cards.map(state), '戻った物が素通り扱いで即座に消えた').toEqual(['out', 'out', 'out']);
+  });
+
+  it('🔴 戻った物の余韻の期限は新しい離脱から数える(古い期限で途中で切れない)', () => {
+    const rig = makeLog(1);
+    glow = createNeonGlow(document, () => media(true), fake);
+    rig.cards[0]!.dispatchEvent(pointer('pointerover', 300, 110));
+    runFrame();
+    advance(NEON_ENTER_DELAY_MS);
+    away(rig); // 期限 = +260
+    advance(200);
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 110, false));
+    runFrame();
+    away(rig); // 新しい期限 = いま +260
+    advance(100); // 古い期限(+60)は過ぎた
+    expect(state(rig.cards[0]!), '古い期限で切れた').toBe('out');
+    advance(NEON_LEAVE_DURATION_MS - 100);
+    expect(state(rig.cards[0]!)).toBe('none');
+  });
+
+  it.each([
+    ['環境が付けない側へ(動きを減らす設定)', (m: ReturnType<typeof media>) => m.set(false)],
+    ['スマホ用画面', () => glow!.setPhone(true)],
+    ['破棄(destroy)', () => glow!.destroy()],
+  ] as const)('🔴 %s: 光っている物も余韻の途中の物も、余韻なしで即座に全部消え、タイマーも 0', (_n, act) => {
+    const rig = makeLog(5);
+    const m = litAll(rig);
+    advance(NEON_ENTER_DELAY_MS);
+    // 0 は余韻へ、3・4 は光らせる(0・1・2 → 3・4)
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 480, false));
+    runFrame();
+    expect(rig.cards.map(state), '検査の前提').toEqual(['out', 'out', 'out', 'near', 'near']);
+    act(m);
+    expect(rig.cards.map(state), '余韻を残した').toEqual(['none', 'none', 'none', 'none', 'none']);
+    expect(rig.cards.map((c) => c.style.getPropertyValue('--gx')).join('')).toBe('');
+    expect(timers.length, 'タイマーが残った').toBe(0);
+    expect(glow!.fading()).toBe(0);
+  });
+
+  it('🔴 ゾーンを出て余韻の途中に環境が付けない側へ変わっても、余韻は即座に消える(ゾーンの外でも)', () => {
+    const rig = makeLog();
+    const m = litAll(rig);
+    advance(NEON_ENTER_DELAY_MS);
+    rig.zone.dispatchEvent(pointer('pointerleave', 0, 0, false));
+    expect(rig.cards.map(state)).toEqual(['out', 'out', 'out']);
+    m.set(false);
+    expect(rig.cards.map(state)).toEqual(['none', 'none', 'none']);
+    expect(timers.length).toBe(0);
+  });
+
+  it('🔴 画面の外へ出た物(IntersectionObserver)は余韻なしで即座に消える ── 余韻の途中の物も', () => {
+    ioInstances = [];
+    vi.stubGlobal('IntersectionObserver', FakeIO);
+    const rig = makeBody();
+    glow = createNeonGlow(document, () => media(true), fake);
+    rig.code.dispatchEvent(pointer('pointerover', 300, 125));
+    runFrame();
+    expect(rig.table.hasAttribute(NEAR_ATTR)).toBe(true);
+    advance(NEON_ENTER_DELAY_MS);
+    const io = ioInstances[0]!;
+    io.show(rig.table, false);
+    expect(state(rig.table), '画面の外へ出たのに余韻を残した').toBe('none');
+    expect(rig.table.style.getPropertyValue('--gx')).toBe('');
+    // 余韻の途中の物も
+    rig.zone.dispatchEvent(pointer('pointerleave', 0, 0, false));
+    expect(state(rig.code)).toBe('out');
+    glow.destroy();
+    expect(state(rig.code)).toBe('none');
+  });
+
+  it('🔴 片付け(タイマー)の自分の書き込みは汚れにしない ── 余韻が消えた後の次のコマで全カードを測り直さない', async () => {
+    const rig = makeLog(5);
+    litAll(rig);
+    await microtasks();
+    advance(NEON_ENTER_DELAY_MS);
+    away(rig); // 0・1・2 が余韻
+    await microtasks();
+    const base = rig.measured();
+    advance(NEON_LEAVE_DURATION_MS); // 片付けが印と style を消す
+    expect(rig.cards.map(state).slice(0, 3)).toEqual(['none', 'none', 'none']);
+    await microtasks(); // 片付けの記録が観測器へ届く(捨てていなければ汚れになる)
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 601, false));
+    runFrame();
+    expect(rig.measured(), '片付けのたびに全部測り直している(自分の片付けを汚れと数えた)').toBe(base);
+  });
+
+  it('🔴 片付けの直前に届いていた他の誰かの変更は捨てない(汚れとして次のコマで測り直す)', async () => {
+    const rig = makeLog(3);
+    litAll(rig);
+    await microtasks();
+    advance(NEON_ENTER_DELAY_MS);
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 330, false)); // 0・1 が余韻、2 は光ったまま
+    runFrame();
+    await microtasks();
+    const base = rig.measured();
+    const added = addCard(rig, 400); // 他の誰かの変更(子の追加)── 記録は同期で観測器に溜まる
+    advance(NEON_LEAVE_DURATION_MS);
+    rig.zone.dispatchEvent(pointer('pointermove', 300, 331, false));
+    runFrame();
+    expect(rig.measured(), '他の変更を片付けの記録と一緒に捨てた').toBeGreaterThan(base);
+    expect(added.hasAttribute(NEAR_ATTR), '足したカードが光らない').toBe(true);
+  });
+});
+
+describe('🔴 CSS(原文): 点き方・消え方(#2096)', () => {
+  const raw = readFileSync(join(__dirname, '../../src/styles/app.css'), 'utf-8');
+  const css = stripComments(raw);
+  const neon = css.slice(css.indexOf('@property --neon-alpha'));
+  const first = nthNoneBlock(css, 1);
+  const third = nthNoneBlock(css, 3);
+  /** 塊の中の規則(選択子, 宣言)。⚠ `@starting-style` の中の規則も含む(内側だけを拾う)。 */
+  const rules = (src: string): [string, string][] => [...src.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => [m[1]!.replace(/\s+/g, ' ').trim(), m[2]!]);
+  const ENTER = `${NEON_ENTER_DURATION_MS}ms ease-out ${NEON_ENTER_DELAY_MS}ms`;
+  const LEAVE = `${NEON_LEAVE_DURATION_MS}ms ease-out 0ms`;
+
+  it('🔴 `--neon-alpha` は登録した数(`inherits: false` ── 子孫へ継承させない)・初期値 0。`@media` の外の独立した塊で、`:root` に書かない', () => {
+    const m = css.match(/@property --neon-alpha\s*\{([^{}]*)\}/);
+    expect(m, '@property が無い / 入れ子になっている').not.toBeNull();
+    expect(m![1]).toMatch(/syntax:\s*'<number>'/);
+    expect(m![1], '子孫へ継承する(全子孫の style を計算し直す)').toMatch(/inherits:\s*false/);
+    expect(m![1]).toMatch(/initial-value:\s*0\s*;/);
+    expect(withoutMedia(css), '@property が @media の中にある').toContain('@property --neon-alpha');
+    expect(neon, ':root へ書いている').not.toMatch(/:root/);
+    expect(neon.match(/--neon-alpha\s*:\s*[^;]+;/g)?.length, '`--neon-alpha` を書く規則が近い / 余韻の 2 つでない').toBe(2);
+  });
+
+  it('🔴 疑似要素: 近い印は 45ms 溜めて 220ms で 1 へ / 余韻の印は 260ms で 0 へ(`opacity` だけ)', () => {
+    const r = rules(first);
+    const near = r.filter(([sel, d]) => /\[data-pkc-glow-near\]\[data-pkc-glow-near\]::before,/.test(sel) && /transition:/.test(d));
+    const out = r.filter(([sel, d]) => /\[data-pkc-glow-out\]\[data-pkc-glow-out\]::before,/.test(sel) && /transition:/.test(d));
+    expect(near.length, '近い印の点き方の規則が無い').toBe(1);
+    expect(out.length, '余韻の規則が無い').toBe(1);
+    expect(near[0]![1]).toMatch(/opacity:\s*1;/);
+    expect(near[0]![1]).toContain(`transition: opacity ${ENTER};`);
+    expect(out[0]![1]).toMatch(/opacity:\s*0;/);
+    expect(out[0]![1]).toContain(`transition: opacity ${LEAVE};`);
+    for (const [sel] of [...near, ...out]) {
+      expect(sel, '::after(にじみ)が入っていない').toContain('::after');
+      expect(sel, '引用の左の線が入っていない').toContain('blockquote:not(.pkc-section-callout)');
+      expect(sel, 'バーのボタンが入っていない').toContain("[data-pkc-region='rail'] button");
+    }
+    // ⚠ `opacity` 以外(色・座標)を補間しない ── 合成だけ
+    expect(near[0]![1]).not.toMatch(/transition:[^;]*(background|--gx|--gy|all)/);
+  });
+
+  it('🔴 疑似要素が作られた最初のコマは `@starting-style` で 0 から(入れ子にせず、画面 + 強制色なしの塊の直下)', () => {
+    const at = first.indexOf('@starting-style');
+    expect(at, '@starting-style が無い').toBeGreaterThan(0);
+    const { body } = atBlock(first.slice(at), '@starting-style');
+    const r = rules(body);
+    expect(r.length, '@starting-style の中が 1 規則でない').toBe(1);
+    expect(r[0]![0]).toMatch(/\[data-pkc-glow-near\]\[data-pkc-glow-near\]::before,/);
+    expect(r[0]![0]).toMatch(/::after$/);
+    expect(r[0]![0]).toContain('blockquote:not(.pkc-section-callout)');
+    expect(r[0]![1]).toMatch(/opacity:\s*0;/);
+    // 描く規則(`content` を持つ)の中に `{` を入れ子にしていない
+    expect(neon, 'CSS Nesting(宣言の中の @starting-style)').not.toMatch(/content:[^{}]*@starting-style/);
+  });
+
+  it('🔴 疑似要素の描く規則は `--neon-alpha` を使わない(引用の線は `--neon-alpha` の無い物で、掛けると 0 で見えなくなる)', () => {
+    for (const [sel, d] of rules(neon)) if (/::(before|after)$/.test(sel) && /content:/.test(d)) expect(`${sel} ${d}`, '疑似要素の描く規則が `--neon-alpha` を読んでいる').not.toContain('--neon-alpha');
+  });
+
+  it('🔴 背景で描く物(ログの器・表・追記欄・入力欄): 近い印は 45ms 溜めて 220ms で `--neon-alpha: 1` / 余韻は 260ms で 0。光の色は `--neon-alpha` で掛ける', () => {
+    const r = rules(third);
+    const near = r.filter(([sel, d]) => sel.endsWith('[data-pkc-glow-near]') && /--neon-alpha:\s*1;/.test(d));
+    const out = r.filter(([sel, d]) => sel.endsWith('[data-pkc-glow-out]') && /--neon-alpha:\s*0;/.test(d));
+    expect(near.length).toBe(1);
+    expect(out.length).toBe(1);
+    expect(near[0]![1]).toContain(`transition: --neon-alpha ${ENTER};`);
+    expect(out[0]![1]).toContain(`transition: --neon-alpha ${LEAVE};`);
+    for (const [sel] of [...near, ...out]) {
+      for (const t of ['[data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card]', "[data-pkc-render-lang='csv']", "[data-pkc-field='append-form']:not(:focus-within)", ':is(input, textarea, select):not(:focus-visible)'])
+        expect(sel, `${t} が入っていない(フォーカスのある物を外していない)`).toContain(t);
+    }
+    // 背景の光の色は濃さを掛ける(4 か所: ログの器の `--ng` / 表 / 追記欄 / 入力欄)── 掛けないと余韻の間に色が残ったまま、期限でブツっと消える
+    const grads = [...neon.matchAll(/radial-gradient\(circle var\(--neon-r\) at var\(--gx, -500px\) var\(--gy, -500px\), ([^;]*)/g)].map((m) => m[1]!);
+    const bg = grads.filter((g) => g.includes('--neon-alpha'));
+    expect(bg.length, '濃さを掛けた背景の光が 4 か所でない').toBe(4);
+    for (const g of bg) expect(g, '芯の色に濃さを掛けていない').toMatch(/color-mix\(in srgb, var\(--neon-core\) calc\(\d+% \* var\(--neon-alpha\)\), transparent\)/);
+  });
+
+  it('🔴 余韻の印の間も、背景・疑似要素の描く規則が当たる(近い印と同じ規則が両方の印を受ける)', () => {
+    const sels = rules(neon).map(([sel]) => sel);
+    for (const want of [
+      "[data-pkc-log-card='solo']:is([data-pkc-glow-near], [data-pkc-glow-out])",
+      "[data-pkc-render-lang='csv']):not([data-pkc-log-card]):is([data-pkc-glow-near], [data-pkc-glow-out])",
+      "[data-pkc-field='append-form']:is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out]):not(:focus-within)",
+      ':is(input, textarea, select):is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out]):not(:focus-visible)',
+      'blockquote:not(.pkc-section-callout):is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out])::before',
+    ])
+      expect(sels.some((s) => s.includes(want)), `${want} が無い`).toBe(true);
+  });
+
+  it('🔴 キーボードのフォーカスは遅らせない: フォーカスの線の規則は `transition` を持たない', () => {
+    const focus = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((m) => /:focus-visible|:focus-within|\[data-pkc-focused\]/.test(m[1]!) && /var\(--neon\)/.test(m[2]!));
+    expect(focus.length, 'フォーカスの線の規則が見つからない(空振り)').toBeGreaterThanOrEqual(3);
+    for (const m of focus) expect(m[2], `${m[1]!.trim().slice(0, 60)}: フォーカスの線が遅れる`).not.toMatch(/transition/);
+  });
+
+  it('🔴 印刷・強制色に余韻の規則・@starting-style は出ない(画面 + 強制色なしの塊だけ)', () => {
+    const outside = withoutMedia(css);
+    expect(outside).not.toContain('[data-pkc-glow-out]');
+    expect(outside).not.toContain('@starting-style');
+    expect(atBlock(css, '@media (forced-colors: active)').body).not.toContain('glow');
   });
 });

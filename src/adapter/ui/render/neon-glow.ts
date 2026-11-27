@@ -28,15 +28,30 @@
  *   (本文のブロックを対象に入れた分の定常コストを増やさない)。観測器が無い環境では全部を候補にする。
  * - ⚠ 変数は**光る側のカード 1 枚**にだけ書く(`:root` / ゾーンへ書くと全子孫の style を計算し直す ── 実測 40 秒 / 600 回)。
  *
+ * ## 🔴 点き方・消え方(#2096)
+ *
+ * - 点く: 印(`NEAR_ATTR`)を付けた瞬間ではなく、CSS が `NEON_ENTER_DELAY_MS` 溜めてから `NEON_ENTER_DURATION_MS` かけて浮かび上がらせる。
+ * - 素通り: 溜めの間(`NEON_ENTER_DELAY_MS` 未満)に離れた物は、まだ光っていないので**即座に**印も座標も消す(余韻を出さない・タイマーも張らない)。
+ * - 余韻: 光った後に離れた物は、印を `OUT_ATTR` へ付け替え、**最後の局所座標を残したまま** `NEON_LEAVE_DURATION_MS` かけて消す。
+ *   期限が来たら印・座標を消す。⚠ 片付けのタイマーは全体で**高々 1 本**(最も早い期限へ)。余韻が 0 件になったら止める(常駐 0)。
+ * - 余韻の途中で再び近づいた物は、`OUT_ATTR` を外して `NEAR_ATTR` へ戻す(途中の明るさから戻る。片付けの予定も外す)。
+ * - 余韻を出さずに即座に全部消す: 環境が付けない側へ変わった(動きを減らす設定など)/ スマホ用画面 / `destroy` / ゾーンの差し替え /
+ *   画面の外へ出た物 / 切り離された物。
+ *
  * 呼び手: `main.ts`(`installNeonGlow` と、描き直しの後の `revalidateNeonGlow`)と、版面が入れ替わるたびに通る
  * `rail.ts` の `paintRail`(`syncNeonPhone`)。
  */
-import { createRectCache, mayGlow, nearCards, NEON_RADIUS, type CardRect } from '@features/neon/near-cards';
+import { createRectCache, mayGlow, nearCards, NEON_ENTER_DELAY_MS, NEON_LEAVE_DURATION_MS, NEON_RADIUS, type CardRect } from '@features/neon/near-cards';
 
 /** 光らせてよい環境。⚠ 3 条件を 1 本の問いにまとめる(どれか 1 つでも外れたら付けない)。 */
 export const GLOW_QUERY = '(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)';
 /** 近いカードに付く印(CSS が読む)。 */
 export const NEAR_ATTR = 'data-pkc-glow-near';
+/**
+ * 余韻を残して消えている間だけ付く印(#2096。CSS が読む)。最後の局所座標は残したまま、`NEON_LEAVE_DURATION_MS` 後に印ごと消す。
+ * ⚠ `NEAR_ATTR` と同時には付かない(近い ↔ 余韻 は排他)。
+ */
+export const OUT_ATTR = 'data-pkc-glow-out';
 
 /** ゾーンの中で光る物の 1 種類(大きさの違う物が 1 つのゾーンに混ざるので、半径は種類ごと)。 */
 export interface NeonTarget {
@@ -100,6 +115,8 @@ export interface NeonGlow {
   listening(): boolean;
   /** いまポインタがゾーンに入っていて、`pointermove` などを付けているか。 */
   inZone(): boolean;
+  /** 余韻を残して消えている物の数(test / smoke の観測点)。 */
+  fading(): number;
   /**
    * 描き直しでゾーンの要素が差し替わったか(切り離されたか)を同期で確かめ、そのときだけ次のコマで付け直す(ポインタが止まっていても)。
    * ゾーンの外にいるとき・ゾーンが生きているときは何もしない(仕事 0)。呼び手: `main.ts` の状態の通知(描き直しの後)。
@@ -113,11 +130,22 @@ const ZONE_BOX_EVERY_MS = 200;
 
 type Item = CardRect & { readonly el: HTMLElement };
 
+/** 余韻の片付けのタイマー(差し替え口。unit が時刻を進めるため)。 */
+export interface NeonTimers {
+  set(fn: () => void, ms: number): unknown;
+  clear(id: unknown): void;
+}
+
 /**
  * @param mm 差し替え口(unit)。既定は window の `matchMedia`(無い / 投げる環境では**付けない側**へ倒す)
+ * @param timers 差し替え口(unit)。既定は window の `setTimeout` / `clearTimeout`
  */
-export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonGlow {
+export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null, timers?: NeonTimers): NeonGlow {
   const view = doc.defaultView;
+  const tm: NeonTimers = timers ?? {
+    set: (fn, ms) => view?.setTimeout(fn, ms),
+    clear: (id) => view?.clearTimeout(id as number),
+  };
   const raf = view?.requestAnimationFrame?.bind(view);
   const caf = view?.cancelAnimationFrame?.bind(view);
   let media: MediaLike | null = null;
@@ -147,8 +175,13 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
   const watched = new Set<HTMLElement>();
   /** 観測器が「画面に出ていない」と教えた候補(教えられるまでは「出ている」として扱う ── 光り損ねない側へ倒す)。 */
   const offscreen = new Set<HTMLElement>();
-  /** 光っているカード(`ro` で大きさも見ている)。 */
-  const lit = new Map<HTMLElement, { gx: number; gy: number }>();
+  /** 光っているカード(`ro` で大きさも見ている)。`since` は近づいた時刻(素通りかを見分ける)。 */
+  const lit = new Map<HTMLElement, { gx: number; gy: number; since: number }>();
+  /** 余韻を残して消えている物と、片付ける期限(`now()` の値)。 */
+  const fading = new Map<HTMLElement, number>();
+  /** 片付けのタイマー(全体で高々 1 本)と、その期限。 */
+  let fadeTimer: unknown = null;
+  let fadeTimerDue = 0;
   /** `ro` に付けた直後で、最初の通知(いまの大きさ)をまだ受けていないカード。 */
   const fresh = new Set<HTMLElement>();
   /** 次のコマで、ゾーンの差し替えを確かめるか。 */
@@ -195,16 +228,68 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     return out;
   });
 
-  const clearOne = (el: HTMLElement): void => {
+  /** 即座に消す(印 2 つ・局所座標・大きさの見張り・余韻の予定)。 */
+  const clearNow = (el: HTMLElement): void => {
     ro?.unobserve(el);
     fresh.delete(el);
+    fading.delete(el);
     el.style.removeProperty('--gx');
     el.style.removeProperty('--gy');
     el.removeAttribute(NEAR_ATTR);
+    el.removeAttribute(OUT_ATTR);
   };
-  const clearAll = (): void => {
-    for (const el of lit.keys()) clearOne(el);
+  const stopFadeTimer = (): void => {
+    if (fadeTimer !== null) tm.clear(fadeTimer);
+    fadeTimer = null;
+  };
+  /** 片付けのタイマーを、余韻の最も早い期限へ 1 本だけ張る(余韻が 0 件なら止める)。 */
+  const armFade = (): void => {
+    if (fading.size === 0) {
+      stopFadeTimer();
+      return;
+    }
+    let due = Infinity;
+    for (const d of fading.values()) due = Math.min(due, d);
+    // 張ってあるタイマーの方が早ければそのまま(鳴ったときに残りへ張り直す)
+    if (fadeTimer !== null && fadeTimerDue <= due) return;
+    stopFadeTimer();
+    fadeTimerDue = due;
+    fadeTimer = tm.set(onFadeTimer, Math.max(0, due - now()));
+  };
+  function onFadeTimer(): void {
+    fadeTimer = null;
+    // 🔴 片付ける前に届いている記録は他の誰かの変更 ── 汚れにしてから、自分の片付けの記録だけを捨てる(でないと片付けのたびに全部測り直す)
+    if (mo !== null && mo.takeRecords().length > 0) markDirty();
+    const t = now();
+    for (const [el, due] of [...fading]) if (due <= t + 1 || !el.isConnected) clearNow(el);
+    mo?.takeRecords();
+    armFade();
+  }
+  /** 近くでなくなった物を消す ── 素通り(まだ光っていない)なら即座に、光った後なら余韻を残して。 */
+  const fadeOut = (el: HTMLElement): void => {
+    const rec = lit.get(el);
+    lit.delete(el);
+    const t = now();
+    if (rec === undefined || t - rec.since < NEON_ENTER_DELAY_MS || !el.isConnected) {
+      clearNow(el);
+      return;
+    }
+    ro?.unobserve(el);
+    fresh.delete(el);
+    // ⚠ 局所座標(`--gx` / `--gy`)は残す ── 消すと光の中心が画面の外へ飛び、余韻にならない
+    el.removeAttribute(NEAR_ATTR);
+    el.setAttribute(OUT_ATTR, '');
+    fading.set(el, t + NEON_LEAVE_DURATION_MS);
+  };
+  /** 全部消す。`immediate` なら余韻も残さず、余韻の途中の物もタイマーも消す。 */
+  const clearAll = (immediate: boolean): void => {
+    for (const el of [...lit.keys()]) {
+      if (immediate) clearNow(el);
+      else fadeOut(el);
+    }
     lit.clear();
+    if (immediate) for (const el of [...fading.keys()]) clearNow(el);
+    armFade();
   };
 
   const paint = (): void => {
@@ -215,7 +300,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     }
     if (zone === null || spec === null || !known) return;
     if (!zone.isConnected) {
-      leave();
+      leave(true);
       return;
     }
     // 🔴 自分の書き込みの記録は、コマの終わりに `takeRecords()` で捨てる(下)── だから、まだ届いていない記録は**全部、他の誰かの変更**
@@ -238,9 +323,12 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       next.add(el);
       const prev = lit.get(el);
       if (prev !== undefined && prev.gx === n.gx && prev.gy === n.gy) continue;
+      // 余韻の途中で再び近づいた ── 片付けの予定を外し、光った物として戻す(すぐ離れても余韻を残す)
+      const revived = prev === undefined && fading.delete(el);
       el.style.setProperty('--gx', `${n.gx}px`);
       el.style.setProperty('--gy', `${n.gy}px`);
       if (!el.hasAttribute(NEAR_ATTR)) {
+        if (revived) el.removeAttribute(OUT_ATTR);
         el.setAttribute(NEAR_ATTR, '');
         // 光っている間だけ、そのカードの大きさも見る(画像・字体の読み込みで伸びても測り直す)
         if (ro !== null) {
@@ -248,13 +336,13 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
           ro.observe(el);
         }
       }
-      lit.set(el, { gx: n.gx, gy: n.gy });
+      lit.set(el, { gx: n.gx, gy: n.gy, since: prev?.since ?? (revived ? t - NEON_ENTER_DELAY_MS : t) });
     }
     for (const el of [...lit.keys()]) {
       if (next.has(el)) continue;
-      clearOne(el);
-      lit.delete(el);
+      fadeOut(el);
     }
+    armFade();
     mo?.takeRecords();
   };
   const schedule = (): void => {
@@ -300,10 +388,11 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       else if (!offscreen.has(el)) {
         offscreen.add(el);
         changed = true;
-        // 画面の外へ出た物に光が残らない
-        if (lit.has(el)) {
-          clearOne(el);
+        // 画面の外へ出た物に光が残らない(余韻も残さない)
+        if (lit.has(el) || fading.has(el)) {
+          clearNow(el);
           lit.delete(el);
+          armFade();
         }
       }
     }
@@ -318,7 +407,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     py = e.clientY;
     known = true;
     z.addEventListener('pointermove', onMove, { passive: true });
-    z.addEventListener('pointerleave', leave);
+    z.addEventListener('pointerleave', onZoneLeave);
     view?.addEventListener('scroll', markDirty, { capture: true, passive: true });
     view?.addEventListener('resize', markDirty);
     doc.fonts?.addEventListener?.('loadingdone', onFonts);
@@ -334,10 +423,17 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     }
     schedule();
   };
-  function leave(): void {
-    if (zone === null) return;
+  /**
+   * ゾーンから出る。`immediate` が偽(ふつうに出た)なら光った物は余韻を残して消え、真(付けない環境へ変わった・差し替え・破棄)なら即座に全部消す。
+   * ⚠ ゾーンの外にいても、`immediate` なら余韻の途中の物を消す(ゾーンを出た後に動きを減らす設定へ変わったとき)。
+   */
+  function leave(immediate: boolean): void {
+    if (zone === null) {
+      if (immediate) clearAll(true);
+      return;
+    }
     zone.removeEventListener('pointermove', onMove);
-    zone.removeEventListener('pointerleave', leave);
+    zone.removeEventListener('pointerleave', onZoneLeave);
     view?.removeEventListener('scroll', markDirty, { capture: true });
     view?.removeEventListener('resize', markDirty);
     doc.fonts?.removeEventListener?.('loadingdone', onFonts);
@@ -351,7 +447,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     offscreen.clear();
     if (frame !== 0) caf?.(frame);
     frame = 0;
-    clearAll();
+    clearAll(immediate);
     cache.reset();
     fresh.clear();
     zoneBox = null;
@@ -359,13 +455,17 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     spec = null;
     known = false;
   }
+  /** ゾーンの `pointerleave`(ふつうに出た ── 余韻を残す)。 */
+  function onZoneLeave(): void {
+    leave(false);
+  }
 
   /** 差し替わったゾーンから出て、いまのポインタの下にゾーンがあれば入り直す(ポインタが止まっていても光る)。 */
   function refresh(): void {
     if (zone === null || zone.isConnected) return;
     const x = px;
     const y = py;
-    leave();
+    leave(true);
     const t = doc.elementFromPoint?.(x, y);
     if (t === null || t === undefined) return;
     const hit = zoneOf(t);
@@ -379,13 +479,13 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     if (zone !== null && zone.contains(t)) return;
     const hit = zoneOf(t);
     if (hit !== null && hit.el === zone) return;
-    leave();
+    leave(false);
     if (hit !== null) enter(hit.el, hit.spec, e);
   };
 
   /** ポインタがウィンドウの外へ出た ── 最後の位置を忘れ、光を消す(古い座標で描き直しの後に光らせない)。 */
   const onWindowLeave = (): void => {
-    leave();
+    leave(false);
     px = 0;
     py = 0;
   };
@@ -408,7 +508,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     } else {
       doc.removeEventListener('pointerover', onOver);
       doc.documentElement.removeEventListener('pointerleave', onWindowLeave);
-      leave();
+      leave(true);
     }
   };
   media?.addEventListener?.('change', apply);
@@ -421,6 +521,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
     },
     listening: () => on,
     inZone: () => zone !== null,
+    fading: () => fading.size,
     revalidate: () => {
       // 同期で確かめ、差し替わった(切り離された)ときだけ次のコマを予約する ── 普通の状態の通知は rAF を 0 本
       if (zone === null || zone.isConnected) return;
@@ -432,7 +533,7 @@ export function createNeonGlow(doc: Document, mm?: NeonMatchMedia | null): NeonG
       on = false;
       doc.removeEventListener('pointerover', onOver);
       doc.documentElement.removeEventListener('pointerleave', onWindowLeave);
-      leave();
+      leave(true);
     },
   };
 }

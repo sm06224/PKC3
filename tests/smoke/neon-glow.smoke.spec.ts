@@ -9,11 +9,13 @@
  * | 🔴 スクロールしてもポインタが止まっていれば、光の位置(`--gy`)が追いつく(`pointermove` 無し) | スクロールの `scroll` → rAF の連携 |
  * | 🔴 畳み(DOM の変化)の後も、動かさずに古い矩形で光り続けない | MutationObserver → 次のコマ |
  * | 🔴 動きを減らす設定 / スマホの幅では、動かしても印が一度も付かない | 環境の問い(`matchMedia`)と版面 |
+ * | 🔴 **点き方・消え方(#2096)**: 近づいた直後は 0 から(溜め 45ms → 220ms)、離れた直後は余韻の印と余韻の画素が残り、260ms 後に印 0 件・静止の画素へ戻る。フォーカスの線は待たずに出る | `transition` / `@starting-style` は描いて初めて効く(遷移は `getAnimations` で止めて画素を撮る)|
  * | 人が目で見る明暗のスクリーンショット(`PKC3_SHOT_DIR` があれば DPR 2・1440×900 で保存) | 人が見る物 |
  */
 import { test, expect, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, dismissAnnounce, pixels, changed } from './helpers';
+import { NEON_ENTER_DELAY_MS, NEON_ENTER_DURATION_MS, NEON_LEAVE_DURATION_MS } from '../../src/features/neon/near-cards';
 
 test.use({ deviceScaleFactor: 2 });
 
@@ -23,6 +25,10 @@ test.beforeEach(async ({ page }) => {
 
 const BODY = '[data-pkc-region="detail"] [data-pkc-field="detail-body"]';
 const NEAR = '[data-pkc-glow-near]';
+/** 光っている物(近い印 + 余韻の印)。⚠ 静止の画素を撮る前は、余韻(`data-pkc-glow-out`)も消えるのを待つ(#2096)。 */
+const GLOW = '[data-pkc-glow-near], [data-pkc-glow-out]';
+/** 満点灯まで待つ時間(溜め + 浮かび上がり + 余裕)。 */
+const LIT_MS = NEON_ENTER_DELAY_MS + NEON_ENTER_DURATION_MS + 150;
 /** どのゾーンでもない所(左のペインの一覧の上。バーは x < 40)。 */
 const OUT_X = 150;
 const OUT_Y = 450;
@@ -79,7 +85,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
 
   const cardSel = `${BODY} > h2[data-pkc-log-card="first"], ${BODY} > h2[data-pkc-log-card="solo"]`;
   await page.mouse.move(OUT_X, OUT_Y); // ゾーンの外(左のペインの一覧の上)
-  await expect(page.locator(NEAR), '入る前から光っている').toHaveCount(0);
+  await expect(page.locator(GLOW), '入る前から光っている').toHaveCount(0);
 
   // ① 静止の画素(ポインタがゾーンの外)── 2 つ目の記録の上の辺と、同じカードの内側の地
   const target = await rectOf(page, cardSel, 1);
@@ -140,7 +146,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
   expect(probe.gx.every((v) => /^-?\d+px$/.test(v)), `局所座標が px でない: ${probe.gx.join(',')}`).toBe(true);
 
   // ③ 🔴 画素: 輪郭は変わり(光った)、内側の地は 1 画素も変わらない
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(LIT_MS);
   const ringLit = await pixels(page, ringClip);
   const groundLit = await pixels(page, groundClip);
   expect(changed(ringRest, ringLit), '輪郭の画素が静止のときと同じ(光っていない)').toBeGreaterThan(ringClip.width * 2 * 0.5);
@@ -192,7 +198,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     const blk = page.locator(`${BODY} > .pkc-md-block[data-pkc-log-card]`).filter({ has: page.locator(kind) }).first();
     await blk.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.mouse.move(OUT_X, OUT_Y);
-    await expect(page.locator(NEAR)).toHaveCount(0);
+    await expect(page.locator(GLOW)).toHaveCount(0);
     const bb = await blk.evaluate((el) => {
       const r = el.getBoundingClientRect();
       return { x: r.x, y: r.y, w: r.width, h: r.height };
@@ -207,7 +213,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     await page.mouse.move(bb.x + 60, bb.y + bb.h / 2 - 40);
     await page.mouse.move(bb.x + 4, bb.y + bb.h / 2);
     await expect.poll(() => blk.evaluate((el) => el.hasAttribute('data-pkc-glow-near')), { message: `${kind} の器が光らない` }).toBe(true);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(LIT_MS);
     const litE = await pixels(page, edge);
     const litI = await pixels(page, inner);
     const rows = (bb.h - 28) * 2; // DPR 2
@@ -218,7 +224,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     const restR = await pixels(page, edgeR);
     await page.mouse.move(bb.x + bb.w - 40, bb.y + bb.h / 2);
     await page.mouse.move(bb.x + bb.w - 4, bb.y + bb.h / 2);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(LIT_MS);
     expect(changed(restR, await pixels(page, edgeR)), `${kind} の器の右の輪郭が光らない`).toBeGreaterThan(rows * 0.9);
     // 横スクロールしても輪郭は器に張り付いたまま(背景は動かない)
     await blk.evaluate((el) => {
@@ -228,7 +234,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     expect(changed(restR, await pixels(page, edgeR)), `${kind}: 横スクロールで輪郭が消えた`).toBeGreaterThan(rows * 0.9);
     // 🔴 ゾーンの入れ子: ポインタが**外から直接**器の上へ入っても(1 回の移動)、ログのゾーンが握り、器(ログのカード)が光る
     await page.mouse.move(OUT_X, OUT_Y);
-    await expect(page.locator(NEAR)).toHaveCount(0);
+    await expect(page.locator(GLOW)).toHaveCount(0);
     await page.mouse.move(bb.x + 30, bb.y + bb.h / 2);
     await expect
       .poll(() => page.locator(`${BODY} > [data-pkc-log-card][data-pkc-glow-near]`).count(), { message: `${kind}: 器の上へ直接入ってもログのカードが光らない(内側のゾーンに奪われた)` })
@@ -244,7 +250,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     const det = page.locator(`${BODY} > details.pkc-details[data-pkc-log-card]`).first();
     await det.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.mouse.move(OUT_X, OUT_Y);
-    await expect(page.locator(NEAR)).toHaveCount(0);
+    await expect(page.locator(GLOW)).toHaveCount(0);
     const d = await det.evaluate((el) => {
       const r = el.getBoundingClientRect();
       return { x: r.x, y: r.y, h: r.height };
@@ -260,7 +266,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
     await page.mouse.move(d.x + 60, d.y + d.h / 2 - 30);
     await page.mouse.move(d.x + 4, d.y + d.h / 2);
     await expect.poll(() => det.evaluate((el) => el.hasAttribute('data-pkc-glow-near')), { message: '折りたたみの塊が光らない' }).toBe(true);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(LIT_MS);
     expect(changed(restE, await pixels(page, edge)), '折りたたみの輪郭がカードの縁(±1px)に出ていない').toBeGreaterThan((d.h - 20) * 2 * 0.8);
     expect(changed(restI, await pixels(page, inside)), '折りたたみの輪郭が内側の余白のぶん内へ寄っている(カードの縁から 8px 以上内側が変わった)').toBe(0);
     await page.mouse.move(OUT_X, OUT_Y);
@@ -268,7 +274,7 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
 
   // ⑥ 離れる: ゾーンの外へ出ると全部消え、座標の変数も残らない
   await page.mouse.move(OUT_X, OUT_Y);
-  await expect(page.locator(NEAR), '出ても光が残る').toHaveCount(0);
+  await expect(page.locator(GLOW), '出ても光が残る').toHaveCount(0);
   expect(await page.evaluate(() => document.querySelectorAll('[data-pkc-log-days] > [style*="--gx"]').length), '座標が残った').toBe(0);
 
   // ⑦ 情報ペインのカードも同じ仕組みで光る
@@ -300,12 +306,12 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
 
   // ⑨ 🔴 動きを減らす設定: 動かしても印が一度も付かない(リスナーごと外れる)
   await page.mouse.move(OUT_X, OUT_Y);
-  await expect(page.locator(NEAR)).toHaveCount(0);
+  await expect(page.locator(GLOW)).toHaveCount(0);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const t2 = await rectOf(page, cardSel, 3);
   for (let i = 0; i < 6; i += 1) await page.mouse.move(t2.x + 100 + i * 20, t2.y + 3 + (i % 2));
-  await page.waitForTimeout(150);
-  await expect(page.locator(NEAR), '動きを減らす設定なのに光った').toHaveCount(0);
+  await page.waitForTimeout(LIT_MS);
+  await expect(page.locator(GLOW), '動きを減らす設定なのに光った').toHaveCount(0);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   // 戻すと付く(環境の変化に追従する)
   await page.mouse.move(OUT_X, OUT_Y);
@@ -318,13 +324,13 @@ test('🔴 ネオン: 近いカードの輪郭だけが光り、内側の地は�
   await page.mouse.move(OUT_X, OUT_Y);
   await page.setViewportSize({ width: 390, height: 800 });
   await expect(page.locator('[data-pkc-region="shell"]')).toHaveAttribute('data-pkc-layout', 'phone');
-  await expect(page.locator(NEAR)).toHaveCount(0);
+  await expect(page.locator(GLOW)).toHaveCount(0);
   const body = await page.locator(`${BODY} > [data-pkc-log-card]`).first().boundingBox();
   if (body !== null) {
     for (let i = 0; i < 6; i += 1) await page.mouse.move(body.x + 40 + i * 10, body.y + 4 + (i % 2));
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(LIT_MS);
   }
-  await expect(page.locator(NEAR), 'スマホの幅で光った').toHaveCount(0);
+  await expect(page.locator(GLOW), 'スマホの幅で光った').toHaveCount(0);
   expect(errors, `console / page error: ${errors.join(' | ')}`).toEqual([]);
 });
 
@@ -357,7 +363,7 @@ async function hoverNear(page: Page, sel: string, x: number, y: number): Promise
   await page.mouse.move(x + 40, y + 24);
   await page.mouse.move(x, y);
   await expect.poll(() => page.locator(sel).first().evaluate((el) => el.hasAttribute('data-pkc-glow-near')), { message: `${sel} が光らない` }).toBe(true);
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(LIT_MS);
 }
 
 /** 縁の帯の画素が、光で変わったか(静止 → 近づけた)。`inner` は内側の地: 1 画素も変わらない。 */
@@ -368,7 +374,7 @@ async function expectEdgeGlows(
   pick: (b: Box) => { pointer: { x: number; y: number }; edge: { x: number; y: number; width: number; height: number }; inner: { x: number; y: number; width: number; height: number }; minChanged: number },
 ): Promise<void> {
   await page.mouse.move(OUT_X, OUT_Y);
-  await expect(page.locator(NEAR), `${name}: ポインタを外しても光が残る`).toHaveCount(0);
+  await expect(page.locator(GLOW), `${name}: ポインタを外しても光が残る`).toHaveCount(0);
   const b = await boxOf(page, sel);
   const p = pick(b);
   const restE = await pixels(page, p.edge);
@@ -389,7 +395,7 @@ async function expectEdgeGlows(
 let currentTheme = 'light';
 
 test('🔴 ネオン(本文のブロック・入力欄): コード・表・図・引用・折りたたみ・入力欄の縁が光り、内側は変わらない / スクロールする表の縁も (Stage 2 PR-2)', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const errors = collectPageErrors(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
@@ -407,6 +413,9 @@ test('🔴 ネオン(本文のブロック・入力欄): コード・表・図�
   const CARD = `${BODY} .pkc-md-block[data-pkc-render-lang="mermaid"]`;
   const QUOTE = `${BODY} blockquote`;
   const DETAILS = `${BODY} .pkc-details`;
+
+  // ⓪ 🔴 点き方・消え方(#2096)
+  await expectFadePhases(page);
 
   for (const theme of ['light', 'dark'] as const) {
     if (theme === 'dark') {
@@ -487,10 +496,11 @@ test('🔴 ネオン(本文のブロック・入力欄): コード・表・図�
     const b = await boxOf(page, TABLE);
     const edgeR = { x: b.x + b.w - 2, y: b.y + 8, width: 2, height: b.h - 16 };
     await page.mouse.move(OUT_X, OUT_Y);
+    await expect(page.locator(GLOW)).toHaveCount(0);
     const rest = await pixels(page, edgeR);
     await page.mouse.move(b.x + b.w - 40, b.y + b.h / 2);
     await page.mouse.move(b.x + b.w - 2, b.y + b.h / 2);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(LIT_MS);
     const lit = await pixels(page, edgeR);
     expect(changed(rest, lit), '表の右の縁が光らない').toBeGreaterThan((b.h - 16) * 2 * 0.8);
     await blk.evaluate((el) => {
@@ -564,17 +574,210 @@ test('🔴 ネオン(本文のブロック・入力欄): コード・表・図�
     const top = { x: wb.x + 80, y: wb.y, width: 240, height: 2 };
     const restTop = await pixels(page, top);
     await input.focus();
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(LIT_MS);
     const focusTop = await pixels(page, top);
     expect(changed(restTop, focusTop), 'SQL の欄のフォーカスの線が出ない').toBeGreaterThan(240 * 2 * 4 * 0.7);
     expect(await input.evaluate((el) => getComputedStyle(el).outlineStyle), 'SQL の欄に outline が残っている').toBe('none');
     await page.mouse.move(wb.x + 330, wb.y + 30);
     await page.mouse.move(wb.x + 200, wb.y + 2);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(LIT_MS);
     expect(changed(focusTop, await pixels(page, top)), 'SQL の欄のフォーカス中に近接の光が重なった').toBe(0);
   }
   expect(errors, `console / page error: ${errors.join(' | ')}`).toEqual([]);
 });
+
+/** 画素の差の大きさ(明るさの差の総和)。`changed` は「変わった画素の数」なので、薄い光と満点灯を区別できない。 */
+const energy = (a: number[], b: number[]): number => a.reduce((sum, v, i) => sum + Math.abs(v - (b[i] ?? 0)), 0);
+
+/**
+ * 🔴 遷移(`transition`)を**止めて撮る**ための仕込み(#2096)。時間に頼ると CI の遅さで揺れるので:
+ * - 印(`attr`)が付いた瞬間(観測器のマイクロタスク = 描画の前)に、その要素と疑似要素の遷移(`opacity` / `--neon-alpha`)を `currentTime = 0` で止め、時間の設定を控える。
+ * - `holdFade` なら、余韻の片付けのタイマー(`NEON_LEAVE_DURATION_MS` 付近の `setTimeout`)を預かる(撮り終えるまで印が消えない)。
+ */
+async function armFreeze(page: Page, sel: string, attr: string, holdFade = false): Promise<void> {
+  await page.evaluate(
+    ([s, a, hold, leave]) => {
+      const el = document.querySelector(s as string) as HTMLElement;
+      const w = window as unknown as Record<string, unknown>;
+      w.__neonT = null;
+      w.__neonAnims = [];
+      w.__held = [];
+      if (hold === true && w.__realST === undefined) {
+        w.__realST = window.setTimeout;
+        (window as unknown as { setTimeout: unknown }).setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+          if (w.__holdFade === true && typeof ms === 'number' && ms > (leave as number) - 30 && ms <= (leave as number)) {
+            (w.__held as [() => void, number][]).push([fn, ms]);
+            return 0;
+          }
+          return (w.__realST as typeof setTimeout)(fn, ms, ...rest);
+        }) as typeof setTimeout;
+      }
+      w.__holdFade = hold;
+      const mo = new MutationObserver(() => {
+        if (!el.hasAttribute(a as string)) return;
+        mo.disconnect();
+        // ⚠ その要素自身と疑似要素の遷移だけ(子のボタンの `opacity` の遷移などを拾わない)
+        const anims = el.getAnimations({ subtree: true }).filter((x) => x instanceof CSSTransition && (x.effect as KeyframeEffect | null)?.target === el && /^(opacity|--neon-alpha)$/.test(x.transitionProperty)) as CSSTransition[];
+        for (const x of anims) {
+          x.pause();
+          x.currentTime = 0;
+        }
+        w.__neonAnims = anims;
+        w.__neonT = anims.map((x) => {
+          const t = x.effect!.getTiming();
+          return { prop: x.transitionProperty, delay: t.delay, duration: t.duration, easing: t.easing };
+        });
+      });
+      mo.observe(el, { attributes: true, attributeFilter: [a as string] });
+    },
+    [sel, attr, holdFade, NEON_LEAVE_DURATION_MS] as const,
+  );
+}
+const timingsOf = (page: Page): Promise<{ prop: string; delay: number; duration: number; easing: string }[] | null> =>
+  page.evaluate(() => (window as unknown as { __neonT: { prop: string; delay: number; duration: number; easing: string }[] | null }).__neonT);
+/** 止めた遷移を時刻 `ms` へ(`finish` なら終わりへ)。 */
+const seek = (page: Page, ms: number | 'finish'): Promise<void> =>
+  page.evaluate(async (t) => {
+    for (const x of (window as unknown as { __neonAnims: CSSTransition[] }).__neonAnims) {
+      if (t === 'finish') x.finish();
+      else x.currentTime = t;
+    }
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  }, ms);
+
+/**
+ * 🔴 **点き方・消え方(#2096)**── 近づいた直後は 0 から溜め → 浮かび上がり、離れると余韻の印と画素が残って `NEON_LEAVE_DURATION_MS` 後に静止へ戻る
+ * (疑似要素・背景・入力欄の 3 方式 × 明 / 暗)。素通りは余韻の印も付かない。⚠ 起動を増やさない(本文のブロックの test の道中で呼ぶ)。終わると明るい配色へ戻す。
+ */
+async function expectFadePhases(page: Page): Promise<void> {
+
+  const cases = [
+    // 疑似要素の線(`opacity`。最初のコマは `@starting-style` で 0)
+    { name: 'code', sel: `${BODY} .pkc-md-block[data-pkc-md-block-kind="code"]:not([data-pkc-render-lang])`, prop: 'opacity', pick: (b: Box) => ({ pointer: { x: b.x + 4, y: b.y + b.h / 2 }, edge: { x: b.x, y: b.y + 6, width: 3, height: b.h - 12 } }) },
+    // 器自身の背景(`--neon-alpha`)
+    { name: 'table', sel: `${BODY} .pkc-md-block[data-pkc-md-block-kind="table"]`, prop: '--neon-alpha', pick: (b: Box) => ({ pointer: { x: b.x + 1, y: b.y + b.h / 2 }, edge: { x: b.x, y: b.y + 6, width: 2, height: b.h - 12 } }) },
+    // 入力欄の枠(`--neon-alpha`)
+    { name: 'find', sel: '[data-pkc-field="entry-filter"]', prop: '--neon-alpha', pick: (b: Box) => ({ pointer: { x: b.x + 60, y: b.y + 2 }, edge: { x: b.x + 20, y: b.y, width: 90, height: 2 } }) },
+  ];
+  // ⚠ 明 / 暗の両方で: 濃さ 0(近づいた直後・余韻の後)の画素が静止と同じ(地が塗られる・枠が消える、が無い)
+  for (const theme of ['light', 'dark'] as const)
+  for (const c0 of cases) {
+    const c = { ...c0, name: `${c0.name}(${theme})` };
+    if (c0 === cases[0]) {
+      await page.evaluate((t) => {
+        document.documentElement.setAttribute('data-pkc-theme', t);
+        document.documentElement.setAttribute('data-pkc-tone', t);
+      }, theme);
+      // 配色の切り替えの地の遷移(0.15s)が落ち着いてから静止を撮る
+      await page.waitForTimeout(700);
+    }
+    await page.mouse.move(OUT_X, OUT_Y);
+    await expect(page.locator(GLOW), `${c.name}: 検査の前提(静止)`).toHaveCount(0);
+    const b = await boxOf(page, c.sel);
+    const p = c.pick(b);
+    const rest = await pixels(page, p.edge);
+
+    // ① 近づいた直後(遷移の 0 で止める)── まだ光っていない
+    await armFreeze(page, c.sel, 'data-pkc-glow-near');
+    await page.mouse.move(p.pointer.x + 40, p.pointer.y + 24);
+    await page.mouse.move(p.pointer.x, p.pointer.y);
+    await expect.poll(() => timingsOf(page), { message: `${c.name}: 近い印が付かない / 遷移が無い` }).not.toBeNull();
+    const enter = (await timingsOf(page))!;
+    expect(enter.map((t) => t.prop), `${c.name}: 点き方の遷移が無い(いきなり満点灯)`).toContain(c.prop);
+    for (const t of enter) {
+      expect(t.delay, `${c.name}: 溜めが ${NEON_ENTER_DELAY_MS}ms でない`).toBe(NEON_ENTER_DELAY_MS);
+      expect(t.duration, `${c.name}: 浮かび上がりが ${NEON_ENTER_DURATION_MS}ms でない`).toBe(NEON_ENTER_DURATION_MS);
+      expect(t.easing).toBe('ease-out');
+    }
+    const start = await pixels(page, p.edge);
+    // ② 途中(溜め + 4 分の 1)── 光り始めているが満点灯より弱い
+    await seek(page, NEON_ENTER_DELAY_MS + NEON_ENTER_DURATION_MS / 4);
+    const mid = await pixels(page, p.edge);
+    // ③ 終わり ── 満点灯
+    await seek(page, 'finish');
+    await page.waitForTimeout(100);
+    const full = await pixels(page, p.edge);
+    const eStart = energy(rest, start);
+    const eMid = energy(rest, mid);
+    const eFull = energy(rest, full);
+    console.log(`[neon-fade] ${c.name}: start ${eStart} / mid ${eMid} / full ${eFull}`);
+    expect(eFull, `${c.name}: 満点灯で光っていない(空振り)`).toBeGreaterThan(0);
+    expect(eStart, `${c.name}: 近づいた直後にもう光っている(溜めが効いていない)`).toBeLessThan(eFull * 0.1);
+    expect(eMid, `${c.name}: 途中で光り始めていない`).toBeGreaterThan(eStart);
+    expect(eMid, `${c.name}: 途中なのに満点灯と同じ(浮かび上がっていない)`).toBeLessThan(eFull * 0.9);
+
+    // ④ 離れた直後(余韻の 0 で止め、片付けのタイマーを預かる)── 余韻の印が付き、画素は満点灯のまま残る
+    await armFreeze(page, c.sel, 'data-pkc-glow-out', true);
+    await page.mouse.move(OUT_X, OUT_Y);
+    await expect.poll(() => timingsOf(page), { message: `${c.name}: 余韻の印が付かない(即座に消えた)` }).not.toBeNull();
+    const leave = (await timingsOf(page))!;
+    expect(leave.map((t) => t.prop), `${c.name}: 余韻の遷移が無い`).toContain(c.prop);
+    for (const t of leave) {
+      expect(t.delay).toBe(0);
+      expect(t.duration, `${c.name}: 余韻が ${NEON_LEAVE_DURATION_MS}ms でない`).toBe(NEON_LEAVE_DURATION_MS);
+      expect(t.easing).toBe('ease-out');
+    }
+    expect(await page.locator(c.sel).first().evaluate((el) => [el.hasAttribute('data-pkc-glow-near'), el.hasAttribute('data-pkc-glow-out'), el.style.getPropertyValue('--gx') !== '']), `${c.name}: 余韻の間の印と座標`).toEqual([false, true, true]);
+    const after = await pixels(page, p.edge);
+    expect(energy(rest, after), `${c.name}: 離れた直後に余韻の画素が残らない(ブツっと消えた)`).toBeGreaterThan(eFull * 0.8);
+    // ⑤ 余韻を流し、片付けのタイマーを返す ── NEON_LEAVE_DURATION_MS 後に印 0 件・座標なし・静止の画素
+    const released = await page.evaluate(() => {
+      const w = window as unknown as { __neonAnims: CSSTransition[]; __held: [() => void, number][]; __holdFade: boolean; __realST: typeof setTimeout };
+      for (const x of w.__neonAnims) x.play();
+      w.__holdFade = false;
+      for (const [fn, ms] of w.__held) w.__realST(fn, ms);
+      return { n: w.__held.length, at: performance.now() };
+    });
+    expect(released.n, `${c.name}: 片付けのタイマーが 1 本でない`).toBe(1);
+    await expect(page.locator(GLOW), `${c.name}: 余韻の印が消えない`).toHaveCount(0);
+    const gone = await page.evaluate(() => performance.now());
+    expect(gone - released.at, `${c.name}: 余韻が ${NEON_LEAVE_DURATION_MS}ms より早く消えた`).toBeGreaterThanOrEqual(NEON_LEAVE_DURATION_MS - 30);
+    expect(await page.locator(c.sel).first().evaluate((el) => el.style.getPropertyValue('--gx') + el.style.getPropertyValue('--gy')), `${c.name}: 座標が残った`).toBe('');
+    await page.waitForTimeout(100);
+    expect(changed(rest, await pixels(page, p.edge)), `${c.name}: 余韻の後に静止の画素へ戻らない`).toBe(0);
+  }
+
+  // ⑥ 🔴 素通り: 溜めの間に離れた物は、余韻の印も付かない(チカつかない)── 近い印を見届けたらすぐ外す
+  {
+    const code = cases[0]!;
+    const b = await boxOf(page, code.sel);
+    await expect(page.locator(GLOW)).toHaveCount(0);
+    // ⚠ 実マウスの 2 回の移動は CI の遅さで 45ms を超えうる ── ページの中で、近づける → 1 コマ待つ → 外す を続けて打つ(溜めより必ず短い)
+    const seen = await page.evaluate(
+      async ([s, x, y, ox, oy]) => {
+        const el = document.querySelector(s as string) as HTMLElement;
+        const flags = { near: false, out: false, elapsed: 0 };
+        const mo = new MutationObserver(() => {
+          if (el.hasAttribute('data-pkc-glow-near')) flags.near = true;
+          if (el.hasAttribute('data-pkc-glow-out')) flags.out = true;
+        });
+        mo.observe(el, { attributes: true, attributeFilter: ['data-pkc-glow-near', 'data-pkc-glow-out'] });
+        const ev = (t: Element, cx: number, cy: number): boolean => t.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, clientX: cx, clientY: cy }));
+        const t0 = performance.now();
+        ev(el, x as number, y as number);
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
+        await new Promise<void>((r) => setTimeout(r, 0));
+        const outside = document.elementFromPoint(ox as number, oy as number)!;
+        ev(outside, ox as number, oy as number);
+        flags.elapsed = performance.now() - t0;
+        await new Promise<void>((r) => setTimeout(r, 400));
+        mo.disconnect();
+        return { ...flags, left: el.hasAttribute('data-pkc-glow-near') || el.hasAttribute('data-pkc-glow-out') || el.style.getPropertyValue('--gx') !== '' };
+      },
+      [code.sel, b.x + 4, b.y + b.h / 2, OUT_X, OUT_Y] as const,
+    );
+    expect(seen.near, '検査の前提: 近い印が付かなかった(空振り)').toBe(true);
+    expect(seen.elapsed, '検査の前提: 溜めより長くかかった').toBeLessThan(NEON_ENTER_DELAY_MS);
+    expect(seen.out, '素通りなのに余韻の印が付いた(チカつく)').toBe(false);
+    expect(seen.left, '素通りの後に印・座標が残った').toBe(false);
+  }
+  await page.evaluate(() => {
+    document.documentElement.setAttribute('data-pkc-theme', 'light');
+    document.documentElement.setAttribute('data-pkc-tone', 'light');
+  });
+  await page.waitForTimeout(700);
+  await page.mouse.move(OUT_X, OUT_Y);
+}
 
 test('🔴 フォーカス: キーボード(Tab)で入力欄・追記欄の枠に全周の静止した線が出る(二重の outline なし)/ フォーカスが近接の光に勝つ / 動きを減らす・スマホ幅でも静止の線は残り、近接の光は出ない (Stage 2 PR-2)', async ({ page }) => {
   test.setTimeout(120_000);
@@ -611,7 +814,11 @@ test('🔴 フォーカス: キーボード(Tab)で入力欄・追記欄の枠�
   await page.keyboard.press('Tab');
   await expect(page.locator(sel)).toBeFocused();
   expect(await page.locator(sel).evaluate((el) => el.matches(':focus-visible')), 'キーボードで入ったのに :focus-visible でない').toBe(true);
-  await page.waitForTimeout(150);
+  // 🔴 フォーカスの線は待たずに出る(#2096 の溜め・浮かび上がりは近接の光だけ)── 遷移が 1 つも無く、待たずに撮った画素で全周が出ている
+  expect(await page.locator(sel).evaluate((el) => el.getAnimations().length), 'フォーカスの線に遷移が掛かっている(遅れて出る)').toBe(0);
+  const f0 = await sides(sb);
+  ring(sb).forEach((r, i) => expect(changed(rest[i]!, f0[i]!), `フォーカスの線が ${r.name} の辺に即座に出ない`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.7));
+  await page.waitForTimeout(LIT_MS);
   const f1 = await sides(sb);
   ring(sb).forEach((r, i) => expect(changed(rest[i]!, f1[i]!), `選択欄のフォーカスの線が ${r.name} の辺に出ていない(全周でない)`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.7));
   expect(changed(restInner, await pixels(page, { x: sb.x + 8, y: sb.y + 7, width: 40, height: sb.h - 14 })), 'フォーカスで内側の地が変わった').toBe(0);
@@ -633,16 +840,17 @@ test('🔴 フォーカス: キーボード(Tab)で入力欄・追記欄の枠�
   await page.mouse.move(fb.x + fb.w / 2 + 30, fb.y + fb.h + 20);
   await page.mouse.move(fb.x + fb.w / 2, fb.y + 2);
   await expect.poll(() => page.locator(sel).evaluate((el) => el.hasAttribute('data-pkc-glow-near')), { message: '近接の印は付く(CSS が隠す)' }).toBe(true);
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(LIT_MS);
   expect(changed(focusedOnly, await pixels(page, { x: fb.x + 10, y: fb.y, width: fb.w - 20, height: 2 })), 'フォーカス中の縁に近接の光が重なった(フォーカスが勝っていない)').toBe(0);
   await page.mouse.move(OUT_X, OUT_Y);
+  await expect(page.locator(GLOW)).toHaveCount(0);
 
   // ③ 追記欄(`:focus-within` の包み): 枠の全周に線が出る。打つ欄は自分では線を引かない(二重にしない)
   await page.locator(sel).blur();
   const ab = await boxOf(page, '[data-pkc-field="append-form"]');
   const aRest = await sides(ab, 1);
   await page.focus('[data-pkc-field="append-input"]');
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(LIT_MS);
   const aF = await sides(ab, 1);
   ring(ab, 1).forEach((r, i) => expect(changed(aRest[i]!, aF[i]!), `追記欄のフォーカスの線が ${r.name} の辺に出ていない`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.6));
   const inner = await page.locator('[data-pkc-field="append-input"]').evaluate((el) => {
@@ -664,11 +872,11 @@ test('🔴 フォーカス: キーボード(Tab)で入力欄・追記欄の枠�
   const code = `${BODY} .pkc-md-block[data-pkc-md-block-kind="code"]`;
   const cb = await boxOf(page, code);
   for (let i = 0; i < 6; i += 1) await page.mouse.move(cb.x + 4 + i * 6, cb.y + cb.h / 2 + (i % 2));
-  await page.waitForTimeout(150);
-  await expect(page.locator(NEAR), '動きを減らす設定なのに近接の光が付いた').toHaveCount(0);
+  await page.waitForTimeout(LIT_MS);
+  await expect(page.locator(GLOW), '動きを減らす設定なのに近接の光が付いた').toHaveCount(0);
   await page.focus('[data-pkc-field="entry-filter"]');
   await page.keyboard.press('Tab');
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(LIT_MS);
   const f3 = await sides(sb);
   ring(sb).forEach((r, i) => expect(changed(rest[i]!, f3[i]!), `動きを減らす設定でフォーカスの線が ${r.name} の辺に出ない`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.7));
   await page.locator(sel).blur();
@@ -680,14 +888,14 @@ test('🔴 フォーカス: キーボード(Tab)で入力欄・追記欄の枠�
   await expect(page.locator('[data-pkc-region="shell"]')).toHaveAttribute('data-pkc-layout', 'phone');
   const pcb = await boxOf(page, code);
   for (let i = 0; i < 6; i += 1) await page.mouse.move(pcb.x + 4 + i * 6, pcb.y + pcb.h / 2 + (i % 2));
-  await page.waitForTimeout(150);
-  await expect(page.locator(NEAR), 'スマホの幅で近接の光が付いた').toHaveCount(0);
+  await page.waitForTimeout(LIT_MS);
+  await expect(page.locator(GLOW), 'スマホの幅で近接の光が付いた').toHaveCount(0);
   const pa = page.locator('[data-pkc-field="append-input"]');
   await expect(pa).toBeVisible();
   const pab = await boxOf(page, '[data-pkc-field="append-form"]');
   const pRest = await sides(pab, 1);
   await pa.focus();
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(LIT_MS);
   const pF = await sides(pab, 1);
   ring(pab, 1).forEach((r, i) => expect(changed(pRest[i]!, pF[i]!), `スマホ幅でフォーカスの線が ${r.name} の辺に出ない`).toBeGreaterThan(r.clip.width * r.clip.height * 4 * 0.6));
   await page.setViewportSize({ width: 1440, height: 900 });

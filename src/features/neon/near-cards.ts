@@ -30,6 +30,16 @@ export interface NearCard {
 /** ゾーンごとの光の半径(px)。⚠ `app.css` の `--neon-r`(`circle` の半径)と揃える ── `tests/adapter/neon-glow.test.ts` が突き合わせる。 */
 export const NEON_RADIUS = { log: 160, inspector: 160, rail: 56, block: 160, field: 96 } as const;
 
+/**
+ * 🔴 **点き方・消え方の時間(ms)**(#2096)── `render/neon-glow.ts` と `app.css` の `transition` の正本(`tests/adapter/neon-glow.test.ts` が突き合わせる)。
+ * - `NEON_ENTER_DELAY_MS`: 光り始めるまでの溜め。これより早く離れた(ポインタが素通りした)物は光らせず、余韻も残さない(チカつかない)。
+ * - `NEON_ENTER_DURATION_MS`: 溜めの後、浮かび上がる時間(`ease-out`)。
+ * - `NEON_LEAVE_DURATION_MS`: 離れた後、余韻を残して消える時間(`ease-out`)。過ぎたら印も局所座標も消す。
+ */
+export const NEON_ENTER_DELAY_MS = 45;
+export const NEON_ENTER_DURATION_MS = 220;
+export const NEON_LEAVE_DURATION_MS = 260;
+
 /** ポインタから矩形までの最短距離の 2 乗。 */
 export function distanceSqToRect(r: CardRect, x: number, y: number): number {
   const dx = Math.max(r.left - x, 0, x - r.right);
