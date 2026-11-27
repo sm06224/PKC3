@@ -89,7 +89,7 @@ import {
 } from '@features/markdown/place-notation';
 import { parsePlaceRotate } from '@features/markdown/place-rotate';
 import { isPlacePosition, PLACE_RECT_MAX } from '@features/markdown/place-rect';
-import { boardPointOf, canvasBackgroundTarget, isCanvasHost } from '@adapter/ui/render/canvas-viewport';
+import { boardPointOf, canvasBackgroundHost, canvasBackgroundTarget, isCanvasHost } from '@adapter/ui/render/canvas-viewport';
 import { graphViewOf } from '@adapter/ui/render/graph';
 import { GRAPH_BOARD_DEFAULT_TITLE, graphViewToBoardMarkdown } from '@features/canvas/graph-to-board';
 import {
@@ -9689,6 +9689,27 @@ function placeEditedElsewhereGate(
   );
 }
 
+/**
+ * 🔴 **画面の点を、付箋を置く器の座標へ写す**(#676 / PR-09 / Polish PR-C)── 右クリックの「ここに付箋を置く」と
+ * キャンバス背景のダブルクリックが**この 1 本**を引く(拡大・縮小を割り戻し、キャンバスでは負の所にも置ける)。
+ * ⚠ 通常表示では負を 0 で止める(描画は負を捨てる)。
+ */
+function boardPlacePoint(host: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
+  const p = boardPointOf(host, clientX, clientY);
+  const floor = isCanvasHost(host) ? -PLACE_RECT_MAX : 0;
+  return { x: Math.max(floor, Math.round(p.x)), y: Math.max(floor, Math.round(p.y)) };
+}
+
+/**
+ * 🔴 **その座標に空の付箋を置く**(`ADD_PLACE` 1 本)── 右クリックの `add-place` とキャンバス背景のダブルクリックが共有する
+ * (二重の書換経路を作らない §7)。別のタブの編集・閲覧専用・編集ロックは同じ門(`placeEditedElsewhereGate` → reducer)が断る。
+ */
+function addPlaceAt(dispatcher: Dispatcher, services: EditLockPort, lid: string, x: number, y: number): void {
+  placeEditedElsewhereGate(dispatcher, services, lid, '付箋を置けませんでした', () =>
+    dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y }),
+  );
+}
+
 /** 運ばれた札の名前(`fill stroke`)。⚠ 知らない名前は捨てる(受け手が書く札を閉じておく)。 */
 function styleKeysOf(target: Element): Array<'fill' | 'stroke'> {
   const raw = target.getAttribute(PLACE_STYLE_KEYS_ATTR) ?? '';
@@ -16160,10 +16181,7 @@ const ACTIONS: Record<string, ActionHandler> = {
       dispatcher.dispatch({ type: 'OP_FAILED', error: '置く位置を読めませんでした(本文を開き直してください)' });
       return;
     }
-    const lid = ob.lid;
-    placeEditedElsewhereGate(dispatcher, services, lid, '付箋を置けませんでした', () =>
-      dispatcher.dispatch({ type: 'ADD_PLACE', lid, x, y }),
-    );
+    addPlaceAt(dispatcher, services, ob.lid, x, y);
   },
   /**
    * 🔴 **ほかのノートを板に置く**(#1662 2。Gemini 裁定 = #1163 依頼 48 の 2 = A)── 題名で探して選ぶ小窓で 1 つ選ぶと、
@@ -25538,10 +25556,9 @@ export function bindActions(
         // 🔴 押した所を**器の座標**へ写して運ぶ(#676)── 受け手はメニューの器の中に居るので、
         //    押した瞬間の座標はここでしか読めない。負は 0 で止める(描画は負を捨てる)
         // 🔴 無限キャンバス(v4.0 Phase 2 / PR-09)では拡大・縮小を割り戻し、負の所にも置ける(式は `boardPointOf` 1 本)
-        const p = boardPointOf(host, ev.clientX, ev.clientY);
-        const floor = isCanvasHost(host) ? -PLACE_RECT_MAX : 0;
-        carry[MENU_X_ATTR] = String(Math.max(floor, Math.round(p.x)));
-        carry[MENU_Y_ATTR] = String(Math.max(floor, Math.round(p.y)));
+        const p = boardPlacePoint(host, ev.clientX, ev.clientY);
+        carry[MENU_X_ATTR] = String(p.x);
+        carry[MENU_Y_ATTR] = String(p.y);
       }
       openContextMenu(root, { x: ev.clientX, y: ev.clientY }, items, root.ownerDocument.activeElement, carry);
       return;
@@ -26259,6 +26276,23 @@ export function bindActions(
   const onDblClick = (ev: Event): void => {
     const t = ev.target as HTMLElement | null;
     if (t === null || t.closest('[data-pkc-field="cell-input"]') !== null) return;
+    /**
+     * 🔴 **無限キャンバスの何も無い背景をダブルクリックすると、その場所に付箋を置く**(v4.0 仕上げ Polish PR-C)。
+     * ⚠ 背景は枠そのもの・器そのものだけ(`canvasBackgroundHost`)── 付箋・線・ミニマップ・バー・手書き中は奪わない。
+     * 🔑 座標と書く口は右クリックの「ここに付箋を置く」と同じ 1 本(`boardPlacePoint` → `addPlaceAt`)。
+     *   断る門も同じ(忙しい間 / 別のタブの編集 / 閲覧専用・編集中は reducer)。
+     */
+    const bg = canvasBackgroundHost(t);
+    if (bg !== null && root.contains(bg) && ev instanceof MouseEvent) {
+      const lid = lidOfNode(bg, dispatcher.getState().openBody?.lid ?? null);
+      if (lid === null) return;
+      ev.preventDefault();
+      bg.ownerDocument.getSelection()?.removeAllRanges();
+      if (refuseWhileBusy('add-place', dispatcher, services)) return;
+      const p = boardPlacePoint(bg, ev.clientX, ev.clientY);
+      addPlaceAt(dispatcher, services, lid, p.x, p.y);
+      return;
+    }
     const el = t.closest<HTMLElement>('[data-pkc-action="edit-cell"]');
     /**
      * 🔴 **ふつうの付箋をダブルクリックすると、その場で字を直す欄が開く**(#1662 1。Gemini 裁定 = #1163 依頼 48 の 1 = A)。

@@ -5985,6 +5985,26 @@ dd[data-pkc-field='inspector-toc'] {
 [data-pkc-field='canvas-viewport'][data-pkc-canvas-select] {
   cursor: crosshair;
 }
+/* 🔴 **スナップ補助線**(v4.0 仕上げ Polish PR-C)── 付箋を動かしている間だけ器(ステージ)の子に置く 1 枚。
+ *   ⚠ `pointer-events: none`(下の付箋・背景の押下を塞がない)。色はアクセント 1 色の細い点線だけ(業務画面の「色は意味にだけ」)。
+ *   🔑 器は拡大・縮小されるので、線の太さと点の間隔は `non-scaling-stroke` で画面の 1px に保つ。 */
+[data-pkc-field='canvas-guides'] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 4;
+}
+[data-pkc-field='canvas-guides'] line {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+  fill: none;
+}
 [data-pkc-field='canvas-marquee'] {
   position: absolute;
   z-index: 3;
@@ -13921,6 +13941,7 @@ h3[data-pkc-section] {
   [data-pkc-field='canvas-bar'],
   [data-pkc-field='canvas-minimap'],
   [data-pkc-field='canvas-draw'],
+  [data-pkc-field='canvas-guides'],
   [data-pkc-field='canvas-marquee'] {
     display: none !important;
   }

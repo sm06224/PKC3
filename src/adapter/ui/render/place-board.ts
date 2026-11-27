@@ -282,6 +282,34 @@ export function rectOf(el: HTMLElement): PlaceRect {
   return rot === 0 ? rect : { ...rect, rot };
 }
 
+/** `style` に当てた px(`12.5px`)を数で読む。当てていなければ `null`。 */
+function stylePx(v: string): number | null {
+  if (v === '') return null;
+  const n = Number.parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 🔴 **いま見えている四角**(v4.0 仕上げ Polish PR-C)── 掴んで動かしている最中は、属性(本文から描いた値)ではなく
+ * `style.left / top / width / height`(掴む手が書いた見た目)を先に読む。当てていない物は `rectOf` と同じ規則へ落とす。
+ * 🔑 線(`syncPlaceLinesLive`)とミニマップ(`syncCanvasMinimapLive`)が**この 1 本**を引く(§7 ── 読み方を 2 つ持たない)。
+ * ⚠ 大きさを style に持たない付箋だけ実寸(`offsetWidth` / `offsetHeight`)を読む ── 測れないときは札・既定値へ落とす。
+ */
+export function liveRectOf(el: HTMLElement): PlaceRect {
+  const sw = stylePx(el.style.width);
+  const sh = stylePx(el.style.height);
+  const ow = sw === null ? el.offsetWidth : 0;
+  const oh = sh === null ? el.offsetHeight : 0;
+  const rect = {
+    x: stylePx(el.style.left) ?? posAttr(el, 'data-pkc-x') ?? 0,
+    y: stylePx(el.style.top) ?? posAttr(el, 'data-pkc-y') ?? 0,
+    w: sw ?? (ow > 0 ? ow : (intAttr(el, 'data-pkc-w') ?? PLACE_FALLBACK_W)),
+    h: sh ?? (oh > 0 ? oh : (intAttr(el, 'data-pkc-h') ?? PLACE_FALLBACK_H)),
+  };
+  const rot = placeRotateOf(el.getAttribute('data-pkc-rotate'));
+  return rot === 0 ? rect : { ...rect, rot };
+}
+
 /**
  * 🔴 **引けない線は、その行を画面に出して理由を言う**(#530 段③a、動線レビュー)。
  *
@@ -364,6 +392,70 @@ function ensureLineNote(el: HTMLElement, why: string): void {
 function clearLineNote(el: HTMLElement): void {
   el.querySelector(':scope > [data-pkc-field="place-line-note"]')?.remove();
   el.removeAttribute('data-pkc-line-missing');
+}
+
+/**
+ * 🔴 **引いた線 1 本の控え**(v4.0 仕上げ Polish PR-C)── 掴んでいる最中に、本文を読み直さずに線の道だけを引き直すため。
+ * ⚠ 綴りの読み・断り・2 巡の数え(`spread`)は描画のときに済ませてある ── ライブでは**四角だけ**が変わる。
+ */
+interface LiveLine {
+  readonly from: HTMLElement;
+  readonly to: HTMLElement;
+  readonly pinFrom: PlaceAnchor | null;
+  readonly pinTo: PlaceAnchor | null;
+  readonly route: PlaceRoute;
+  readonly bend: PlaceBend | null;
+  readonly arrow: PlaceArrow;
+  readonly width: number | null;
+  readonly index: number;
+  readonly count: number;
+  readonly path: SVGPathElement;
+  readonly heads: { readonly start: SVGPathElement | null; readonly end: SVGPathElement | null };
+  readonly hit: SVGPathElement | null;
+}
+
+/** 線の層(`place-lines` の `<svg>`)→ その層に引いた線の控え。⚠ 層が作り直されれば控えも一緒に捨てられる。 */
+const liveLines = new WeakMap<Element, LiveLine[]>();
+
+/**
+ * 🔴 **掴んでいる最中に、線をその場で引き直す**(v4.0 仕上げ Polish PR-C)── 付箋の見えている四角(`liveRectOf`)から、
+ * つながっている線の `<path d>`・矢じり・当たりの線を書き直す。本文も属性も触らない(書くのは離したとき 1 回のまま)。
+ * 🔑 道の計算は描画と**同じ 3 本**(`placeLineOf` / `placePathOf` / `placeArrowHeadsOf`)── 離した後の描き直しと 1px も食い違わない。
+ * ⚠ 線が 1 本も無い器は何もしない(仕事 0)。
+ * @returns 引き直した線の数
+ */
+export function syncPlaceLinesLive(host: HTMLElement): number {
+  const layer = host.querySelector(`:scope > [${LINE_LAYER}]`);
+  if (layer === null) return 0;
+  const lines = liveLines.get(layer);
+  if (lines === undefined || lines.length === 0) return 0;
+  const rects = new Map<HTMLElement, PlaceRect>();
+  const live = (el: HTMLElement): PlaceRect => {
+    let r = rects.get(el);
+    if (r === undefined) {
+      r = liveRectOf(el);
+      rects.set(el, r);
+    }
+    return r;
+  };
+  let n = 0;
+  for (const l of lines) {
+    const ln = placeLineOf(live(l.from), live(l.to), {
+      from: l.pinFrom,
+      to: l.pinTo,
+      spread: { index: l.index, count: l.count },
+    });
+    const d = placePathOf(ln, l.route, l.bend);
+    if (l.path.getAttribute('d') !== d) l.path.setAttribute('d', d);
+    if (l.hit !== null && l.hit.getAttribute('d') !== d) l.hit.setAttribute('d', d);
+    l.path.setAttribute('data-pkc-line-from', anchorSpell(ln.from));
+    l.path.setAttribute('data-pkc-line-to', anchorSpell(ln.to));
+    const heads = placeArrowHeadsOf(ln, l.route, l.bend, l.arrow, l.width);
+    if (l.heads.start !== null && heads.start !== null) l.heads.start.setAttribute('d', heads.start);
+    if (l.heads.end !== null && heads.end !== null) l.heads.end.setAttribute('d', heads.end);
+    n += 1;
+  }
+  return n;
 }
 
 /**
@@ -480,6 +572,7 @@ function applyPlaceLines(
   for (const r of ready) total.set(r.pair, (total.get(r.pair) ?? 0) + 1);
   const seen = new Map<string, number>();
   let drawn = 0;
+  const records: LiveLine[] = [];
   for (const r of ready) {
     const index = seen.get(r.pair) ?? 0;
     seen.set(r.pair, index + 1);
@@ -510,6 +603,7 @@ function applyPlaceLines(
      * 🔑 印は `data-pkc-line-head`(`start` / `end`)── 線の数を数える検査は `data-pkc-line-from` を持つ物だけを読む。
      */
     const heads = placeArrowHeadsOf(ln, r.route, r.bend, r.arrow, r.width);
+    const headEls: { start: SVGPathElement | null; end: SVGPathElement | null } = { start: null, end: null };
     for (const [side, dd] of [['start', heads.start], ['end', heads.end]] as const) {
       if (dd === null) continue;
       const head = document.createElementNS(SVG_NS, 'path');
@@ -518,6 +612,7 @@ function applyPlaceLines(
       setStyleVar(head, '--pkc-line-stroke', r.stroke);
       setStyleVar(head, '--pkc-line-width', r.width === null ? null : String(r.width));
       svg.append(head);
+      headEls[side] = head;
     }
     /**
      * 🔑 **押さえる層には、その線の開き行の行番号を焼く**(生の body 基準。`data-pkc-place-line`
@@ -525,16 +620,34 @@ function applyPlaceLines(
      *   消す口はこの番号で本文の開き行を指す。⚠ 数え直しの第 2 の規則を持たない。
      */
     const src = intAttr(r.d, 'data-pkc-source-line');
+    let hitEl: SVGPathElement | null = null;
     if (src !== null) {
       const hit = document.createElementNS(SVG_NS, 'path');
+      hitEl = hit;
       hit.setAttribute('d', el.getAttribute('d')!);
       hit.setAttribute('data-pkc-line-decl', String(src + lineOffset));
       // 🔑 太い線は当たりも太くする(見える線より当たりが細いと、端が押せない)
       setStyleVar(hit, '--pkc-hit-width', r.width === null ? null : String(Math.max(12, r.width + 8)));
       hits.append(hit);
     }
+    records.push({
+      from: r.from,
+      to: r.to,
+      pinFrom: r.pinFrom,
+      pinTo: r.pinTo,
+      route: r.route,
+      bend: r.bend,
+      arrow: r.arrow,
+      width: r.width,
+      index,
+      count: total.get(r.pair) ?? 1,
+      path: el,
+      heads: headEls,
+      hit: hitEl,
+    });
     drawn += 1;
   }
+  liveLines.set(svg, records);
   old?.remove();
   oldHits?.remove();
   if (drawn === 0) return 0;
