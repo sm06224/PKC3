@@ -95,14 +95,14 @@ describe('SyncScopeKeeper', () => {
     expect(f.calls.filter((c) => c.op === 'syncSetSelectiveScope')).toEqual([]);
   });
 
-  it('🔴 ワークスペース全体: エントリが動いても読み直さない(束ねの待ちも作らない)', async () => {
+  it('🔴 コレクション全体: エントリが動いても読み直さない(束ねの待ちも作らない)', async () => {
     const f = fake();
     await f.keeper.refresh();
     expect(f.calls).toEqual([{ op: 'syncSelectiveView', cid: 'c1' }]);
     expect(f.current()?.mode).toBe('all');
     f.keeper.onEntriesChanged();
     f.keeper.onEntriesChanged();
-    expect(f.timers.length, 'ワークスペース全体なのに待ちを作った').toBe(0);
+    expect(f.timers.length, 'コレクション全体なのに待ちを作った').toBe(0);
   });
 
   it('選択同期: エントリが動いたら束ねて 1 回だけ読み直す(対照群: 全体のときは 0 回)', async () => {
@@ -196,7 +196,7 @@ describe('SyncScopeKeeper ── 回復と画面に戻ったとき(#2066 段 5-B
     expect(g.timers.length).toBe(0);
   });
 
-  it('🔴 画面に戻ったら、ワークスペース全体のときも 1 回読み直す(別のタブで選択同期へ切り替えた分を拾う)/ 切なら聞かない', async () => {
+  it('🔴 画面に戻ったら、コレクション全体のときも 1 回読み直す(別のタブで選択同期へ切り替えた分を拾う)/ 切なら聞かない', async () => {
     const f = fake();
     await f.keeper.refresh();
     expect(f.current()?.mode).toBe('all');

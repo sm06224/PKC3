@@ -19740,7 +19740,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'forget-sync-records': (_dispatcher, _target, services) => {
     void services.forgetSyncRecords?.();
   },
-  /** 🔴 選択同期の範囲(#2066 段 5-B)── 「ワークスペース全体」/「選んだエントリだけ同期」。値は押した選択肢の属性。 */
+  /** 🔴 選択同期の範囲(#2066 段 5-B)── 「コレクション全体」/「選んだエントリだけ同期」。値は押した選択肢の属性。 */
   'set-sync-scope-mode': (_dispatcher, target, services) => {
     const v = target.getAttribute(SYNC_SCOPE_MODE_ATTR);
     if (v === 'all' || v === 'selective') void services.syncScope?.setMode(v);

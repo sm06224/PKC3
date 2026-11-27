@@ -2218,7 +2218,7 @@ describe('つながりの図の手数が、マニュアルと一致する', () =
      *   太字だけを見ると、手数を上げた日に**片方だけ直って片方が残る**。
      * 🔑 だから**全部拾って、全部同じ数であること**を見る。
      */
-    const all = [...MANUAL.matchAll(/(\d+) 手先まで/g)].map((x) => Number(x[1]));
+    const all = [...MANUAL.matchAll(/(\d+) 段階まで/g)].map((x) => Number(x[1]));
     expect(all.length, 'マニュアルに手数の記述が無い(字が変わった?)').toBeGreaterThan(0);
     expect(
       new Set(all),

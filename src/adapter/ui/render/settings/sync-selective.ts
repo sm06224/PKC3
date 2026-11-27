@@ -2,7 +2,7 @@
  * 🔴 **同期の範囲(選択同期)**(#2066 段 5-B)── 端末間の同期の節のすぐ下。
  *
  * - **同期がオンのときだけ出す**(オフの間は見出しごと隠す。何も読まない)。
- * - 範囲: 「ワークスペース全体(既定)」/「選んだエントリだけ同期(選択同期)」。
+ * - 範囲: 「コレクション全体(既定)」/「選んだエントリだけ同期(選択同期)」。
  * - 選択同期のときだけ、関連エントリの自動同伴・対象の件数・「選択をすべて外す」・注記を出す。
  * ⚠ 正本は storage の行(`syncSetSelectiveScope`)、画面は `state.syncScope`(写し)を読む。押した瞬間の見かけは
  *   `buildChoiceRow` が自分で移し、正本を読み直した写しで `sync` が上書きする。
@@ -15,7 +15,7 @@ import { buildSettingsNote } from './note';
 import type { SettingsSection } from './section';
 
 export const SYNC_SCOPE_LABEL = '同期の範囲';
-export const SYNC_RELATED_LABEL = '関連エントリの自動同伴';
+export const SYNC_RELATED_LABEL = '関連項目も自動で同期';
 export const SYNC_SCOPE_MODE_ATTR = 'data-pkc-sync-scope-mode';
 export const SYNC_SCOPE_RELATED_ATTR = 'data-pkc-sync-scope-related';
 export const SYNC_SCOPE_MODE_FIELD = 'sync-scope-mode';
@@ -39,7 +39,7 @@ export function createSyncSelectiveSection(region: HTMLElement, enabled: SyncEna
         action: 'set-sync-scope-mode',
         dataAttr: SYNC_SCOPE_MODE_ATTR,
         choices: [
-          { id: 'all', label: 'ワークスペース全体(既定)' },
+          { id: 'all', label: 'コレクション全体(既定)' },
           { id: 'selective', label: '選んだエントリだけ同期(選択同期)' },
         ],
         currentId: '',

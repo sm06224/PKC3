@@ -1,6 +1,6 @@
 /**
  * 🔴 選択同期(#2066 段 5-B)の画面の写し ── `buildSyncScopeView` / `selectiveActive` / `selectiveMenuCtx` / 件数の要約。
- * 空振り防止: 「ワークスペース全体」と「選択同期」を同じ材料で組み、閉包が後者でだけ出ることを見る。
+ * 空振り防止: 「コレクション全体」と「選択同期」を同じ材料で組み、閉包が後者でだけ出ることを見る。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -58,7 +58,7 @@ describe('buildSyncScopeView', () => {
     expect(v.counts).toEqual({ total: 4, direct: 1, descendant: 3, related: 0, ancestor: 0 });
   });
 
-  it('ワークスペース全体: 閉包を計算しない(理由の表は空・件数 0)・選択同期の画面は出さない', () => {
+  it('コレクション全体: 閉包を計算しない(理由の表は空・件数 0)・選択同期の画面は出さない', () => {
     const v = buildSyncScopeView(input({ mode: 'all' }));
     expect(v.reasons.size).toBe(0);
     expect(v.counts.total).toBe(0);

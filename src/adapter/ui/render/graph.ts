@@ -521,7 +521,7 @@ export class GraphRenderer {
         value: 'selected',
         label: '選んだノートから',
         pressed: !all,
-        title: '選んでいるノートを中心に、つながりを手先の数だけたどって描きます',
+        title: '選んでいるノートを中心に、選んだノートから指定した段階までつながりをたどって表示します',
       }),
       buildPressedButton({
         action: 'graph-scope',
@@ -539,9 +539,9 @@ export class GraphRenderer {
             action: 'graph-depth',
             dataAttr: 'data-pkc-graph-depth',
             value: String(n),
-            label: `${n} 手`,
+            label: `${n} 段階`,
             pressed: n === depth,
-            title: `選んだノートから ${n} 手先までたどります`,
+            title: `選んだノートから ${n} 段階までたどります`,
           }),
         );
       }

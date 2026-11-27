@@ -3,7 +3,7 @@
  * 🔴 **選択同期の画面(#2066 段 5-B)── 設定・情報ペイン・右クリック・一覧の印**。
  *
  * 守る主張:
- * 1. 同期が切・「ワークスペース全体」の間は、選択同期の画面を何も出さない(属性・印・欄・メニュー項目・設定の詳細)
+ * 1. 同期が切・「コレクション全体」の間は、選択同期の画面を何も出さない(属性・印・欄・メニュー項目・設定の詳細)
  * 2. 「選んだエントリだけ同期」のとき、`direct / descendant / related / ancestor / 対象外` を出し分ける
  * 3. 🔴 **置けるなら外せる**: フォルダを右クリックで同期対象にすると、配下が即時に `descendant`、外すと即時に戻る
  * 4. 設定: 範囲の切替・関連の範囲の切替・件数の要約・一括解除(直接指定が 0 件なら押せない)・同期が切なら見出しごと隠す
@@ -158,7 +158,7 @@ describe('選択同期の画面 ── 出さないとき', () => {
     expectNothingShown(s);
   });
 
-  it('🔴 ワークスペース全体: 何も出さない', async () => {
+  it('🔴 コレクション全体: 何も出さない', async () => {
     const s = setup({ on: true, mode: 'all', direct: ['F'] });
     await s.keeper.refresh();
     await flush();
@@ -206,7 +206,7 @@ describe('選択同期の画面 ── 選んだエントリだけ同期', () =>
     expect(s.inspBtn('sync-select-entry').hidden).toBe(false);
     expect(s.inspBtn('sync-unselect-entry').hidden).toBe(true);
     s.select('q');
-    expect(s.inspStatus()).toBe('同期対象(関連エントリとして同伴)');
+    expect(s.inspStatus()).toBe('同期対象(関連により自動追加)');
     s.select('p');
     expect(s.inspStatus()).toBe('同期対象外(この端末のみ)');
     // 情報ペインから付ける → 直接指定になり「外す」に替わる
@@ -235,7 +235,7 @@ describe('選択同期の画面 ── 選んだエントリだけ同期', () =>
     expect(s.inspBtn('sync-select-entry').title).toContain('このフォルダ配下');
   });
 
-  it('🔴 ワークスペース全体へ戻すと、印・欄・メニューがすべて消える', async () => {
+  it('🔴 コレクション全体へ戻すと、印・欄・メニューがすべて消える', async () => {
     const s = setup({ on: true, mode: 'selective', direct: ['F'] });
     await s.keeper.refresh();
     await flush();
@@ -287,9 +287,9 @@ describe('設定の「同期の範囲」', () => {
     expect(on.q('[data-pkc-field="sync-selective-term"]').textContent).toBe('同期の範囲');
   });
 
-  it('ワークスペース全体: 範囲だけを出し、詳細(関連・件数・一括解除)は畳む', () => {
+  it('コレクション全体: 範囲だけを出し、詳細(関連・件数・一括解除)は畳む', () => {
     const s = section(true, withScope('all', '1hop', []));
-    expect(s.pressed('sync-scope-mode')).toEqual(['ワークスペース全体(既定)']);
+    expect(s.pressed('sync-scope-mode')).toEqual(['コレクション全体(既定)']);
     expect(s.q('[data-pkc-field="sync-selective-detail"]').hidden).toBe(true);
   });
 

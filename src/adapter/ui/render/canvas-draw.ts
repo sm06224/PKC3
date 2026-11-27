@@ -181,7 +181,7 @@ export function openFreehand(opts: FreehandOptions): FreehandSession {
     pressed(b, w.value === width);
     return b;
   });
-  const undo = mk('1 手戻す', '最後に描いた線を 1 本消します');
+  const undo = mk('元に戻す', '最後に描いた線を 1 本消します');
   undo.setAttribute(DRAW_CMD_ATTR, 'undo');
   const place = mk('ボードに置く', '描いた線を画像にして、描いた場所へ付箋として置きます');
   place.setAttribute(DRAW_CMD_ATTR, 'place');

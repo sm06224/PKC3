@@ -137,7 +137,14 @@ const modeMemory = new Map<string, boolean>();
 /** ノートごとのカメラ(このタブの中だけ。本文には書かない)。 */
 const cameraMemory = new Map<string, CanvasCamera>();
 /** ミニマップを出すか(タブの中で共通)。 */
-let minimapOpen = true;
+/** `null` = 利用者がまだ触っていない(狭い画面では出さず、広い画面では出す)。 */
+let minimapOpen: boolean | null = null;
+
+/** ミニマップを出すか。⚠ 狭い画面(スマホ幅)の既定は閉じる ── 触った後は利用者の選択を優先する。 */
+function minimapShown(minimap: HTMLElement | null): boolean {
+  if (minimapOpen !== null) return minimapOpen;
+  return minimap?.closest("[data-pkc-layout='phone']") == null;
+}
 
 interface Canvas {
   readonly host: HTMLElement;
@@ -210,7 +217,7 @@ export function canvasModeFor(lid: string, body: string): boolean {
 export function resetCanvasMemory(): void {
   modeMemory.clear();
   cameraMemory.clear();
-  minimapOpen = true;
+  minimapOpen = null;
 }
 
 /**
@@ -281,13 +288,24 @@ function makeBar(doc: Document): HTMLElement {
     button(doc, 'zoom-in', '+', '拡大します(Ctrl + ホイールでも変えられます)'),
     button(doc, 'fit', '全体を表示', 'すべての付箋が収まるように表示します'),
     button(doc, 'minimap', 'ミニマップ', '右下にミニマップを表示します。押した位置へ移動できます'),
-    button(doc, 'default', 'いつもキャンバスで開く', 'このノートを開いたとき、最初から無限キャンバスで表示します(前書きに layout: canvas と書きます)'),
     button(doc, 'select', '選択', '背景のドラッグで範囲を選びます(Shift を押しながらのドラッグでも選べます。Shift + クリックで 1 枚ずつ選べます)'),
+    button(doc, 'draw', '手書き', 'ボードに直接手書きします。描いた線は画像にして付箋として置きます'),
+    separator(doc),
     button(doc, 'align', '整列 ▾', '選んだ付箋を揃えます'),
     button(doc, 'group', 'グループにする', '選んだ付箋をグループにします(どれか 1 枚を動かすと全員が動きます)'),
-    button(doc, 'draw', '手書き', 'ボードに直接手書きします。描いた線は画像にして付箋として置きます'),
+    button(doc, 'default', 'いつもキャンバスで開く', 'このノートを開いたとき、最初から無限キャンバスで表示します(前書きに layout: canvas と書きます)'),
   );
   return bar;
+}
+
+/** 常に出る道具(選択・手書き)と、複数選択のときだけ出る道具(整列・グループ)の間の仕切り。 */
+function separator(doc: Document): HTMLElement {
+  const sep = doc.createElement('span');
+  sep.setAttribute('data-pkc-field', 'canvas-bar-sep');
+  sep.setAttribute('role', 'separator');
+  sep.setAttribute('aria-orientation', 'vertical');
+  sep.hidden = true;
+  return sep;
 }
 
 function cmdButton(bar: HTMLElement, cmd: CanvasCommand): HTMLButtonElement | null {
@@ -304,7 +322,7 @@ function syncBar(view: BoardView): void {
     const b = cmdButton(bar, cmd);
     if (b !== null) b.hidden = !on;
   }
-  cmdButton(bar, 'minimap')?.setAttribute('aria-pressed', String(minimapOpen));
+  cmdButton(bar, 'minimap')?.setAttribute('aria-pressed', String(minimapShown(view.canvas?.minimap ?? null)));
   cmdButton(bar, 'default')?.setAttribute('aria-pressed', String(isCanvasLayout(view.body)));
   const c = view.canvas;
   // 🔑 整列・グループにするは 2 枚以上選んでいるときだけ出す(常用ではない ── 1 段奥)
@@ -313,6 +331,8 @@ function syncBar(view: BoardView): void {
     const b = cmdButton(bar, cmd);
     if (b !== null) b.hidden = !many;
   }
+  const sep = bar.querySelector<HTMLElement>('[data-pkc-field="canvas-bar-sep"]');
+  if (sep !== null) sep.hidden = !many;
   if (!many) closeAlignMenu(bar);
   cmdButton(bar, 'select')?.setAttribute('aria-pressed', String(c?.selectMode === true));
   const draw = cmdButton(bar, 'draw');
@@ -432,8 +452,9 @@ function drawMinimapCards(c: Canvas): void {
 
 /** ミニマップの写像と、いま映っている所の四角(パン・ズームのたび)。 */
 function drawMinimapView(c: Canvas): void {
-  c.minimap.hidden = !minimapOpen;
-  if (!minimapOpen) return;
+  const shown = minimapShown(c.minimap);
+  c.minimap.hidden = !shown;
+  if (!shown) return;
   const { w, h } = viewSize(c);
   const g = minimapGeometry(contentBounds(c), c.cam, w, h, MINIMAP_W, MINIMAP_H);
   c.geometry = g;
@@ -1122,7 +1143,7 @@ export function runCanvasCommand(
       if (c !== null) fitAll(c, view);
       return true;
     case 'minimap':
-      minimapOpen = !minimapOpen;
+      minimapOpen = !minimapShown(c?.minimap ?? null);
       if (c !== null) drawMinimapView(c);
       syncBar(view);
       return true;
