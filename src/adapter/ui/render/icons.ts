@@ -133,6 +133,8 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'adopt-external-images': 'arrow-in',
   'export-archive': 'archive',
   'export-html': 'globe',
+  /** 配布パッケージ(#2098 後半)── 閲覧用 HTML と同じ「渡して読む」形なので同じ図案。 */
+  'export-site': 'globe',
   'export-portable': 'archive',
   /** PKC2 の HTML で書き出す(台帳 #1416)── PKC3 入り HTML と同じ「1 つにまとめる」図案。 */
   'export-pkc2-html': 'archive',
@@ -188,6 +190,7 @@ export const ACTION_ICONS: Readonly<Record<string, IconName>> = {
   'export-entry': 'arrow-out',
   // 🔑 全体の「閲覧用 HTML」(`export-html`)と**同じ図案** ── 同じ形の物である
   'export-entry-html': 'globe',
+  'export-folder-site': 'globe',
   'export-entry-markdown': 'page',
   'copy-entry-mail': 'mail',
   'export-entry-srt': 'page',

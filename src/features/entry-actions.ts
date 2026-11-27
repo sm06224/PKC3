@@ -401,6 +401,11 @@ export const ENTRY_MENU_ACTIONS: readonly EntryAction[] = [
    */
   { action: 'export-folder', label: 'このフォルダをバックアップ', group: 'this-folder', when: 'folder' },
   /**
+   * 🔴 **このフォルダを配布パッケージで書き出す**(#2098 後半)── 中のノートと添付・HTML のツールを 1 つの zip にまとめる。
+   * ⚠ バックアップの真横に置く(同じ「このフォルダごと」の塊)。違いは説明で言う(取り込み直せない・展開して開く)。
+   */
+  { action: 'export-folder-site', label: 'このフォルダを配布パッケージで書き出す', group: 'this-folder', when: 'folder' },
+  /**
    * 🔴 **右ペインが唯一の入口だった 3 つ**(#500。2026-08-29 に**実測で確定**)。
    *
    * ⚠ この 3 つを画面に出す所は**右ペインの帯 1 か所だけ**だった。ところが実測すると:
@@ -1715,6 +1720,8 @@ export const ENTRY_ACTION_HINTS: Readonly<Record<string, string>> = {
   //    「中に入っているものごと」。⚠ **外へ繋がる関連が落ちる**ことも先に言う
   'export-folder':
     '中の本文・添付・履歴を保存します(.pkc3-notes.zip)。取り込み直せます。外へのつながりは入りません',
+  'export-folder-site':
+    '中のノートと添付・HTML のツールを zip にまとめます。展開して index.html で読めます',
   // 🔴 **実装に合わせる**(2026-08-18)。直す前は「この版では画像は入りません」と
   //    書いてあったが、画像も図もグラフも**入る**(`features/export/docx.ts` の VML /
   //    `svg-emf.ts` のベクタ)。マニュアル(§5)もお知らせ 2 件も「入る」と言っており、

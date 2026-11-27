@@ -169,7 +169,7 @@ describe('末尾の使い分け(#1017 段④b)', () => {
   it('🔴 フォルダの書き出しも .pkc3-notes.zip(exportFolder)', async () => {
     const { deps, downloaded } = baseDeps({ source: fakeSource({ folder: true }) });
     const d = readyDispatcher();
-    await exportFolder(d, deps, 'box');
+    await exportFolder(d, deps, 'box', 'archive');
     expect(downloaded).toHaveLength(1);
     expect(downloaded[0]!.name.endsWith('.pkc3-notes.zip'), downloaded[0]!.name).toBe(true);
   });

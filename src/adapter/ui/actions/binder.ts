@@ -2911,6 +2911,13 @@ export interface BinderServices {
   exportArchive?(): void;
   /** 可搬 HTML の書出し(P6d 段③)。 */
   exportHtml?(): void;
+  /**
+   * 🔴 **配布パッケージ**(`.pkc3-site.zip`、#2098 後半)── 複数のノートと HTML のツールを 1 つの zip にまとめる
+   *   (展開して index.html を開けばオフラインで読める)。全体 / 選んだノート / フォルダの 3 つの入り口。
+   */
+  exportSite?(): void;
+  exportSelectionSite?(lids: string[]): void;
+  exportFolderSite?(lid: string): void;
   /** md ZIP の書出し(P6d 段④)。 */
   exportMarkdown?(): void;
   /** md を PC のフォルダへ 1 度だけ書き出す(#1455 (b))。 */
@@ -10468,6 +10475,26 @@ export const EXPORT_CHECK_CHUNK = 200;
  *   (`showDirectoryPicker`)は押してから約 5 秒しか開けない。点検が長引いたら、問題が無くても 1 度聞いて押し直してもらう。
  */
 export const EXPORT_GESTURE_MS = 3000;
+
+/**
+ * 🔴 **配布パッケージの点検の範囲**(#2098 後半)── 配布パッケージはフォルダを選ぶと中のノートごと入れる(`selectionSource(..., 'archive')` /
+ *   `folderSource`)ので、点検もフォルダの中のノートへ広げる(フォルダの行のままだと `guardExport` の「フォルダ 1 件は素通り」に入る)。
+ * ⚠ 選択(`export-selection-site`)とフォルダ(`export-folder-site`)の 2 つの押し所が同じ 1 本を使う。中が空ならフォルダの行のまま。
+ */
+export function siteCheckScope(st: AppState, lids: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const lid of lids) {
+    if (st.entryMetas.get(lid)?.archetype !== 'folder') {
+      out.add(lid);
+      continue;
+    }
+    for (const l of collectSubtreeLids(lid, st.entryMetas, st.relations)) {
+      if (st.entryMetas.get(l)?.archetype !== 'folder') out.add(l);
+    }
+  }
+  return out.size > 0 ? [...out] : [...lids];
+}
+
 /** 🔴 点検の最中か(二度押しで確認が 2 枚出る / 書き出しが 2 回走る、を作らない ── 着地前レビュー ⚠8)。 */
 let exportChecking = false;
 export function resetExportCheckForTest(): void {
@@ -20008,6 +20035,10 @@ const ACTIONS: Record<string, ActionHandler> = {
   'export-html': (dispatcher, _target, services, root) => {
     if (services.exportHtml) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportHtml?.());
   },
+  /** 🔴 配布パッケージ(#2098 後半)── 外へ渡す形なので、閲覧用 HTML と同じく書き出す前に点検する。 */
+  'export-site': (dispatcher, _target, services, root) => {
+    if (services.exportSite) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportSite?.());
+  },
   'export-markdown': (dispatcher, _target, services, root) => {
     if (services.exportMarkdown) void guardExport(dispatcher, services, root, 'all', 'images', () => services.exportMarkdown?.());
   },
@@ -20423,6 +20454,11 @@ const ACTIONS: Record<string, ActionHandler> = {
           hint: `選んでいる ${lids.length} 件の本文・添付・履歴を保存します(.pkc3-notes.zip。取り込み直せます。選んだフォルダは中のノートも入ります)`,
         },
         {
+          action: 'export-selection-site',
+          label: `配布パッケージ(選んだ ${lids.length} 件)`,
+          hint: `選んでいる ${lids.length} 件と、そこから参照している添付・HTML のツールを 1 つの zip にまとめます。展開して index.html を開けば、インターネットにつながっていなくても読めます(選んだフォルダは中のノートも入ります。取り込み直せません)`,
+        },
+        {
           action: 'export-selection-portable',
           label: `PKC3 入り HTML(選んだ ${lids.length} 件)`,
           hint: `選んでいる ${lids.length} 件と、そこから参照しているノート・添付・親のフォルダだけを、開けばそのまま PKC3 として読めて編集できる HTML ファイル 1 つにまとめます(履歴・ゴミ箱は入りません。取り込み直せます)`,
@@ -20435,6 +20471,13 @@ const ACTIONS: Record<string, ActionHandler> = {
     const lids = selectedExportLids(dispatcher);
     if (lids.length > 0 && services.exportSelectionHtml)
       void guardExport(dispatcher, services, root, lids, 'images', () => services.exportSelectionHtml?.(lids));
+  },
+  'export-selection-site': (dispatcher, _target, services, root) => {
+    const lids = selectedExportLids(dispatcher);
+    if (lids.length > 0 && services.exportSelectionSite)
+      void guardExport(dispatcher, services, root, siteCheckScope(dispatcher.getState(), lids), 'images', () =>
+        services.exportSelectionSite?.(lids),
+      );
   },
   'export-selection-portable': (dispatcher, _target, services, root) => {
     const lids = selectedExportLids(dispatcher);
@@ -20524,6 +20567,17 @@ const ACTIONS: Record<string, ActionHandler> = {
     //    「A を書き出して B を削除する」が成立する(review M-3 と同じ形)
     const lid = rowLidOrSelected(dispatcher.getState(), target);
     if (lid) services.exportFolder?.(lid);
+  },
+  /**
+   * 🔴 **このフォルダを配布パッケージで書き出す**(#2098 後半)。解決規則は隣の `export-folder` と同じ。
+   * ⚠ 外へ渡す形なので点検を通す(フォルダの中身は書き出す側で集めるので、点検はフォルダの行で頼む)。
+   */
+  'export-folder-site': (dispatcher, target, services, root) => {
+    const lid = rowLidOrSelected(dispatcher.getState(), target);
+    if (!lid || !services.exportFolderSite) return;
+    void guardExport(dispatcher, services, root, siteCheckScope(dispatcher.getState(), [lid]), 'images', () =>
+      services.exportFolderSite?.(lid),
+    );
   },
   'purge-orphan-assets': (_dispatcher, _target, services) => {
     services.purgeOrphanAssets?.();

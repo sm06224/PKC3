@@ -425,6 +425,8 @@ describe('右クリックの説明(#587 C-1)', () => {
       ['export-entry-srt', 'e5c1b39c'],
       // 🔴 2026-10-13(#1087): 同じ。フォルダの中のノートの履歴も入る(`folder-source.ts` の `getRevisionChain`)
       ['export-folder', '4b51181e'],
+      // 🔴 このフォルダを配布パッケージで書き出す(#2098 後半)
+      ['export-folder-site', 'fb79fe02'],
       ['export-entry-docx', '93906675'],
       ['export-entry-pptx', '027614c1'],
       ['export-entry-pdf', '6ec553e1'],

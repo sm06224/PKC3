@@ -258,7 +258,8 @@ describe('レビューで見つかった穴', () => {
 
   it('🔴 書き出し HTML でグラフが原文に戻る(空の器で出荷しない)', async () => {
     const src = await import('node:fs').then((fs) =>
-      fs.readFileSync('src/features/export/pkc3-html.ts', 'utf-8'),
+      // 🔑 閲覧側の hydrate は #2098 後半で `portable-hydrate.ts` に切り出した(閲覧用 HTML と配布パッケージの共有)
+      fs.readFileSync('src/features/export/portable-hydrate.ts', 'utf-8'),
     );
     // ⚠ 「mermaid だけ書いてある」を落とす ── 両方が同じ経路に載っていること
     expect(src, 'chart を原文へ戻す経路が無い').toContain('data-pkc-chart-src');

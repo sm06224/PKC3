@@ -50,7 +50,7 @@ test('🔴 何も選んでいないときの右の列に、コレクションの
   // ② 4 つの書き出しが、実際に見えて押せる形で在る(畳まれていない)
   //    ⚠ 見える説明(`title` の 1 行)まで見る ── 押した後どうなるか読めること
   // 🔴 2026-11-03(#1029 / #501): 書き出し系は「書き出す ▾」1 つに畳んだ ── 実マウスで開き、一覧の項目と説明を見る
-  const actions = ['export-html', 'export-portable', 'export-pkc2-html', 'export-markdown'];
+  const actions = ['export-html', 'export-site', 'export-portable', 'export-pkc2-html', 'export-markdown'];
   await expect(
     pane.locator('[data-pkc-action="open-collection-export-menu"]'),
     '「書き出す ▾」が見えていない',

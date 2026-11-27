@@ -99,9 +99,10 @@ describe('進行中の字を見分ける(結果として積まない)', () => {
     expect(shouldPostNotice(t)).toBe(false);
   });
 
-  it('🔴 書き出しの開始の字(実装の定数)は 3 種とも在り、全部が進行中と読める', () => {
+  it('🔴 書き出しの開始の字(実装の定数)は 4 種とも在り、全部が進行中と読める', () => {
     // ⚠ 手で写した一覧ではなく定数そのものを見る ── 実装から `…` を落とすと、ここが落ちる
-    expect(Object.keys(EXPORT_STARTING).sort()).toEqual(['archive', 'html', 'markdown']);
+    // 🔑 4 種目は配布パッケージ(#2098 後半)
+    expect(Object.keys(EXPORT_STARTING).sort()).toEqual(['archive', 'html', 'markdown', 'site']);
     for (const t of Object.values(EXPORT_STARTING)) {
       expect(isProgressNotice(t), `進行中と読めていない: ${t}`).toBe(true);
     }

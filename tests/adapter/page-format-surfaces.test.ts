@@ -474,6 +474,11 @@ describe('本文の器の全数(印の付け忘れを数で止める)', () => {
       prose: true,
       why: '配る HTML の本文(#body)と「全体を印刷」の箱',
     },
+    'src/features/export/pkc3-site-zip.ts': {
+      host: /b pkc-md-rendered/g,
+      prose: true,
+      why: '配布パッケージ(#2098 後半)の index.html のノートのタブの本文',
+    },
     'src/adapter/platform/chapter-window.ts': {
       host: /className = 'pkc-md-rendered'/g,
       prose: true,

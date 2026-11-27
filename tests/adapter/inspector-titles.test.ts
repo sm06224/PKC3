@@ -102,6 +102,8 @@ const EXPECTED_ACTIONS: readonly string[] = [
   'export-entry',
   'export-entry-html',
   'export-folder',
+  // 🔴 このフォルダを配布パッケージで書き出す(#2098 後半)── バックアップの隣(同じ「このフォルダ」の塊)
+  'export-folder-site',
   'export-entry-docx',
   'export-entry-pptx',
   'export-entry-pdf',

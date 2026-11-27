@@ -109,7 +109,7 @@ describe('右の列の「書き出す ▾」(#1029 / #501)', () => {
     const shown = menuActions(m);
     // ノートでは「フォルダ」「字幕」「元ファイル」は畳まれる
     const expected = INSPECTOR_EXPORT_MENU_ACTIONS.filter(
-      (a) => !['export-folder', 'export-entry-srt', 'write-back-file'].includes(a),
+      (a) => !['export-folder', 'export-folder-site', 'export-entry-srt', 'write-back-file'].includes(a),
     );
     expect(shown).toEqual(expected);
     expect(shown.length).toBeGreaterThanOrEqual(7);
@@ -141,6 +141,8 @@ describe('右の列の「書き出す ▾」(#1029 / #501)', () => {
     const s = mounted({ folder: true });
     s.q('[data-pkc-action="open-export-menu"]').click();
     expect(menuActions(s.menu())).toContain('export-folder');
+    // 🔴 配布パッケージ(#2098 後半)もフォルダのときだけ出る
+    expect(menuActions(s.menu())).toContain('export-folder-site');
   });
 
   it('Esc で閉じて焦点がボタンへ戻り、その Esc はノート選択の解除へ届かない', () => {
@@ -385,9 +387,10 @@ describe('一覧の項目の状態(#1029 / #501)', () => {
       ]),
     );
 
-  it('A2: フォルダを選んでも、書き出し系 10 件は隠した器の中(平置きに戻らない)', () => {
+  it('A2: フォルダを選んでも、書き出し系 11 件は隠した器の中(平置きに戻らない)', () => {
     const s = mounted({ folder: true, linked: true });
-    expect(INSPECTOR_EXPORT_MENU_ACTIONS.length).toBe(10);
+    // 🔑 11 件目は「このフォルダを配布パッケージで書き出す」(#2098 後半)
+    expect(INSPECTOR_EXPORT_MENU_ACTIONS.length).toBe(11);
     for (const a of INSPECTOR_EXPORT_MENU_ACTIONS) {
       const b = s.q(`[data-pkc-field="inspector-actions"] [data-pkc-action="${a}"]`);
       expect(b, `${a} が描かれていない`).not.toBeNull();
@@ -419,6 +422,8 @@ describe('一覧の項目の状態(#1029 / #501)', () => {
       expect(it[a]!.hint, `${a} の理由が出ていない`).toContain(FOLDER_EXPORT_NOTE);
     }
     expect(it['export-folder']!.disabled).toBe(false);
+    expect(it['export-folder-site']!.disabled, 'フォルダの配布パッケージまで塞いだ').toBe(false);
+    expect(it['export-folder-site']!.group).toBe('this-folder');
     expect(it['export-entry']!.disabled).toBe(false);
     // B2: 2 つのバックアップは別の塊(見出しの間で区別できる)
     expect(it['export-folder']!.group).toBe('this-folder');

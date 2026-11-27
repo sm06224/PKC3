@@ -99,6 +99,8 @@ const UNRESOLVED: readonly string[] = [
   'export-selection-archive',
   'export-selection-html',
   'export-selection-portable',
+  // 🔴 配布パッケージ(選んだ N 件。#2098 後半)── 隣の 3 つと同じく選択バーの「書き出す ▾」が組む一覧の項目
+  'export-selection-site',
   'install-asr-part',
   'remove-asr-part',
   // 2026-10-29(#674 / #949): 音源分離のモデルを取り込む / やめる / 消す。押し所は設定の節の `button()` ヘルパーで組む(`install-asr-part` と同じ)

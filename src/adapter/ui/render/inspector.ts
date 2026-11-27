@@ -1461,6 +1461,9 @@ export class InspectorRenderer {
      *   押せない(畳んである)より悪い。
      */
     const folderBtn = this.buttons.get('export-folder');
+    // 🔴 配布パッケージ(#2098 後半)もフォルダのときだけ ── 同じ門で畳む(塊の器は下でバックアップと一緒に畳む)
+    const folderSiteBtn = this.buttons.get('export-folder-site');
+    if (folderSiteBtn) folderSiteBtn.hidden = meta.archetype !== 'folder';
     if (folderBtn) {
       folderBtn.hidden = meta.archetype !== 'folder';
       /**
@@ -2449,6 +2452,8 @@ export class InspectorRenderer {
      *   この塊(親の `data-pkc-group='this-folder'`)ごと隠す(下を見よ)。
      */
     entryBtn('export-folder');
+    // 🔴 **このフォルダを配布パッケージで書き出す**(#2098 後半)── バックアップと同じ塊・同じ門(フォルダのときだけ)
+    entryBtn('export-folder-site');
     // 🔴 **Word で出す**(#187 段①)。⚠ 隣の「書き出す」と**別の物**である ──
     //    あちらは取り込み直せるバックアップ、こちらは片道の Word 文書
     entryBtn('export-entry-docx');

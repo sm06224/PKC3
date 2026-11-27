@@ -250,10 +250,13 @@ describe('再生機を作る面は、全部つなぎに通している(全数)',
  * ⚠ 覆す条件: user か Gemini が「書き出した HTML でも整えてよい」と言ったとき(設問 1 の B)。
  */
 describe('書き出した HTML は整えない(#772 設問 1 = A の pin)', () => {
-  const file = join(process.cwd(), 'src/features/export/pkc3-html.ts');
+  // 🔑 閲覧側の hydrate は #2098 後半で `portable-hydrate.ts` に切り出した ── 配る形(閲覧用 HTML・配布パッケージ)の全部を見る
+  const files = ['pkc3-html.ts', 'portable-hydrate.ts', 'pkc3-site-zip.ts'].map((f) =>
+    join(process.cwd(), 'src/features/export', f),
+  );
 
   it('🔴 再生機は作る(空振り防止)が、整える鎖は 1 本も持たない', () => {
-    const src = codeOnly(readFileSync(file, 'utf-8'));
+    const src = files.map((f) => codeOnly(readFileSync(f, 'utf-8'))).join('\n');
     const players = (src.match(/\.controls=true/g) ?? []).length;
     expect(players, '書き出し HTML に再生機を作る所が無い(前処理が壊れている)').toBeGreaterThanOrEqual(2);
     expect(src.includes('appVoiceBoostRouter'), '書き出し HTML が整える鎖を持っている ── 裁定(設問 1 = A)と食い違う').toBe(false);

@@ -2093,7 +2093,8 @@ describe('可搬 HTML — 本文の CSS を app.css から焼く', () => {
    */
   it('🔴 添付のボタンを作る側と、その体裁を書く側で class 名が一致している', async () => {
     const html = await (await writePortableHtml(DOC, NOW)).blob.text();
-    const made = /(?:^|[^\w])a\.className='([^']+)'/.exec(html)?.[1];
+    // ⚠ 作る箇所は `dl()` の中に絞る(#2098 後半で確認バーの `a.className=` が先に並ぶようになった ── 最初の 1 個では当たり先がずれる)
+    const made = /function dl\([^)]*\)\{\s*var a=document\.createElement\('a'\);a\.className='([^']+)'/.exec(html)?.[1];
     expect(made, '添付のボタンを作る箇所が見つからない(この検査は空振り)').toBeTruthy();
     const css = /<style>([\s\S]*?)<\/style>/.exec(html)![1]!;
     expect(css, `a.${made} の体裁が CSS に無い(名前がずれた)`).toContain(`a.${made}{`);

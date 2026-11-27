@@ -1,6 +1,6 @@
 // 見た目(P7b 段⑨)。⚠ **ここから import する**のが唯一の入り口 ── index.html に
 // `<link>` を書くと Vite の hash 付き出力に乗らず、SW の precache 一覧からも外れる
-import { installWidgetBridge, remountAssetWidgets, routeWidgetBlocked, setWidgetNoteHost, widgetPermissionGate } from '@adapter/ui/render/widget-bridge';
+import { currentWidgetTheme, installWidgetBridge, remountAssetWidgets, routeWidgetBlocked, setWidgetNoteHost, widgetPermissionGate } from '@adapter/ui/render/widget-bridge';
 import { listWidgetNoteAssets, widgetAttachLanded, widgetNoteAssetKeys } from '@adapter/platform/widget-note-assets';
 import { hasWidgetStateBlock } from '@features/markdown/widget-state-block';
 import { errorText, diagramExportErrorText } from '@features/error-text';
@@ -3451,10 +3451,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   const runExport = (
     kind:
       | ExportKind
-      | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'markdown' | 'mail' | 'srt' }
+      | { entryLid: string; as?: 'archive' | 'html' | 'docx' | 'pptx' | 'folder' | 'folder-site' | 'markdown' | 'mail' | 'srt' }
       | { mdFolder: WritableDirLike }
       // 🔴 一覧で選んだ N 件だけ(#1038 A1)
-      | { selection: readonly string[]; as: 'archive' | 'html' }
+      | { selection: readonly string[]; as: 'archive' | 'html' | 'site' }
       // 🔴 PKC2 のポータブル形式の HTML(台帳 #1416)。値は user が選んだ PKC2 の HTML の中身
       | { pkc2Html: string },
   ): Promise<void> =>
@@ -3601,6 +3601,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          *   書き出した HTML だけ中央になる(配った先で見え方が割れる)。
          */
         proseAlign: currentProseAlign(document.documentElement),
+        /** 🔴 配布パッケージのツールを単体で開いたときの配色(#2098 後半)── 書き出した時点の画面の配色 */
+        toolTheme: currentWidgetTheme(document),
       };
       // 1 ノートだけの書出しも**同じ実行部・同じ形式**を通る(P6f)──
       // 別経路にすると「1 件書出しだけ壊れている」が起きる
@@ -3624,7 +3626,9 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         else if (kind.as === 'pptx') await exportEntryPptx(dispatcher, deps, kind.entryLid);
         // 🔴 **フォルダごと**(#399 ①)── 同じ `deps`・同じ形式(.pkc3.zip)を通る。
         //    ⚠ 別経路にすると「フォルダ書出しだけ壊れている」が起きる(P6f と同じ理由)
-        else if (kind.as === 'folder') await exportFolder(dispatcher, deps, kind.entryLid);
+        else if (kind.as === 'folder') await exportFolder(dispatcher, deps, kind.entryLid, 'archive');
+        // 🔴 **フォルダの配布パッケージ**(#2098 後半)── 同じ `deps`・同じ絞り込み(`folderSource`)を通る
+        else if (kind.as === 'folder-site') await exportFolder(dispatcher, deps, kind.entryLid, 'site');
         // 🔴 **相手に渡せる 1 枚**(#491)── 同じ `deps`・同じ絞り込み・同じ実行部を通る
         else if (kind.as === 'html') await exportEntry(dispatcher, deps, kind.entryLid, 'html');
         // 🔴 **本文そのままの 1 つの .md**(#1440)── 同じ `deps`(読み口・待ち・知らせ)を通る
@@ -6735,6 +6739,10 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
     // 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる
     exportArchive: () => void runExport('archive'),
     exportHtml: () => void runExport('html'),
+    // 🔴 配布パッケージ(#2098 後半)── 全体・選んだノート・フォルダの 3 つの入り口が同じ `runExport` を通る
+    exportSite: () => void runExport('site'),
+    exportSelectionSite: (lids) => void runExport({ selection: lids, as: 'site' }),
+    exportFolderSite: (lid) => void runExport({ entryLid: lid, as: 'folder-site' }),
     exportMarkdown: () => void runExport('markdown'),
     // 🔴 PC のフォルダへ 1 度だけ(#1455 (b))。⚠ 無いブラウザではボタンごと出ない
     // 🔴 選ぶウィンドウは asset gate の**外**(`createMarkdownFolderFlow`)。書くところだけ gate に入る

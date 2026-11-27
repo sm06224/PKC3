@@ -79,6 +79,13 @@ export const ARCHIVE_SUFFIXES: readonly string[] = [
  */
 export const DIFF_ARCHIVE_SUFFIX = '.pkc3-diff.zip';
 
+/**
+ * 🔴 **配布パッケージ**(#2098 後半)の末尾 ── 複数のノートと HTML のツールを 1 つの zip にまとめ、展開して `index.html` を
+ * 開くだけで読める形。⚠ バックアップでは**ない**(取り込み直せない片道の形)ので `ARCHIVE_SUFFIXES` にも
+ * `isBackupFileName` にも入れない ── 落としたとき取り込みの道へ送らない。
+ */
+export const SITE_PACKAGE_SUFFIX = '.pkc3-site.zip';
+
 /** 🔴 PKC3 入り HTML(`.pkc3.html`)の末尾。⚠ 書き出す側は `export-portable.ts`(同じ字)。 */
 export const PORTABLE_HTML_SUFFIX = '.pkc3.html';
 
