@@ -70,11 +70,11 @@ test('🔴 関係グラフ: 本文のリンクが図になり、節点を押す�
     expect(h.hit, '節点が別の要素に覆われていて押せない').toBe(true);
   }
 
-  // ② 手先のボタン / 全体 の切替が画面に効く
-  await expect(pane.locator('[data-pkc-graph-depth="2"]')).toHaveAttribute('aria-pressed', 'true');
+  // ② 段階の選択 / 全体 の切替が画面に効く
+  await expect(pane.locator('select[data-pkc-action="graph-depth"]')).toHaveValue('2');
   await clickReal(page, pane.locator('[data-pkc-graph-scope="all"]'));
   await expect(pane.locator('[data-pkc-graph-scope="all"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(pane.locator('[data-pkc-graph-depth]'), '全体なのに手先のボタンが残っている').toHaveCount(0);
+  await expect(pane.locator('[data-pkc-action="graph-depth"]'), '全体なのに段階の選択が残っている').toHaveCount(0);
   // 全体は関係(relations)だけ ── 本文のリンクだけの組は出ず、その旨の案内が出る
   await expect(pane.locator('[data-pkc-field="graph-note"]')).toContainText('つながり');
   await clickReal(page, pane.locator('[data-pkc-graph-scope="selected"]'));

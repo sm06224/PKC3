@@ -3,6 +3,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   ORBIT_PHI_EPS,
+  ORBIT_PRESETS,
+  ORBIT_ZOOM_STEP,
+  wheelDeltaPx,
+  wheelZoomsStage,
+  orbitPreset,
+  orbitZoomStep,
   fitBoundsToOrbit,
   orbitCameraPosition,
   orbitFromPosition,
@@ -86,5 +92,58 @@ describe('orbit-math', () => {
     expect(p[1]).toBeCloseTo(4);
     expect(p[2]).toBeCloseTo(5);
     expect(orbitFromPosition([1, 1, 1], [1, 1, 1]).radius).toBe(5);
+  });
+});
+
+describe('orbit-math: プリセット・ズーム段・ホイール判定', () => {
+  const s: OrbitState = { target: [1, 2, 3], radius: 7, theta: 2, phi: 1 };
+
+  it('プリセットは注視点と距離を変えず、向きだけを決める', () => {
+    for (const p of ORBIT_PRESETS) {
+      const r = orbitPreset(s, p);
+      expect(r.target).toEqual([1, 2, 3]);
+      expect(r.radius).toBe(7);
+    }
+    expect(orbitPreset(s, 'oblique')).toMatchObject({ theta: Math.PI / 4, phi: Math.PI / 3 });
+    expect(orbitPreset(s, 'front')).toMatchObject({ theta: 0, phi: Math.PI / 2 });
+    expect(orbitPreset(s, 'top')).toMatchObject({ theta: 0, phi: ORBIT_PHI_EPS });
+  });
+
+  it('正面はカメラが +z 側の水平、上面は真上(ほぼ)', () => {
+    const f = orbitCameraPosition(orbitPreset({ ...s, target: [0, 0, 0] }, 'front'));
+    expect(f[0]).toBeCloseTo(0);
+    expect(f[1]).toBeCloseTo(0);
+    expect(f[2]).toBeCloseTo(7);
+    const t = orbitCameraPosition(orbitPreset({ ...s, target: [0, 0, 0] }, 'top'));
+    expect(t[1]).toBeGreaterThan(6.99);
+    expect(Math.hypot(t[0], t[2])).toBeLessThan(0.1);
+  });
+
+  it('3 つのプリセットは互いに違う向き', () => {
+    const keys = new Set(ORBIT_PRESETS.map((p) => JSON.stringify([orbitPreset(s, p).theta, orbitPreset(s, p).phi])));
+    expect(keys.size).toBe(3);
+  });
+
+  it('ズームの段: +1 で寄り、-1 で引く(逆向きで元に戻る)', () => {
+    const near = orbitZoomStep(s, 1);
+    const far = orbitZoomStep(s, -1);
+    expect(near.radius).toBeLessThan(s.radius);
+    expect(far.radius).toBeGreaterThan(s.radius);
+    expect(orbitZoomStep(near, -1).radius).toBeCloseTo(s.radius);
+    expect(near.radius).toBeCloseTo(s.radius * Math.exp(-ORBIT_ZOOM_STEP * 0.001));
+  });
+
+  it('ホイール判定: Ctrl/⌘ か有効化済みのときだけズームする', () => {
+    expect(wheelZoomsStage(false, false)).toBe(false);
+    expect(wheelZoomsStage(true, false)).toBe(true);
+    expect(wheelZoomsStage(false, true)).toBe(true);
+    expect(wheelZoomsStage(true, true)).toBe(true);
+  });
+
+  it('deltaY の単位換算', () => {
+    expect(wheelDeltaPx(10, 0)).toBe(10);
+    expect(wheelDeltaPx(3, 1)).toBe(48);
+    expect(wheelDeltaPx(1, 2)).toBe(100);
+    expect(wheelDeltaPx(Number.NaN, 0)).toBe(0);
   });
 });

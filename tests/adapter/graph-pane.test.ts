@@ -47,15 +47,18 @@ describe('関係グラフの面', () => {
     expect(s.graphView.depth).toBe(3);
     expect(nodes(paint(s)).map((n) => n.getAttribute('data-pkc-entry'))).toEqual(['a', 'b', 'c', 'd']);
     const h = paint(s);
-    expect(h.querySelector('[data-pkc-graph-depth="3"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(h.querySelector('[data-pkc-graph-depth="2"]')?.getAttribute('aria-pressed')).toBe('false');
+    // 段階は <select>(狭い左の列でボタンが折り返さない)。選んでいる値と選択肢 1〜6 段階
+    const sel = h.querySelector<HTMLSelectElement>('select[data-pkc-action="graph-depth"]')!;
+    expect(sel.value).toBe('3');
+    expect([...sel.options].map((o) => o.textContent)).toEqual(['1 段階', '2 段階', '3 段階', '4 段階', '5 段階', '6 段階']);
+    expect(h.querySelector('button[data-pkc-action="graph-depth"]')).toBeNull();
   });
 
   it('🔴 全体: 選んでいなくても描き、手先のボタンは出ない', () => {
     const s = reduce(stateOf({ selectedLid: null }), { type: 'SET_GRAPH_VIEW', all: true }).state;
     const h = paint(s);
     expect(nodes(h)).toHaveLength(4);
-    expect(h.querySelector('[data-pkc-graph-depth]')).toBeNull();
+    expect(h.querySelector('[data-pkc-action="graph-depth"]')).toBeNull();
     expect(h.querySelector('[data-pkc-graph-scope="all"]')?.getAttribute('aria-pressed')).toBe('true');
     // 対照: 選んでいない + 「選んだノートから」は案内だけで図は出ない
     const h2 = paint(stateOf({ selectedLid: null }));
@@ -109,5 +112,17 @@ describe('関係グラフの面', () => {
     expect(BROWSE_MODES).toContain('graph');
     expect(BROWSE_TABS.find((t) => t.mode === 'graph')?.label).toBe('グラフ');
     expect(BROWSE_ICONS.graph).toBeTruthy();
+  });
+
+  it('🔴 「広い画面で開く」は左のタブの図だけに出る(中央では出ない)・表示モードの名前・文言', () => {
+    const left = document.createElement('div');
+    document.body.append(left);
+    new GraphRenderer(left, { wideButton: true }).render(stateOf({}));
+    const wide = left.querySelector<HTMLButtonElement>('[data-pkc-action="graph-open-wide"]');
+    expect(wide?.textContent).toBe('広い画面で開く');
+    const center = paint(stateOf({}));
+    expect(center.querySelector('[data-pkc-action="graph-open-wide"]')).toBeNull();
+    expect(left.querySelector('[data-pkc-field="graph-modes"]')?.getAttribute('aria-label')).toBe('表示モード');
+    expect(left.textContent).not.toMatch(/[1-6] 手/);
   });
 });

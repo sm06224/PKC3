@@ -1955,21 +1955,21 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     label: 'ルビ',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Alt+Shift+R'],
-    note: '選んだ字にふりがなを付けます([[ruby:漢字|かんじ]] の形)',
+    note: '選択した文字にふりがなを付けます([[ruby:漢字|かんじ]] の形)',
   },
   {
     id: 'format-emdot',
     label: '圏点',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Alt+Shift+E'],
-    note: '選んだ字の上に点を打ちます(^^ で囲みます)',
+    note: '選択した文字の上に点を打ちます(^^ で囲みます)',
   },
   {
     id: 'format-strike',
     label: '取り消し線',
     contexts: ['editor', 'row', 'append'],
     defaults: ['Alt+Shift+X'],
-    note: '選んだ字に取り消し線を引きます(~~ で囲みます)',
+    note: '選択した文字に取り消し線を引きます(~~ で囲みます)',
   },
   /**
    * 🔴 **注意書きのブロック 8 種**(#425 の「囲い(`:::`)の挿入口」)。鍵は付けない(`KEYLESS`)── 操作を探すで種類を名前で呼ぶ。
@@ -2125,7 +2125,7 @@ export const KEY_COMMANDS: readonly KeyCommand[] = [
     note: 'カーソルのある表の、列の幅を空白で揃えます(中の字は変えません)。1 画面編集の行では「全文を編集」に切り替えてから',
   },
   /**
-   * 🔴 **選んだ字を整える 5 つ**(#1233。Gemini 裁定 A ── 別アプリは作らず、本文で字を選んで
+   * 🔴 **選択した文字を整える 5 つ**(#1233。Gemini 裁定 A ── 別アプリは作らず、本文で字を選んで
    * 「操作を探す」から呼ぶ)。
    * ⚠ 鍵は付けない(`defaults: []`)── 名前で呼ぶだけの操作で、鍵が欲しい人は設定で割り当てる。
    *   既定を置くと、user が割り当てた鍵と重なって検め(重複の断り)が鳴る。`KEYLESS` に足すこと。

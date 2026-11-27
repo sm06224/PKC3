@@ -123,6 +123,11 @@ test('🔴 関係グラフ: 通常では Three.js 0 件 → 大規模 → 3D(回
   expect(box.height).toBeGreaterThan(80);
   const reset = pane.locator('[data-pkc-graph-zoom="reset"]');
   await expect(reset).toHaveText('100%');
+  // 🔴 有効にする前のただのホイールは、図を奪わない(倍率は 100% のまま)
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -400);
+  await page.waitForTimeout(200);
+  await expect(reset, '有効にしていないのにホイールで図がズームした').toHaveText('100%');
   // 何も無い角からドラッグして回す(節点を開かない)
   await page.mouse.move(box.x + 6, box.y + 6);
   await page.mouse.down();

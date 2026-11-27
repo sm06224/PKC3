@@ -3,7 +3,7 @@
  * 🔴 選択同期の画面の写しの材料(`syncSelectiveView`。#2066 段 5-B)── 実物の worker。
  *
  * 1. 同期が切: 断らずに既定を返し、DB に同期の行を 1 本も作らない
- * 2. ワークスペース全体: ノートを読まない(notes / relations / bodyRefs が空)
+ * 2. コレクション全体: ノートを読まない(notes / relations / bodyRefs が空)
  * 3. 選択同期: メタ・親フォルダ・つながりを返す。本文の参照は関連をたどるときだけ
  * 4. 書き出しと同じ閉包になる(`syncSnapshot` から作った閉包と、写しから作った閉包が同じ)
  */
@@ -39,7 +39,7 @@ describe('syncSelectiveView(実物の worker)', () => {
     expect(r).toEqual({ selective: { mode: 'all', related: '1hop', directLids: [] }, notes: [], relations: [], bodyRefs: {} });
   }, 60_000);
 
-  it('🔴 ワークスペース全体: ノートを 1 件も返さない(読まない)', async () => {
+  it('🔴 コレクション全体: ノートを 1 件も返さない(読まない)', async () => {
     const d = await seeded(true);
     const r = await d.request({ op: 'syncSelectiveView', cid: d.cid });
     expect(r.selective.mode).toBe('all');

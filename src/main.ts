@@ -3977,7 +3977,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
   };
   /**
    * 🔴 **選択同期の写しの係**(#2066 段 5-B)。判断は `features/sync/selective-view.ts`、ここは口を渡すだけ。
-   * ⚠ 同期が切なら worker に聞かない・ワークスペース全体なら worker はノートを読まない(定常の手間ゼロ)。
+   * ⚠ 同期が切なら worker に聞かない・コレクション全体なら worker はノートを読まない(定常の手間ゼロ)。
    */
   const syncScope = new SyncScopeKeeper({
     cid,

@@ -1,5 +1,5 @@
 /**
- * PDF の窓で選んだ字を、ノートへ**引く**(#275 段①)── 純粋な規則だけ。
+ * PDF の窓で選択した文字を、ノートへ**引く**(#275 段①)── 純粋な規則だけ。
  *
  * 🔑 窓(`public/pdf/`)は text と頁番号を**放送で送るだけ**で、ノートへ書くのは本体側である
  * (sqlite の行を書けるのは writer リースを持つタブだけ)。ここは本体側が使う 2 つの規則:
@@ -18,7 +18,7 @@ import { escapeInline } from '@features/markdown/html-to-markdown';
 export const PDF_QUOTE_MAX_BYTES = 64 * 1024;
 
 /** 超過したときの断り。⚠ 窓にも本体にも同じ字を出す(綴りを 2 か所に持たない)。 */
-export const PDF_QUOTE_TOO_LONG = '選んだ字が長すぎます(64KB まで)。短く選び直してください';
+export const PDF_QUOTE_TOO_LONG = '選択した文字が長すぎます(64KB まで)。短く選び直してください';
 
 /** UTF-8 での長さ。⚠ `TextEncoder` に頼らない(features は環境に依らず同じ答えを返す)。 */
 export function utf8Length(text: string): number {
@@ -55,8 +55,8 @@ function stripControls(s: string): string {
  *
  * 形(複数行の選びは各行に `> `。出典は**最後の行の末尾**):
  *
- *     > 選んだ字(1 行目)
- *     > 選んだ字(2 行目) (p.3、報告書.pdf)
+ *     > 選択した文字(1 行目)
+ *     > 選択した文字(2 行目) (p.3、報告書.pdf)
  *
  * ⚠ 頁番号は**必須** ── 出典を落とすと、後から原典へ戻る手がかりが無くなる。
  */

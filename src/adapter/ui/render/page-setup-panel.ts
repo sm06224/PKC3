@@ -43,20 +43,36 @@ export function pageSetupPanelOf(root: HTMLElement): HTMLElement | null {
   return opened.get(root)?.panel ?? null;
 }
 
-/** 本文の器の中の位置へ置く(押した ▾ の下。画面からはみ出すなら左へ寄せ、下が足りなければ上へ)。 */
+/** 画面の端から空ける余白(px)。 */
+const PLACE_MARGIN = 8;
+
+/**
+ * 🔴 **パネルを置く位置**(純粋関数)。押したボタンの**真下**・**左端をそろえ**、画面の左右の端からはみ出すなら内側へ寄せる。
+ * 下が足りなければボタンの上へ回す(それも収まらなければ上端に寄せる)。
+ */
+export function computePanelPosition(
+  anchor: { left: number; top: number; bottom: number },
+  panel: { width: number; height: number },
+  view: { width: number; height: number },
+  margin: number = PLACE_MARGIN,
+): { x: number; y: number } {
+  let x = anchor.left;
+  if (x + panel.width > view.width - margin) x = view.width - margin - panel.width;
+  x = Math.max(margin, x);
+  let y = anchor.bottom + 4;
+  if (view.height > 0 && y + panel.height > view.height - margin) y = Math.max(margin, anchor.top - 4 - panel.height);
+  return { x, y };
+}
+
+/** 押した ▾ の直下へ置く(`position: fixed` なので座標は画面基準)。 */
 function place(panel: HTMLElement, anchor: HTMLElement): void {
   const view = panel.ownerDocument.defaultView;
   const r = anchor.getBoundingClientRect();
-  const w = panel.offsetWidth;
-  const h = panel.offsetHeight;
-  const vw = view?.innerWidth ?? 0;
-  const vh = view?.innerHeight ?? 0;
-  const margin = 8;
-  let x = r.right - w;
-  if (x + w > vw - margin) x = vw - margin - w;
-  x = Math.max(margin, x);
-  let y = r.bottom + 4;
-  if (vh > 0 && y + h > vh - margin) y = Math.max(margin, r.top - 4 - h);
+  const { x, y } = computePanelPosition(
+    r,
+    { width: panel.offsetWidth, height: panel.offsetHeight },
+    { width: view?.innerWidth ?? 0, height: view?.innerHeight ?? 0 },
+  );
   panel.style.left = `${Math.round(x)}px`;
   panel.style.top = `${Math.round(y)}px`;
 }

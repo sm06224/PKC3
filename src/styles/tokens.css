@@ -61,6 +61,20 @@
   --neon: #008f52;
   --neon-core: #046d3d;
   color-scheme: light;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。明るい地では書いた色のまま */
+  --pkc-tc-red: #e03131;
+  --pkc-tc-red-name: red;
+  --pkc-tc-orange: #d9480f;
+  --pkc-tc-orange-name: orange;
+  --pkc-tc-green: #2b8a3e;
+  --pkc-tc-green-name: green;
+  --pkc-tc-blue: #1c7ed6;
+  --pkc-tc-blue-name: blue;
+  --pkc-tc-purple: #ae3ec9;
+  --pkc-tc-purple-name: purple;
+  --pkc-tc-gray: #6c757d;
+  --pkc-tc-gray-name: gray;
+  --pkc-tc-grey-name: grey;
 }
 
 :root[data-pkc-theme='dark'] {
@@ -97,6 +111,20 @@
   --neon: #1ee087;
   --neon-core: #d8fce4;
   color-scheme: dark;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。暗い地向けに明るい同系色(WCAG AA。tests/features/dark-text-colors.test.ts) */
+  --pkc-tc-red: #ffa8a8;
+  --pkc-tc-red-name: #ffa8a8;
+  --pkc-tc-orange: #ffc078;
+  --pkc-tc-orange-name: #ffc078;
+  --pkc-tc-green: #8ce99a;
+  --pkc-tc-green-name: #8ce99a;
+  --pkc-tc-blue: #a5d8ff;
+  --pkc-tc-blue-name: #a5d8ff;
+  --pkc-tc-purple: #eebefa;
+  --pkc-tc-purple-name: #eebefa;
+  --pkc-tc-gray: #ced4da;
+  --pkc-tc-gray-name: #ced4da;
+  --pkc-tc-grey-name: #ced4da;
 }
 
 /* GitHub(Primer)*/
@@ -134,6 +162,20 @@
   --neon: #0371ed;
   --neon-core: #0255b7;
   color-scheme: light;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。明るい地では書いた色のまま */
+  --pkc-tc-red: #e03131;
+  --pkc-tc-red-name: red;
+  --pkc-tc-orange: #d9480f;
+  --pkc-tc-orange-name: orange;
+  --pkc-tc-green: #2b8a3e;
+  --pkc-tc-green-name: green;
+  --pkc-tc-blue: #1c7ed6;
+  --pkc-tc-blue-name: blue;
+  --pkc-tc-purple: #ae3ec9;
+  --pkc-tc-purple-name: purple;
+  --pkc-tc-gray: #6c757d;
+  --pkc-tc-gray-name: gray;
+  --pkc-tc-grey-name: grey;
 }
 
 :root[data-pkc-theme='github-dark'] {
@@ -170,6 +212,20 @@
   --neon: #92c1ff;
   --neon-core: #eaf3fe;
   color-scheme: dark;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。暗い地向けに明るい同系色(WCAG AA。tests/features/dark-text-colors.test.ts) */
+  --pkc-tc-red: #ffa8a8;
+  --pkc-tc-red-name: #ffa8a8;
+  --pkc-tc-orange: #ffc078;
+  --pkc-tc-orange-name: #ffc078;
+  --pkc-tc-green: #8ce99a;
+  --pkc-tc-green-name: #8ce99a;
+  --pkc-tc-blue: #a5d8ff;
+  --pkc-tc-blue-name: #a5d8ff;
+  --pkc-tc-purple: #eebefa;
+  --pkc-tc-purple-name: #eebefa;
+  --pkc-tc-gray: #ced4da;
+  --pkc-tc-gray-name: #ced4da;
+  --pkc-tc-grey-name: #ced4da;
 }
 
 /* Solarized(Ethan Schoonover)*/
@@ -207,6 +263,20 @@
   --neon: #0882b0;
   --neon-core: #036388;
   color-scheme: light;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。明るい地では書いた色のまま */
+  --pkc-tc-red: #e03131;
+  --pkc-tc-red-name: red;
+  --pkc-tc-orange: #d9480f;
+  --pkc-tc-orange-name: orange;
+  --pkc-tc-green: #2b8a3e;
+  --pkc-tc-green-name: green;
+  --pkc-tc-blue: #1c7ed6;
+  --pkc-tc-blue-name: blue;
+  --pkc-tc-purple: #ae3ec9;
+  --pkc-tc-purple-name: purple;
+  --pkc-tc-gray: #6c757d;
+  --pkc-tc-gray-name: gray;
+  --pkc-tc-grey-name: grey;
 }
 
 :root[data-pkc-theme='solarized-dark'] {
@@ -243,6 +313,20 @@
   --neon: #6cc9fe;
   --neon-core: #e4f5ff;
   color-scheme: dark;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。暗い地向けに明るい同系色(WCAG AA。tests/features/dark-text-colors.test.ts) */
+  --pkc-tc-red: #ffa8a8;
+  --pkc-tc-red-name: #ffa8a8;
+  --pkc-tc-orange: #ffc078;
+  --pkc-tc-orange-name: #ffc078;
+  --pkc-tc-green: #8ce99a;
+  --pkc-tc-green-name: #8ce99a;
+  --pkc-tc-blue: #a5d8ff;
+  --pkc-tc-blue-name: #a5d8ff;
+  --pkc-tc-purple: #eebefa;
+  --pkc-tc-purple-name: #eebefa;
+  --pkc-tc-gray: #ced4da;
+  --pkc-tc-gray-name: #ced4da;
+  --pkc-tc-grey-name: #ced4da;
 }
 
 /* Dracula(公式仕様)*/
@@ -280,6 +364,20 @@
   --neon: #ccabfe;
   --neon-core: #f4efff;
   color-scheme: dark;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。暗い地向けに明るい同系色(WCAG AA。tests/features/dark-text-colors.test.ts) */
+  --pkc-tc-red: #ffa8a8;
+  --pkc-tc-red-name: #ffa8a8;
+  --pkc-tc-orange: #ffc078;
+  --pkc-tc-orange-name: #ffc078;
+  --pkc-tc-green: #8ce99a;
+  --pkc-tc-green-name: #8ce99a;
+  --pkc-tc-blue: #a5d8ff;
+  --pkc-tc-blue-name: #a5d8ff;
+  --pkc-tc-purple: #eebefa;
+  --pkc-tc-purple-name: #eebefa;
+  --pkc-tc-gray: #ced4da;
+  --pkc-tc-gray-name: #ced4da;
+  --pkc-tc-grey-name: #ced4da;
 }
 
 /* Nord(nord0..nord15)*/
@@ -317,6 +415,20 @@
   --neon: #0dd3f9;
   --neon-core: #def7fe;
   color-scheme: dark;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。暗い地向けに明るい同系色(WCAG AA。tests/features/dark-text-colors.test.ts) */
+  --pkc-tc-red: #ffa8a8;
+  --pkc-tc-red-name: #ffa8a8;
+  --pkc-tc-orange: #ffc078;
+  --pkc-tc-orange-name: #ffc078;
+  --pkc-tc-green: #8ce99a;
+  --pkc-tc-green-name: #8ce99a;
+  --pkc-tc-blue: #a5d8ff;
+  --pkc-tc-blue-name: #a5d8ff;
+  --pkc-tc-purple: #eebefa;
+  --pkc-tc-purple-name: #eebefa;
+  --pkc-tc-gray: #ced4da;
+  --pkc-tc-gray-name: #ced4da;
+  --pkc-tc-grey-name: #ced4da;
 }
 
 /* 端末風(P7b までの既定。方針転換で「6 つのうちの 1 つ」へ降ろした)*/
@@ -357,6 +469,20 @@
   --neon: #33ff66;
   --neon-core: #ddfcdf;
   color-scheme: dark;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。暗い地向けに明るい同系色(WCAG AA。tests/features/dark-text-colors.test.ts) */
+  --pkc-tc-red: #ffa8a8;
+  --pkc-tc-red-name: #ffa8a8;
+  --pkc-tc-orange: #ffc078;
+  --pkc-tc-orange-name: #ffc078;
+  --pkc-tc-green: #8ce99a;
+  --pkc-tc-green-name: #8ce99a;
+  --pkc-tc-blue: #a5d8ff;
+  --pkc-tc-blue-name: #a5d8ff;
+  --pkc-tc-purple: #eebefa;
+  --pkc-tc-purple-name: #eebefa;
+  --pkc-tc-gray: #ced4da;
+  --pkc-tc-gray-name: #ced4da;
+  --pkc-tc-grey-name: #ced4da;
 }
 
 /* レトロ(茶とオレンジ。PKC1 の配色を暗い地へ移した試用版。#1458)
@@ -395,6 +521,20 @@
   --neon: #fbac01;
   --neon-core: #ffefdb;
   color-scheme: dark;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。暗い地向けに明るい同系色(WCAG AA。tests/features/dark-text-colors.test.ts) */
+  --pkc-tc-red: #ffa8a8;
+  --pkc-tc-red-name: #ffa8a8;
+  --pkc-tc-orange: #ffc078;
+  --pkc-tc-orange-name: #ffc078;
+  --pkc-tc-green: #8ce99a;
+  --pkc-tc-green-name: #8ce99a;
+  --pkc-tc-blue: #a5d8ff;
+  --pkc-tc-blue-name: #a5d8ff;
+  --pkc-tc-purple: #eebefa;
+  --pkc-tc-purple-name: #eebefa;
+  --pkc-tc-gray: #ced4da;
+  --pkc-tc-gray-name: #ced4da;
+  --pkc-tc-grey-name: #ced4da;
 }
 
 /* 紙(原典の PKC の「紙とインク」の温かさを、段差で区切る作りに移した物。#1982 段 4)
@@ -434,6 +574,20 @@
   --neon: #b95803;
   --neon-core: #8e4201;
   color-scheme: light;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。明るい地では書いた色のまま */
+  --pkc-tc-red: #e03131;
+  --pkc-tc-red-name: red;
+  --pkc-tc-orange: #d9480f;
+  --pkc-tc-orange-name: orange;
+  --pkc-tc-green: #2b8a3e;
+  --pkc-tc-green-name: green;
+  --pkc-tc-blue: #1c7ed6;
+  --pkc-tc-blue-name: blue;
+  --pkc-tc-purple: #ae3ec9;
+  --pkc-tc-purple-name: purple;
+  --pkc-tc-gray: #6c757d;
+  --pkc-tc-gray-name: gray;
+  --pkc-tc-grey-name: grey;
 }
 
 /* 紙(ダーク)── 夜の机に置いたセピアの紙。琥珀色のアクセント */
@@ -471,6 +625,20 @@
   --neon: #fea845;
   --neon-core: #ffefe0;
   color-scheme: dark;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。暗い地向けに明るい同系色(WCAG AA。tests/features/dark-text-colors.test.ts) */
+  --pkc-tc-red: #ffa8a8;
+  --pkc-tc-red-name: #ffa8a8;
+  --pkc-tc-orange: #ffc078;
+  --pkc-tc-orange-name: #ffc078;
+  --pkc-tc-green: #8ce99a;
+  --pkc-tc-green-name: #8ce99a;
+  --pkc-tc-blue: #a5d8ff;
+  --pkc-tc-blue-name: #a5d8ff;
+  --pkc-tc-purple: #eebefa;
+  --pkc-tc-purple-name: #eebefa;
+  --pkc-tc-gray: #ced4da;
+  --pkc-tc-gray-name: #ced4da;
+  --pkc-tc-grey-name: #ced4da;
 }
 
 /* アクセントの色の選択(#1982 段 4)。配色とは独立に --accent 系の 4 トークンと、輪郭の近接発光(ネオン)の 2 色(`--neon` / `--neon-core`)を差し替える。

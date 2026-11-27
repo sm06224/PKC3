@@ -30,7 +30,8 @@ export function applyCodeLangBadges(host: HTMLElement): void {
     const codeEl = block.querySelector<HTMLElement>('pre > code[class*="language-"]');
     if (!codeEl) continue;
 
-    const lang = extractLanguageName(codeEl.className);
+    // 🔴 ```3d は器の中の原文(language-json)ではなく、囲みの言語(3d)を出す ── 3D ビューアの上段と二重見出しにしない(V-6)
+    const lang = block.getAttribute('data-pkc-render-lang') === '3d' ? '3D' : extractLanguageName(codeEl.className);
     if (!lang || IGNORED_LANGS.has(lang.toLowerCase())) continue;
 
     const badge = block.ownerDocument.createElement('span');

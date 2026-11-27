@@ -1,11 +1,11 @@
 /**
  * 🔴 **選択同期の一覧の印**(#2066 段 5-B)── 左の列(`filer.ts`)と 2 ペイン(`dual-filer.ts`)が同じ 1 つを使う。
- * ⚠ 出す / 出さないの判定は `selectiveActive` 1 つ(同期が切・ワークスペース全体なら何も付けない)。
+ * ⚠ 出す / 出さないの判定は `selectiveActive` 1 つ(同期が切・コレクション全体なら何も付けない)。
  */
 import type { AppState } from '@adapter/state/app-state';
 import { SELECTIVE_REASON_HINTS, SELECTIVE_REASON_LABELS, selectiveActive } from '@features/sync/selective-view';
 import type { SelectiveReason } from '@features/sync/selective-sync';
-/** 🔴 選択同期の理由(#2066 段 5-B)。効いていない(同期が切・ワークスペース全体)・対象外は `undefined`。 */
+/** 🔴 選択同期の理由(#2066 段 5-B)。効いていない(同期が切・コレクション全体)・対象外は `undefined`。 */
 export function syncReasonOf(state: Pick<AppState, 'syncScope'>, lid: string): SelectiveReason | undefined {
   const view = state.syncScope;
   return selectiveActive(view) ? view.reasons.get(lid) : undefined;

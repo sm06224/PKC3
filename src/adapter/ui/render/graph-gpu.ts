@@ -41,7 +41,15 @@ import {
   zoomLabel,
   type CanvasCamera,
 } from '@features/canvas/viewport';
-import { orbitPan, orbitRotate, orbitZoom, orbitCameraPosition, type OrbitState } from '@features/viewer3d/orbit-math';
+import {
+  orbitPan,
+  orbitRotate,
+  orbitZoom,
+  orbitCameraPosition,
+  wheelDeltaPx,
+  wheelZoomsStage,
+  type OrbitState,
+} from '@features/viewer3d/orbit-math';
 import type { GraphView } from '@features/relation/graph-view';
 import {
   GRAPH_3D_FOV,
@@ -138,6 +146,8 @@ export class GraphGpuView {
   private orbitValue: OrbitState | null = null;
   private home: OrbitState | null = null;
   private hover: string | null = null;
+  /** 🔴 描画面を「有効」にしたか(クリックで入り、Esc・外側のクリックで抜ける)。有効の間だけ、ただのホイールでもズームする。 */
+  private active = false;
   private canvas2d: HTMLCanvasElement | null = null;
   private readonly cleanups: Array<() => void> = [];
   private readonly onCamera2d: ((cam: CanvasCamera) => void) | undefined;
@@ -163,8 +173,8 @@ export class GraphGpuView {
     this.stage.setAttribute(
       'aria-label',
       opts.mode === 'gpu3d'
-        ? '関係グラフ(3D)。ドラッグで回転、Shift + ドラッグか右ドラッグで移動、ホイールで拡大・縮小、矢印キーでも回せます。0 で視点をリセット、Enter でポインタの下のノートを開きます'
-        : '関係グラフ(大規模表示)。ドラッグで移動、Ctrl + ホイールで拡大・縮小、矢印キーでも動かせます。0 で 100% に戻し、Enter でポインタの下のノートを開きます',
+        ? '関係グラフ(3D)。ドラッグで回転、Shift + ドラッグか右ドラッグで移動、Ctrl + ホイールで拡大・縮小(クリックして有効にするとホイールだけでも)、矢印キーでも回せます。0 で視点をリセット、Enter でポインタの下のノートを開きます'
+        : '関係グラフ(大規模表示)。ドラッグで移動、Ctrl + ホイールで拡大・縮小(クリックして有効にするとホイールだけでも)、矢印キーでも動かせます。0 で 100% に戻し、Enter でポインタの下のノートを開きます',
     );
 
     this.hoverButton = doc.createElement('button');
@@ -300,6 +310,14 @@ export class GraphGpuView {
     this.onCamera2d?.(cam);
   }
 
+  /** 描画面の有効 / 無効(ホイールでのズームの許可)。 */
+  private setActive(on: boolean): void {
+    if (this.active === on) return;
+    this.active = on;
+    if (on) this.stage.setAttribute('data-pkc-graph-active', '');
+    else this.stage.removeAttribute('data-pkc-graph-active');
+  }
+
   private afterCamera(): void {
     this.placeHover();
     this.onViewChange?.();
@@ -321,7 +339,7 @@ export class GraphGpuView {
     }
     const p = this.points[this.pointIndex.get(lid)!]!;
     b.setAttribute('data-pkc-entry', lid);
-    b.textContent = `${p.title === '' ? '(無題)' : p.title}・つながり ${this.degrees.get(lid) ?? 0}`;
+    b.textContent = `${p.title === '' ? '(無題)' : p.title} (つながり ${this.degrees.get(lid) ?? 0} 件)`;
     b.title = p.title;
     b.hidden = false;
     this.placeHover();
@@ -374,8 +392,16 @@ export class GraphGpuView {
     this.on(stage, 'click', (e) => {
       if (e.target !== this.hoverButton) e.stopPropagation();
     });
+    const doc = stage.ownerDocument;
+    const onOutside = (e: Event): void => {
+      if (e.target instanceof Node && stage.contains(e.target)) return;
+      this.setActive(false);
+    };
+    doc.addEventListener('pointerdown', onOutside, true);
+    this.cleanups.push(() => doc.removeEventListener('pointerdown', onOutside, true));
     this.on(stage, 'pointerdown', (e) => {
       if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
+      this.setActive(true);
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false, button: e.button };
       this.surface?.setPinned(true);
       if (e.button === 1) e.preventDefault();
@@ -443,22 +469,29 @@ export class GraphGpuView {
       stage,
       'wheel',
       (e) => {
+        // 🔴 スクロールの取り合いを 0 にする: Ctrl/⌘ + ホイール(ピンチ含む)か有効なときだけ奪う。
+        //   それ以外は `preventDefault` せず親のスクロールへ流す(⚠ 奪う経路があるので非 passive で登録する)
+        if (!wheelZoomsStage(e.ctrlKey || e.metaKey, this.active)) return;
         if (this.mode === 'gpu2d') {
-          // 従来の図と同じ: Ctrl / ⌘ + ホイールで拡大・縮小(ホイールだけなら画面のスクロールのまま)
-          if (!(e.ctrlKey || e.metaKey)) return;
           e.preventDefault();
           const p = this.local(e);
-          const unit = e.deltaMode === 1 ? 16 : 1;
-          this.setCam2d(zoomAtPoint(this.cam2d, this.cam2d.zoom * Math.exp(-e.deltaY * unit * 0.0015), p.x, p.y));
+          this.setCam2d(zoomAtPoint(this.cam2d, this.cam2d.zoom * Math.exp(-wheelDeltaPx(e.deltaY, e.deltaMode) * 0.0015), p.x, p.y));
         } else {
           e.preventDefault();
-          if (this.orbitValue !== null) this.orbitValue = orbitZoom(this.orbitValue, e.deltaY);
+          if (this.orbitValue !== null) this.orbitValue = orbitZoom(this.orbitValue, wheelDeltaPx(e.deltaY, e.deltaMode));
         }
         this.afterCamera();
       },
       { passive: false },
     );
     this.on(stage, 'keydown', (e) => {
+      if (e.key === 'Escape' && this.active) {
+        // 有効を抜ける(⚠ 背後のノート選択解除などへ Esc を流さない)
+        this.setActive(false);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const step = 20;
       switch (e.key) {

@@ -174,7 +174,7 @@ export interface EntryMenuContext {
   readonly labelled?: boolean;
   /**
    * 🔴 **選択同期で直接指定しているか**(#2066 段 5-B)。⚠ **省く = 出さない**(`undefined`)── 同期が入 かつ
-   *   「選んだエントリだけ同期」のとき、user 領域のノートの行のメニューだけが渡す(同期が切・ワークスペース全体・system 領域は渡さない)。
+   *   「選んだエントリだけ同期」のとき、user 領域のノートの行のメニューだけが渡す(同期が切・コレクション全体・system 領域は渡さない)。
    */
   readonly syncDirect?: boolean;
   /**

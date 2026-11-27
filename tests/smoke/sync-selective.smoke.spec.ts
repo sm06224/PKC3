@@ -114,7 +114,7 @@ test('🔴 選択同期: フォルダを同期対象にすると配下だけが�
   expect(second.container.tombstones, '同期対象から外しただけなのに削除の記録が出た').toEqual([]);
   expect(second.container.notes.map((n) => n.title)).toEqual([]);
 
-  // ── ④ もう一度付けてから「ワークスペース全体」へ戻すと、印・情報ペインの欄・メニュー項目がすべて消える
+  // ── ④ もう一度付けてから「コレクション全体」へ戻すと、印・情報ペインの欄・メニュー項目がすべて消える
   await rightClickRow(page, '共有フォルダ', 'sync-select-entry');
   await expect(row(page, '共有フォルダ')).toHaveAttribute('data-pkc-sync-scope', 'direct');
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');

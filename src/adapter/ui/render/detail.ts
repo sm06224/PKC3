@@ -13,6 +13,7 @@
  */
 import { appTranscriptFollow } from './transcript-follow';
 import { DAY_NAV_FIELD, paintDayNav } from './day-nav';
+import { buildPrintLayoutSegment } from './note-layout';
 import { renderMarkdown } from '@features/markdown/markdown-render';
 import { isOnePaneEditorMode, isRichEditorMode } from '@features/editor-mode';
 import { flipTaskInDraft } from '@features/markdown/body-rewrite';
@@ -2499,7 +2500,12 @@ export class DetailRenderer {
           const split = document.createElement('span');
           split.setAttribute('data-pkc-field', 'copy-split');
           split.append(md, copyMore, copySource);
-          bar.append(this.barButton, split, find, cols);
+          /**
+           * 🔴 **印刷レイアウト表示の 2 択を帯にも置く**(右の情報ペインが畳まれる 1100px 以下で 1 クリックにするため。
+           *   CSS が 1100px 超では隠す)。⚠ 情報ペインと同じ部品・同じ受け手(`toggle-print-layout`)。
+           */
+          const printSeg = buildPrintLayoutSegment(document, 'bar-print-layout');
+          bar.append(this.barButton, split, find, cols, printSeg);
         } else {
           // 保存失敗からの復帰導線: baseline ≠ persisted =「disk に未達の commit が
           // ある」証拠(P3-5 の分離の回収点)。黙って死なせず再送を提示する
@@ -3159,7 +3165,16 @@ export class DetailRenderer {
     editAll.setAttribute(HINT_BASE, '本文全体を 1 つの入力欄で編集します');
     editAll.setAttribute(HINT_COMMAND, 'edit-all');
     editAll.title = hintTitle('本文全体を 1 つの入力欄で編集します', 'edit-all');
-    tools.append(editAll);
+    /**
+     * 🔴 **「全文を編集」は 1 段目の編集の帯(「編集をやめる」の隣)に置く**(縦の場所を空ける。リッチ編集の改善)。
+     * ⚠ 帯が無い経路(退避など)だけ、従来どおり別の 1 段に置く。
+     */
+    const toolbar = this.region.querySelector<HTMLElement>("[data-pkc-field='detail-toolbar']");
+    if (toolbar !== null) {
+      toolbar.insertBefore(editAll, toolbar.querySelector(`[data-pkc-field='${TOTAL_CHARS_FIELD}']`));
+    } else {
+      tools.append(editAll);
+    }
     /**
      * 🔴 **文書の情報(frontmatter)は「札」として上に出す**(#284)。
      *
@@ -3174,7 +3189,7 @@ export class DetailRenderer {
      */
     const fmCard = document.createElement('div');
     fmCard.setAttribute('data-pkc-region', 'live-frontmatter');
-    this.region.append(tools, fmCard, pane, note);
+    this.region.append(...(tools.childElementCount > 0 ? [tools] : []), fmCard, pane, note);
 
     let body = initialBody;
     /**
@@ -3407,6 +3422,8 @@ export class DetailRenderer {
       //    (設定を切り替えたら次に押したブロックから効く)
       richEnabled: () => isRichEditorMode(appEditorMode.getMode()),
     });
+    // 🔴 リッチ編集の設定のときだけ、押せるブロックにポインタを載せると薄く縁が出る(CSS。配置は動かさない)
+    if (isRichEditorMode(appEditorMode.getMode())) pane.setAttribute('data-pkc-rich-mode', '');
     /**
      * 🔴 **押した行を開いた状態で編集に入る**(#395 段③)。
      *

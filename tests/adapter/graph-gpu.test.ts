@@ -344,6 +344,45 @@ describe('🔴 カメラ', () => {
     v.dispose();
   });
 
+  it('🔴 3D: 有効にしていないただのホイールは奪わず(preventDefault なし・カメラ不変)、Ctrl+ホイール / クリックで有効にした後は寄る。Esc・外側のクリックで抜ける', async () => {
+    const { v, surface } = mount(bigView(100), 'gpu3d');
+    await acquire(surface);
+    const home = v.orbit!;
+    const plain = new WheelEvent('wheel', { deltaY: 300, bubbles: true, cancelable: true });
+    v.stage.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
+    expect(v.orbit).toEqual(home);
+    // Ctrl(ピンチも ctrlKey 付きの wheel で届く)
+    const ctrl = new WheelEvent('wheel', { deltaY: 300, bubbles: true, cancelable: true });
+    Object.defineProperty(ctrl, 'ctrlKey', { value: true });
+    v.stage.dispatchEvent(ctrl);
+    expect(ctrl.defaultPrevented).toBe(true);
+    expect(v.orbit!.radius).toBeGreaterThan(home.radius);
+    v.resetView();
+    // クリックで有効 → 枠が出る
+    down(v.stage, 10, 10);
+    up(v.stage, 10, 10);
+    expect(v.stage.hasAttribute('data-pkc-graph-active')).toBe(true);
+    const act = new WheelEvent('wheel', { deltaY: 300, bubbles: true, cancelable: true });
+    v.stage.dispatchEvent(act);
+    expect(act.defaultPrevented).toBe(true);
+    // Esc で抜ける(Esc は外へ流さない)
+    const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    v.stage.dispatchEvent(esc);
+    expect(esc.defaultPrevented).toBe(true);
+    expect(v.stage.hasAttribute('data-pkc-graph-active')).toBe(false);
+    const after = new WheelEvent('wheel', { deltaY: 300, bubbles: true, cancelable: true });
+    v.stage.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+    // 外側のクリックで抜ける
+    down(v.stage, 10, 10);
+    up(v.stage, 10, 10);
+    expect(v.stage.hasAttribute('data-pkc-graph-active')).toBe(true);
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 2, bubbles: true }));
+    expect(v.stage.hasAttribute('data-pkc-graph-active')).toBe(false);
+    v.dispose();
+  });
+
   it('3D: ドラッグで回転・Shift + ドラッグで移動・ホイールで寄る・+ / − / 0 / 矢印', async () => {
     const { v, surface } = mount(bigView(100), 'gpu3d');
     await acquire(surface);

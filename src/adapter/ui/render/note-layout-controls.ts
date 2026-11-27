@@ -4,8 +4,8 @@
  * 情報ペインの「ページ設定」の行と、書式の帯の「ページ設定 ▾」のパネルが**同じ部品**を組み、**同じ塗り方**で塗る ──
  * 2 か所で別々に組むと、字・説明・押せる条件が片方だけ変わる(CLAUDE.md §7)。
  *
- * - 印刷レイアウト表示の切替(`toggle-print-layout`)── この端末の見方(`note-layout.ts`)。
- * - このノートの紙面・余白・段組み・字体の 4 つの選択欄(`set-note-layout`)。先頭は常に「アプリの設定に従う」(選ぶとキーが前書きから消える)。
+ * - 印刷レイアウト表示の 2 択(`toggle-print-layout`)── この端末の見方(`note-layout.ts`)。
+ * - このノートの紙面・余白・段組み・字体の 4 つの選択欄(`set-note-layout`)。先頭は常に「アプリ設定」(選ぶとキーが前書きから消える)。
  * - 「すべてアプリの設定に戻す」(`reset-note-layout`)── 個別の指定が 1 つ以上あるときだけ押せる(片道を作らない)。
  *
  * 🔑 値はどちらも**同じ本文**(`state.openBody`。編集中は下書き)の前書きから読む。片方で変えたら state が変わり、
@@ -20,7 +20,7 @@ import {
   type NoteLayoutField,
   type NoteLayoutSpec,
 } from '@features/page-layout';
-import { isPrintLayoutOn, paintPrintLayoutButton, TOGGLE_PRINT_LAYOUT_ACTION } from './note-layout';
+import { buildPrintLayoutSegment, isPrintLayoutOn, paintPrintLayoutSegment } from './note-layout';
 import { plainChoiceLabel } from './settings/default-mark';
 
 /** 4 つの選択欄の `data-pkc-action`。 */
@@ -29,7 +29,8 @@ export const SET_NOTE_LAYOUT_ACTION = 'set-note-layout';
 export const RESET_NOTE_LAYOUT_ACTION = 'reset-note-layout';
 
 export interface NoteLayoutControls {
-  readonly toggle: HTMLButtonElement;
+  /** 印刷レイアウト表示の 2 択(`通常` | `印刷レイアウト`)の器 */
+  readonly toggle: HTMLElement;
   readonly grid: HTMLElement;
   readonly reset: HTMLButtonElement;
 }
@@ -40,15 +41,12 @@ export interface NoteLayoutControls {
  */
 export function ensureNoteLayoutControls(box: HTMLElement, toggleField: string): NoteLayoutControls {
   const doc = box.ownerDocument;
-  const toggle0 = box.querySelector<HTMLButtonElement>(`[data-pkc-action="${TOGGLE_PRINT_LAYOUT_ACTION}"]`);
+  const toggle0 = box.querySelector<HTMLElement>(`[data-pkc-print-layout-segment]`);
   const reset0 = box.querySelector<HTMLButtonElement>(`[data-pkc-action="${RESET_NOTE_LAYOUT_ACTION}"]`);
   const grid0 = box.querySelector<HTMLElement>('[data-pkc-field="inspector-note-layout"]');
   if (toggle0 !== null && reset0 !== null && grid0 !== null) return { toggle: toggle0, grid: grid0, reset: reset0 };
   box.textContent = '';
-  const toggle = doc.createElement('button');
-  toggle.type = 'button';
-  toggle.setAttribute('data-pkc-action', 'toggle-print-layout'); // = TOGGLE_PRINT_LAYOUT_ACTION(字のまま書く ── 出口の全数検査が綴りで追う)
-  toggle.setAttribute('data-pkc-field', toggleField);
+  const toggle = buildPrintLayoutSegment(doc, toggleField);
   const grid = doc.createElement('span');
   grid.setAttribute('data-pkc-field', 'inspector-note-layout');
   for (const f of NOTE_LAYOUT_FIELDS) {
@@ -61,7 +59,7 @@ export function ensureNoteLayoutControls(box: HTMLElement, toggleField: string):
     sel.setAttribute('aria-label', `このノートの${NOTE_LAYOUT_LABELS[f]}`);
     const inherit = doc.createElement('option');
     inherit.value = '';
-    inherit.textContent = 'アプリの設定に従う';
+    inherit.textContent = 'アプリ設定';
     sel.append(inherit);
     for (const c of noteLayoutChoices(f)) {
       const opt = doc.createElement('option');
@@ -91,13 +89,13 @@ export function paintNoteLayoutControls(
   locked: boolean,
   withNote: (base: string) => string,
 ): void {
-  paintPrintLayoutButton(c.toggle, isPrintLayoutOn(c.toggle.ownerDocument.documentElement));
+  paintPrintLayoutSegment(c.toggle, isPrintLayoutOn(c.toggle.ownerDocument.documentElement));
   for (const sel of c.grid.querySelectorAll<HTMLSelectElement>(`select[data-pkc-action="${SET_NOTE_LAYOUT_ACTION}"]`)) {
     const f = sel.getAttribute('data-pkc-note-layout-field') as NoteLayoutField;
     const v = spec[f] ?? '';
     if (sel.value !== v) sel.value = v;
     if (sel.disabled !== locked) sel.disabled = locked;
-    const base = `このノートだけの${NOTE_LAYOUT_LABELS[f]}です。「アプリの設定に従う」を選ぶと、本文の先頭の情報から消えます`;
+    const base = `このノートだけの${NOTE_LAYOUT_LABELS[f]}です。「アプリ設定」を選ぶと、前書き(frontmatter)から消えます`;
     const tip = locked ? withNote(base) : base;
     if (sel.title !== tip) sel.title = tip;
   }

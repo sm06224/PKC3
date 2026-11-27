@@ -308,7 +308,7 @@ describe('🔴 選択同期(#2066 段 5-A)の設定の行', () => {
     });
     await w.request({ op: 'syncConfigure', enabled: true });
     const all = await w.request({ op: 'syncSelectiveView', cid: 'c1' });
-    expect(all.notes, 'ワークスペース全体なのにノートを読んだ').toEqual([]);
+    expect(all.notes, 'コレクション全体なのにノートを読んだ').toEqual([]);
     expect(await syncScopesIn((await w.request({ op: 'exportImage' })).image), '読むだけの op が同期の行を作った').toEqual([]);
   }, 60_000);
 

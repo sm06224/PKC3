@@ -4856,10 +4856,33 @@ dd[data-pkc-field='inspector-toc'] {
 .pkc-3d-btn {
   font-size: var(--btn-fs-sm);
 }
-/* 切替の入は形(太字)で示す ── 色は意味にだけ使う */
+/* 切替の入は形で示す ── 薄い地の色 + アクセントの下線(塗りつぶさない) */
 .pkc-3d-btn[aria-pressed='true'] {
   font-weight: 600;
-  box-shadow: inset 0 -2px 0 var(--fg);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+/* ── 3D ビューア v4.0 仕上げ(スクロール 0 取り合い・ズーム・視点・拡大)── 区切りの塊 ── */
+/* 情報(形式・大きさ・描画方式)は中黒で区切る(空の欄には出さない) */
+.pkc-3d-info:not(:empty) + .pkc-3d-info:not(:empty)::before {
+  content: '·';
+  margin: 0 var(--s1);
+  color: var(--muted);
+  font-weight: 400;
+}
+/* ズーム・視点のボタンは小さく(− / + は正方形に近く) */
+.pkc-3d-btn[data-pkc-3d-op='zoom-out'],
+.pkc-3d-btn[data-pkc-3d-op='zoom-in'] {
+  min-width: 2em;
+  text-align: center;
+}
+/* 描画面を「有効」にしたら(クリック)、ホイールだけでもズームする ── 輪郭で示す */
+.pkc-3d-stage[data-pkc-3d-active] {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.pkc-3d-viewer[data-pkc-3d-expanded] .pkc-3d-stage {
+  height: max(560px, 75vh) !important;
 }
 .pkc-3d-stage {
   position: relative;
@@ -4937,20 +4960,117 @@ dd[data-pkc-field='inspector-toc'] {
   border: 0;
   display: block;
 }
-/* 「状態を初期化」のバー ── 控えめなゴーストのボタン 1 つを右に寄せる(箱の上・同じ場所に固定) */
+/* ウィジェットの上の 1 行 ── 左に種類(HTML)、右に「ノートへ保存」「状態を初期化」(箱の上・同じ場所に固定)。
+ * 言語バッジ(`.pkc-code-lang`)は同じ行に重ねず、この行の左の字へ寄せる。 */
 .pkc-md-rendered .pkc-widget-bar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: var(--s2);
   margin-bottom: 2px;
+}
+.pkc-md-rendered .pkc-widget-bar::before {
+  content: 'HTML';
+  margin-right: auto;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.pkc-md-rendered .pkc-md-block:has(.pkc-widget-bar) > .pkc-code-lang {
+  display: none;
+}
+/* 🔴 1 行にまとめる ── ブロック共通の上余白(コピー / 原文ボタンの段)を詰め、ウィジェットの行をその段へ上げる。
+ * 右端はコピー / 原文ボタン(絶対配置)の分だけ空けて重ねない */
+.pkc-md-rendered .pkc-md-block.pkc-md-block:has(.pkc-widget-bar) {
+  padding-top: 3px;
+}
+.pkc-md-rendered .pkc-md-block:has(.pkc-widget-bar) .pkc-widget-bar {
+  padding-right: 56px;
+  padding-left: 8px;
 }
 .pkc-md-rendered .pkc-widget-bar > button {
   font-size: var(--btn-fs-sm);
   padding: 0 8px;
   min-height: 0;
-  color: var(--muted);
+  color: var(--fg);
   background: transparent;
-  border-color: transparent;
+  border: 1px solid var(--border);
 }
+/* 押せないボタンも読める(薄くしすぎない)── 暗いテーマでも字が地に溶けない */
+.pkc-md-rendered .pkc-widget-bar > button:disabled {
+  color: var(--muted);
+  border-color: var(--hairline);
+  opacity: 1;
+  cursor: default;
+}
+/* BEGIN dark-text-colors */
+/* 🔴 暗いテーマの文字色(`:文字:red:` と、文字色 ▾ の 6 色)── 明るい地向けの濃さのままだと暗い地で沈むので、
+ * 暗いテーマだけ明るい同系色へ差し替える(本文の書き方は変えない。WCAG AA 4.5:1 は tests/features/dark-text-colors.test.ts で検算) */
+:root[data-pkc-tone='dark'] {
+  --pkc-tc-red: var(--pkc-dark-text-red);
+  --pkc-tc-red-name: var(--pkc-dark-text-red);
+  --pkc-dark-text-red: #ffa8a8;
+  --pkc-tc-orange: var(--pkc-dark-text-orange);
+  --pkc-tc-orange-name: var(--pkc-dark-text-orange);
+  --pkc-dark-text-orange: #ffc078;
+  --pkc-tc-green: var(--pkc-dark-text-green);
+  --pkc-tc-green-name: var(--pkc-dark-text-green);
+  --pkc-dark-text-green: #8ce99a;
+  --pkc-tc-blue: var(--pkc-dark-text-blue);
+  --pkc-tc-blue-name: var(--pkc-dark-text-blue);
+  --pkc-dark-text-blue: #a5d8ff;
+  --pkc-tc-purple: var(--pkc-dark-text-purple);
+  --pkc-tc-purple-name: var(--pkc-dark-text-purple);
+  --pkc-dark-text-purple: #eebefa;
+  --pkc-tc-gray: var(--pkc-dark-text-gray);
+  --pkc-tc-gray-name: var(--pkc-dark-text-gray);
+  --pkc-tc-grey-name: var(--pkc-dark-text-gray);
+  --pkc-dark-text-gray: #ced4da;
+}
+/* ⚠ 規則は `.pkc-md-rendered` から始める(本文 CSS の書き出しへ載る形 = tests/build/body-css.test.ts)。
+ * 変数の既定値は tokens.css(書いた色のまま)。暗いテーマだけ下の :root で明るい同系色へ上書きする */
+.pkc-md-rendered :is(span[style^='color: red'], span[style*='; color: red']) {
+  color: var(--pkc-tc-red-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #e03131'], span[style*='; color: #e03131']) {
+  color: var(--pkc-tc-red) !important;
+}
+.pkc-md-rendered :is(span[style^='color: orange'], span[style*='; color: orange']) {
+  color: var(--pkc-tc-orange-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #d9480f'], span[style*='; color: #d9480f']) {
+  color: var(--pkc-tc-orange) !important;
+}
+.pkc-md-rendered :is(span[style^='color: green'], span[style*='; color: green']) {
+  color: var(--pkc-tc-green-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #2b8a3e'], span[style*='; color: #2b8a3e']) {
+  color: var(--pkc-tc-green) !important;
+}
+.pkc-md-rendered :is(span[style^='color: blue'], span[style*='; color: blue']) {
+  color: var(--pkc-tc-blue-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #1c7ed6'], span[style*='; color: #1c7ed6']) {
+  color: var(--pkc-tc-blue) !important;
+}
+.pkc-md-rendered :is(span[style^='color: purple'], span[style*='; color: purple']) {
+  color: var(--pkc-tc-purple-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #ae3ec9'], span[style*='; color: #ae3ec9']) {
+  color: var(--pkc-tc-purple) !important;
+}
+.pkc-md-rendered :is(span[style^='color: gray'], span[style*='; color: gray']) {
+  color: var(--pkc-tc-gray-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: grey'], span[style*='; color: grey']) {
+  color: var(--pkc-tc-grey-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #6c757d'], span[style*='; color: #6c757d']) {
+  color: var(--pkc-tc-gray) !important;
+}
+/* END dark-text-colors */
 /* ⚠ 箱を置けなかったときは**理由を見せる**(黙って原文だけ出さない) */
 .pkc-md-rendered [data-pkc-react-state='failed']::before {
   content: attr(data-pkc-react-error);
@@ -5674,6 +5794,9 @@ dd[data-pkc-field='inspector-toc'] {
  * 🔑 だから既定は上の `display: none` のまま ── ここは**例外を 1 つ開けている**。 */
 .pkc-md-rendered .pkc-format-block.pkc-line[data-pkc-line-missing] {
   display: block;
+  /* 付箋(絶対配置)の下に隠れない ── 板の上でも前に出す */
+  position: relative;
+  z-index: 1000;
 }
 [data-pkc-field='place-line-note'] {
   display: block;
@@ -5726,11 +5849,59 @@ dd[data-pkc-field='inspector-toc'] {
 [data-pkc-field='canvas-bar'] button[hidden] {
   display: none;
 }
-/* 押している物は地と字の反転で示す(属性だけにしない ── 描画の道具のバーと同じ) */
+/* 押している物は形(太字・下線)と薄い色味で示す(地と字の反転で塗りつぶさない ── 3D・関係グラフの切替と同じ) */
 [data-pkc-field='canvas-bar'] button[aria-pressed='true'] {
-  background: var(--fg);
-  color: var(--surface);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
   font-weight: 600;
+}
+/* 常に出る道具と、複数選択のときだけ出る道具(整列・グループ)の仕切り */
+[data-pkc-field='canvas-bar'] [data-pkc-field='canvas-bar-sep'] {
+  align-self: stretch;
+  width: 1px;
+  margin: 0 var(--s1);
+  background: var(--hairline);
+}
+[data-pkc-field='canvas-bar'] [data-pkc-field='canvas-bar-sep'][hidden] {
+  display: none;
+}
+/* 「いつもキャンバスで開く」は常用ではない設定 ── バーの末尾で控えめに出す */
+[data-pkc-field='canvas-bar'] button[data-pkc-canvas-cmd='default'] {
+  margin-left: auto;
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+[data-pkc-field='canvas-bar'] button[data-pkc-canvas-cmd='default']:hover:not([disabled]) {
+  border-color: var(--border);
+}
+[data-pkc-field='canvas-bar'] button[data-pkc-canvas-cmd='default'][aria-pressed='true'] {
+  color: var(--fg);
+  background: transparent;
+  border-color: transparent;
+}
+/* スマホ幅 ── バーは 1 行(横に送る)・ミニマップは小さく枠の内側に収める */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='canvas-bar'] {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: var(--s1);
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='canvas-bar'] button {
+  flex: none;
+  white-space: nowrap;
+  padding: 1px var(--s2);
+}
+/* 🔴 スマホ幅は右上に置く ── キャンバスの枠は画面より縦に長くなりうるので、下端に置くとミニマップが画面の外で切れる */
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='canvas-minimap'] {
+  max-width: 110px;
+  right: var(--s2);
+  top: var(--s2);
+  bottom: auto;
+}
+[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='canvas-minimap'] svg {
+  max-width: 100%;
+  height: auto;
 }
 /* 倍率の字は幅を揃える(押すたびに隣のボタンが動かない) */
 [data-pkc-field='canvas-bar'] button[data-pkc-canvas-cmd='zoom-reset'] {
@@ -5890,8 +6061,8 @@ dd[data-pkc-field='inspector-toc'] {
   opacity: 0.5;
 }
 [data-pkc-field='canvas-draw-bar'] button[aria-pressed='true'] {
-  background: var(--fg);
-  color: var(--surface);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  box-shadow: inset 0 -2px 0 var(--accent);
   font-weight: 600;
 }
 /* ペンの色の見本 ── 押している色は輪郭で示す */
@@ -13816,6 +13987,19 @@ h3[data-pkc-section] {
     --note-6: #7e22ce;
     --note-7: #be185d;
     --note-8: #64748b;
+    --pkc-tc-red: #e03131;
+    --pkc-tc-red-name: red;
+    --pkc-tc-orange: #d9480f;
+    --pkc-tc-orange-name: orange;
+    --pkc-tc-green: #2b8a3e;
+    --pkc-tc-green-name: green;
+    --pkc-tc-blue: #1c7ed6;
+    --pkc-tc-blue-name: blue;
+    --pkc-tc-purple: #ae3ec9;
+    --pkc-tc-purple-name: purple;
+    --pkc-tc-gray: #6c757d;
+    --pkc-tc-gray-name: gray;
+    --pkc-tc-grey-name: grey;
     color-scheme: light;
   }
   /* 🔴 音の再生機の貼り付きは紙には要らない(#1232 段 b)── 解かないと、紙の送りで頭に重なる */
@@ -15675,6 +15859,18 @@ h6:hover > .pkc-heading-anchor,
   flex-wrap: wrap;
   gap: var(--s1);
 }
+/* 🔴 関係グラフの「たどる段階」と、左の列(狭い)での図の広さ ── 段階は <select> にして折り返しで壁にしない */
+[data-pkc-field='graph-depth-select'] {
+  min-width: 6.5em;
+}
+[data-pkc-browse-pane='graph'] [data-pkc-field='graph-gpu-stage'] {
+  aspect-ratio: 1 / 1.15;
+  min-height: 300px;
+  max-height: 70vh;
+}
+[data-pkc-browse-pane='graph'] [data-pkc-field='graph-map'] {
+  aspect-ratio: 1 / 1.15 !important;
+}
 [data-pkc-field='graph-note'],
 [data-pkc-field='graph-legend'] {
   margin: 0;
@@ -15761,7 +15957,8 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='graph-gpu'][data-pkc-graph-panning] [data-pkc-field='graph-gpu-stage'] {
   cursor: grabbing;
 }
-[data-pkc-field='graph-gpu-stage']:focus-visible {
+[data-pkc-field='graph-gpu-stage']:focus-visible,
+[data-pkc-field='graph-gpu-stage'][data-pkc-graph-active] {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -17009,23 +17206,34 @@ h6:hover > .pkc-heading-anchor,
     padding: var(--s4);
     margin-block: var(--s3);
   }
-  /* 🔴 改ページ(`+++` = `hr.pkc-section-break`)を「紙の継ぎ目」として見せる ── 破線と控えめな「改ページ」の字 */
+  /* 🔴 改ページ(`+++` = `hr.pkc-section-break`)で紙が 2 枚に分かれて見えるようにする。
+   *   DOM は変えない(`hr` のまま)。`hr` を紙の幅いっぱい(さらに左右へ少し突き出して)作業台の地色で塗り、
+   *   上の紙の下端・下の紙の上端に影を落とす。字は CSS カウンタ(`pkc-sheet`。本文の頭で 1 = 1 枚目、改ページごとに +1)。
+   *   ⚠ 印刷(`@media print`)には効かない ── 改ページは従来の `break-after: page` のまま。 */
+  :root[data-pkc-print-layout='1'] [data-pkc-view-pane='detail'] :is([data-pkc-field='detail-body'], [data-pkc-region='editor-live']) {
+    counter-reset: pkc-sheet 1;
+    overflow-x: clip;
+    overflow-clip-margin: 12px;
+  }
   :root[data-pkc-print-layout='1'] [data-pkc-view-pane='detail'] :is([data-pkc-field='detail-body'], [data-pkc-region='editor-live']) hr.pkc-section-break {
+    counter-increment: pkc-sheet;
     position: relative;
+    box-sizing: border-box;
     overflow: visible;
-    height: 0;
+    height: 2rem;
     border: 0;
-    border-top: 1px dashed var(--muted);
-    margin: var(--s6) 0;
+    margin-block: var(--pkc-paper-pad, 20mm);
+    margin-inline: calc(-1 * var(--pkc-paper-pad, 20mm) - 13px);
+    background:
+      linear-gradient(to bottom, color-mix(in srgb, var(--fg) 16%, transparent), transparent 8px, transparent calc(100% - 8px), color-mix(in srgb, var(--fg) 16%, transparent)),
+      var(--surface-2);
   }
   :root[data-pkc-print-layout='1'] [data-pkc-view-pane='detail'] :is([data-pkc-field='detail-body'], [data-pkc-region='editor-live']) hr.pkc-section-break::after {
-    content: '改ページ';
+    content: counter(pkc-sheet) ' ページ目';
     position: absolute;
-    top: 0;
+    top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    padding: 0 var(--s2);
-    background: var(--surface);
     color: var(--muted);
     font-size: var(--fs-xs);
     line-height: 1.4;
@@ -17063,11 +17271,45 @@ h6:hover > .pkc-heading-anchor,
 [data-pkc-field='inspector-note-layout'] select {
   min-width: 0;
   max-width: 100%;
+  width: 100%;
+  padding-inline: var(--s1);
+  text-overflow: clip;
 }
 /* 印刷レイアウト表示が入のときは、形(左端の線と太字)で示す ── 色は意味にだけ使う */
-[data-pkc-field='inspector-print-layout'][aria-pressed='true'] {
-  box-shadow: inset 3px 0 0 var(--accent);
+/* 2 択(`通常` | `印刷レイアウト`)── 押された側を薄い地色 + アクセントの下線で示す(塗りつぶさない) */
+[data-pkc-print-layout-segment] {
+  display: inline-flex;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+[data-pkc-print-layout-segment] > button {
+  min-width: 0;
+  padding: var(--s1) var(--s3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  white-space: nowrap;
+}
+[data-pkc-print-layout-segment] > button + button {
+  border-left: 1px solid var(--border);
+}
+[data-pkc-print-layout-segment] > button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-bottom-color: var(--accent);
   font-weight: 600;
+}
+/* 読む面の帯の 2 択は、右の情報ペインが畳まれる 1100px 以下でだけ出す(それより広いときは情報ペインの物を使う) */
+[data-pkc-field='bar-print-layout'] {
+  display: none;
+}
+@media (max-width: 1100px) {
+  [data-pkc-field='bar-print-layout'] {
+    display: inline-flex;
+  }
 }
 
 /* 🔴 書式の帯の「ページ設定 ▾」のパネル(v4.0 Phase 1 / PR-04)── 中身は情報ペインの「ページ設定」と同じ部品(`note-layout-controls.ts`)。
@@ -17105,10 +17347,6 @@ h6:hover > .pkc-heading-anchor,
   max-width: 100%;
   white-space: normal;
   text-align: start;
-}
-[data-pkc-field='page-setup-print-layout'][aria-pressed='true'] {
-  box-shadow: inset 3px 0 0 var(--accent);
-  font-weight: 600;
 }
 /* 「ページ設定 ▾」「文字色 ▾」が開いている間は押し込んだ見た目(「…」と同じ段) */
 [data-pkc-region='format-bar'] [data-pkc-action='open-page-setup'][aria-expanded='true'] {
@@ -17516,4 +17754,65 @@ h6:hover > .pkc-heading-anchor,
   height: 100%;
   max-width: none;
   object-fit: contain;
+}
+
+/* ── リッチ編集の改善(コードブロックの帯・上下の移動・ホバーの縁)────────────────
+ * 🔴 色は意味にだけ使う: 帯は地を塗らず、字は `--muted`。ホバーの縁は `outline` で描く(配置を動かさない)。 */
+[data-pkc-code-bar] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1, 4px);
+  font-size: var(--fs-xs, 11px);
+  color: var(--muted);
+}
+[data-pkc-code-bar] label {
+  flex: 0 0 auto;
+}
+[data-pkc-code-bar] select,
+[data-pkc-code-bar] button {
+  font: inherit;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.6;
+  padding: 0 var(--s1, 4px);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--hairline, var(--border));
+  border-radius: var(--radius-sm, 3px);
+}
+[data-pkc-code-bar] button {
+  margin-left: auto;
+  cursor: pointer;
+}
+[data-pkc-code-bar] select:hover,
+[data-pkc-code-bar] button:hover,
+[data-pkc-code-bar] button:focus-visible {
+  color: var(--fg);
+}
+/* 上へ / 下へ移動(「原文」「+」と同じゴースト型) */
+[data-pkc-rich-move] {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--fs-xs, 11px);
+  line-height: 1.6;
+  padding: 0 var(--s1, 4px);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 3px);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.7;
+}
+[data-pkc-rich-move]:hover,
+[data-pkc-rich-move]:focus-visible {
+  opacity: 1;
+  color: var(--fg);
+  border-color: var(--hairline, var(--border));
+}
+/* リッチ編集のとき、開ける(押せる)ブロックにポインタを載せると薄く縁が出る。⚠ outline なので配置は動かない */
+[data-pkc-region='editor-live'][data-pkc-rich-mode] > :not([data-pkc-row-slot]):hover {
+  outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm, 3px);
 }

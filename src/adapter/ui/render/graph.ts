@@ -5,12 +5,12 @@
  * ## どこに在るか ── 左の列のタブと、別ウィンドウの面の 2 か所
  *
  * 連絡先 / 録ったものと同じ形(`contacts.ts` の docstring)。⚠ この描画器は同じ document に 2 つ生きうる
- * (左のタブ + 中央の面)ので、`data-pkc-region` を焼かない。見方(全体 / 手先の数)は **state**
+ * (左のタブ + 中央の面)ので、`data-pkc-region` を焼かない。見方(全体 / 段階)は **state**
  * (`graphView`)が持つ ── 描画器に覚えさせると、片方で変えた結果がもう片方に届かない。
  *
  * ## 情報ペインの「つながりの図」との違い
  *
- * あちらは選んだノートの 2 手先まで(固定・右の列)。こちらは **全体**、または **選んだノートから 1〜6 手先**。
+ * あちらは選んだノートの 2 段階まで(固定・右の列)。こちらは **全体**、または **選んだノートから 1〜6 段階**。
  * 作りは同じ ── 節点は `<button>`(押すとそのノートを開く = 既存の `select-entry`)、辺は 1 枚の `<svg>`。
  * ⚠ 節点を押せることが要件なので、図を PNG の `<img>` に焼かない(焼くと「形は見えるが辿れない図」になる。
  *   `relation-map.ts` と同じ判断)。件数は `GRAPH_MAX_NODES` で打ち切り、**切ったらそう言う**。
@@ -136,8 +136,12 @@ export class GraphRenderer {
   /** 最後に描いた state(描き方を変えたときに描き直す)。 */
   private lastState: AppState | null = null;
 
-  constructor(host: HTMLElement) {
+  /** 左のタブの図だけ「広い画面で開く」を出す(中央の面では出さない)。 */
+  private readonly wideButton: boolean;
+
+  constructor(host: HTMLElement, opts: { wideButton?: boolean } = {}) {
     this.host = host;
+    this.wideButton = opts.wideButton === true;
   }
 
   private ensureFrame(): void {
@@ -510,7 +514,7 @@ export class GraphRenderer {
     }
   }
 
-  /** 見方のボタン(全体 / 選んだノートから + 手先の数)。state が正で、毎回合わせ直す。 */
+  /** 見方のボタン(全体 / 選んだノートから + 段階)。state が正で、毎回合わせ直す。 */
   private paintBar(all: boolean, depth: number, nodeCount: number): void {
     const bar = this.bar!;
     bar.textContent = '';
@@ -521,7 +525,7 @@ export class GraphRenderer {
         value: 'selected',
         label: '選んだノートから',
         pressed: !all,
-        title: '選んでいるノートを中心に、つながりを手先の数だけたどって描きます',
+        title: '選んだノートから指定した段階までつながりをたどって表示します',
       }),
       buildPressedButton({
         action: 'graph-scope',
@@ -533,18 +537,21 @@ export class GraphRenderer {
       }),
     );
     if (!all) {
+      // 🔴 段階は <select> にする(狭い左の列でボタンが折り返して「1 段階」だけ 1 行に残らないように)
+      const sel = document.createElement('select');
+      sel.setAttribute('data-pkc-action', 'graph-depth');
+      sel.setAttribute('data-pkc-field', 'graph-depth-select');
+      sel.setAttribute('aria-label', 'たどる段階');
+      sel.title = '選んだノートから指定した段階までつながりをたどって表示します';
       for (let n = 1; n <= GRAPH_MAX_DEPTH; n += 1) {
-        bar.append(
-          buildPressedButton({
-            action: 'graph-depth',
-            dataAttr: 'data-pkc-graph-depth',
-            value: String(n),
-            label: `${n} 手`,
-            pressed: n === depth,
-            title: `選んだノートから ${n} 手先までたどります`,
-          }),
-        );
+        const o = document.createElement('option');
+        o.value = String(n);
+        o.textContent = `${n} 段階`;
+        o.selected = n === depth;
+        sel.append(o);
       }
+      sel.value = String(depth);
+      bar.append(sel);
     }
     bar.append(this.modes(), this.tools(nodeCount));
   }
@@ -554,7 +561,7 @@ export class GraphRenderer {
     const g = document.createElement('span');
     g.setAttribute('data-pkc-field', 'graph-modes');
     g.setAttribute('role', 'group');
-    g.setAttribute('aria-label', '描き方');
+    g.setAttribute('aria-label', '表示モード');
     for (const m of MODE_BUTTONS) {
       const b = document.createElement('button');
       b.type = 'button';
@@ -589,6 +596,15 @@ export class GraphRenderer {
     open.textContent = 'ボードで開く';
     open.title = 'いまの図を、並べ替えや書き足しができるボード(無限キャンバス)の新しいノートにして開きます';
     open.disabled = nodeCount === 0;
+    if (this.wideButton) {
+      // 🔴 左のタブの図を、中央の広い画面(関係グラフの面)で 1 回で開く。中央の面では出さない
+      const wide = document.createElement('button');
+      wide.type = 'button';
+      wide.setAttribute('data-pkc-action', 'graph-open-wide');
+      wide.textContent = '広い画面で開く';
+      wide.title = 'この関係グラフを、中央の広い画面で開きます';
+      g.append(wide);
+    }
     g.append(
       zoom('out', '−', '図を縮小します(Ctrl + ホイールでも変えられます)'),
       zoom('reset', zoomLabel(this.cam.zoom), '押すと 100% に戻します'),

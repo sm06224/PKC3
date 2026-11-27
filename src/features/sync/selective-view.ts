@@ -1,7 +1,7 @@
 /**
  * 🔴 **選択同期(#2066 段 5-B)の画面の写し** ── 設定・情報ペイン・右クリック・一覧が同じ 1 つの写しを読む。
  *
- * - 写しは同期が入のときだけ作る(切 = `null`)。範囲が「ワークスペース全体」(`'all'`)のときは閉包を計算せず、理由の表は空。
+ * - 写しは同期が入のときだけ作る(切 = `null`)。範囲が「コレクション全体」(`'all'`)のときは閉包を計算せず、理由の表は空。
  * - 閉包は書き出しと同じ `resolveSelectiveClosure`(同じ問いに 2 か所で答えない)。
  * - 画面の言葉(理由の名前・件数の要約)もここ 1 か所に置く。
  *
@@ -88,7 +88,7 @@ export function selectiveActive(view: SyncScopeView | null | undefined): view is
 export const SELECTIVE_REASON_LABELS: Readonly<Record<SelectiveReason, string>> = {
   direct: '同期対象(直接指定)',
   descendant: '同期対象(親フォルダ配下)',
-  related: '同期対象(関連エントリとして同伴)',
+  related: '同期対象(関連により自動追加)',
   ancestor: '同期対象(親フォルダの階層のみ)',
 };
 

@@ -232,7 +232,7 @@ function banned(
  *   (`.claude/skills/notice-writing/notice_check.py` が行の形で読む)。
  */
 export const BANNED_TERMS: readonly BannedTerm[] = [
-  banned('面', '画面', '造語', ['画面', '紙面', '場面', '文面', '面積']),
+  banned('面', '画面', '造語', ['画面', '紙面', '場面', '文面', '面積', '正面', '上面']),
   banned('口', '使わない', '造語', ['入口', '出口', '窓口', '口座']),
   banned('札', '使わない', '造語', ['札幌']),
   banned('検め', '使わない', '造語'),
@@ -298,6 +298,10 @@ export const BANNED_TERMS: readonly BannedTerm[] = [
   banned('引いて', '実行して(SQL)', '造語', ['線を引いて', '差し引いて']),
   banned('引きま', '実行します(SQL)/ 引用しました(PDF)', '造語', ['線を引きま']),
   banned('当たり', '一致', '造語', ['当たりやす']),
+  banned('手先', '段階', '造語'),
+  banned('1 手戻す', '元に戻す', '造語'),
+  banned('自動同伴', '自動で同期', '造語'),
+  banned('選んだ字', '選択した文字', '造語'),
   banned('当たる', '一致する', '造語'),
   banned('当てて', '適用して', '造語', ['割り当てて']),
   banned('当てる', '適用する', '造語', ['割り当てる']),

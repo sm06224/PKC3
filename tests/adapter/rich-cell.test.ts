@@ -577,7 +577,8 @@ describe('⑧ リッチ ⇔ 原文の双方向切替(PR-06。片道を作らな�
     const r = rig();
     openClick(findByText(r.host, 'pre', 'const'));
     const ta = rowOf(r.host)!;
-    expect(r.host.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)).not.toBeNull();
+    // 🔴 戻せないブロック(コード)には「リッチ」ボタンを出さない
+    expect(r.host.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)).toBeNull();
     key(ta, 'm', { altKey: true, code: 'KeyM' });
     expect(cellOf(r.host)).toBeNull();
     expect(rowOf(r.host)).toBe(ta);
@@ -908,5 +909,110 @@ describe('書式の帯の配線(DetailRenderer + binder)', () => {
     expect(cell.textContent).toBe('二');
     key(cell, 'z', { ctrlKey: true, code: 'KeyZ' });
     expect(d.getState().openBody?.body).toBe('一\n\n二');
+  });
+});
+
+describe('⑫ コードブロックの再編集・上下ボタン(リッチ編集の改善)', () => {
+  const codeBar = (h: HTMLElement): HTMLElement | null => h.querySelector<HTMLElement>('[data-pkc-code-bar]');
+
+  it('コードブロックの原文の欄に「リッチ」ボタンは出ず、段落の原文の欄には出る(対照群)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'pre', 'const'));
+    expect(r.host.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)).toBeNull();
+    key(rowOf(r.host)!, 'Escape');
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    r.host.querySelector<HTMLButtonElement>(`[${RICH_SOURCE_BUTTON_ATTR}]`)!.click();
+    expect(r.host.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)).not.toBeNull();
+    expect(codeBar(r.host)).toBeNull();
+  });
+
+  it('言語の選択が開きの行だけを書き換え、未知の言語も選択肢に残る', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'pre', 'const'));
+    const sel = r.host.querySelector<HTMLSelectElement>('[data-pkc-code-lang]')!;
+    expect([...sel.options].map((o) => o.value)).toEqual(['', 'ts', 'js', 'python', 'sql', 'json', 'html', 'mermaid', '3d']);
+    expect(sel.value).toBe('js');
+    sel.value = 'python';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(rowOf(r.host)!.value).toBe('```python\nconst  x = 1;  \n```');
+    sel.value = '';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(rowOf(r.host)!.value.split('\n')[0]).toBe('```');
+    // 未知の言語は選択肢に足される
+    const ta = rowOf(r.host)!;
+    ta.value = '```rust\nfn main() {}\n```';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    const sel2 = r.host.querySelector<HTMLSelectElement>('[data-pkc-code-lang]')!;
+    expect([...sel2.options].map((o) => o.value)).toContain('rust');
+    expect(sel2.value).toBe('rust');
+    key(ta, 'Escape');
+  });
+
+  it('言語を変えて確定すると、行の範囲だけが書き戻る', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'pre', 'const'));
+    const sel = r.host.querySelector<HTMLSelectElement>('[data-pkc-code-lang]')!;
+    sel.value = 'ts';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    key(rowOf(r.host)!, 'Tab');
+    expect(r.commits).toEqual([{ start: 4, end: 6, text: '```ts\nconst  x = 1;  \n```' }]);
+  });
+
+  it('「下に段落を追加」: 途中のコードブロックを出て、直下に空の段落を開く', async () => {
+    const r = rig('前\n\n```js\nlet a;\n```\n\n後');
+    openClick(findByText(r.host, 'pre', 'let a'));
+    r.host.querySelector<HTMLButtonElement>('[data-pkc-code-add-below]')!.click();
+    await settle();
+    expect(r.body()).toBe('前\n\n```js\nlet a;\n```\n\n後');
+    expect(cellOf(r.host), '新しい空の段落が開いていない').not.toBeNull();
+    expect(cellOf(r.host)!.textContent).toBe('');
+  });
+
+  it('「下に段落を追加」: 最後のブロックのコードでも、直下に開く(閉じていない囲みは閉じる)', async () => {
+    const r = rig('前\n\n```js\nlet a;\n```');
+    openClick(findByText(r.host, 'pre', 'let a'));
+    r.host.querySelector<HTMLButtonElement>('[data-pkc-code-add-below]')!.click();
+    await settle();
+    expect(r.body()).toBe('前\n\n```js\nlet a;\n```');
+    expect(cellOf(r.host), '末尾に新しい段落のセルが開く').not.toBeNull();
+    expect(cellOf(r.host)!.textContent).toBe('');
+    // 入力して確定すると、コードの後ろに段落が付く
+    caretAtEnd(cellOf(r.host)!);
+    typeText(cellOf(r.host)!, '続き');
+    key(cellOf(r.host)!, 'Tab');
+    expect(r.body()).toBe('前\n\n```js\nlet a;\n```\n\n続き');
+  });
+
+  it('コードの欄の Ctrl+Enter も同じ(出て、下に段落)。閉じていない囲みは閉じてから確定する', async () => {
+    const r = rig('```js\nlet a;');
+    openClick(findByText(r.host, 'pre', 'let a'));
+    const ta = rowOf(r.host)!;
+    const ev = key(ta, 'Enter', { ctrlKey: true });
+    expect(ev.defaultPrevented).toBe(true);
+    await settle();
+    expect(r.body()).toBe('```js\nlet a;\n```');
+    expect(cellOf(r.host)).not.toBeNull();
+  });
+
+  it('↑ / ↓ ボタンで、Alt+↑↓ と同じくブロックを入れ替える(ラベルつき)', async () => {
+    const r = rig('一の段落\n\n二の段落\n\n三の段落');
+    openClick(findByText(r.host, 'p', '一の段落'));
+    const down = r.host.querySelector<HTMLButtonElement>('[data-pkc-rich-move="down"]')!;
+    expect(down.getAttribute('aria-label')).toBe('下へ移動');
+    expect(r.host.querySelector('[data-pkc-rich-move="up"]')!.getAttribute('aria-label')).toBe('上へ移動');
+    down.click();
+    expect(r.body()).toBe('二の段落\n\n一の段落\n\n三の段落');
+    await settle();
+    r.host.querySelector<HTMLButtonElement>('[data-pkc-rich-move="up"]')!.click();
+    expect(r.body()).toBe('一の段落\n\n二の段落\n\n三の段落');
+  });
+
+  it('「+」の click はバブリングしない(root の外押しで一覧が即閉じるのを防ぐ)', () => {
+    const r = rig();
+    openClick(findByText(r.host, 'p', '最初の段落'));
+    let reached = false;
+    document.body.addEventListener('click', () => (reached = true));
+    r.host.querySelector<HTMLButtonElement>(`[${RICH_INSERT_BUTTON_ATTR}]`)!.click();
+    expect(reached).toBe(false);
   });
 });

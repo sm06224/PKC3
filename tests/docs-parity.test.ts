@@ -2218,7 +2218,7 @@ describe('つながりの図の手数が、マニュアルと一致する', () =
      *   太字だけを見ると、手数を上げた日に**片方だけ直って片方が残る**。
      * 🔑 だから**全部拾って、全部同じ数であること**を見る。
      */
-    const all = [...MANUAL.matchAll(/(\d+) 手先まで/g)].map((x) => Number(x[1]));
+    const all = [...MANUAL.matchAll(/(\d+) 段階まで/g)].map((x) => Number(x[1]));
     expect(all.length, 'マニュアルに手数の記述が無い(字が変わった?)').toBeGreaterThan(0);
     expect(
       new Set(all),
@@ -2410,6 +2410,11 @@ describe('お知らせの受け皿(CHANGELOG)', () => {
    *   (`.claude/skills/notice-writing/SKILL.md`)。
    */
   const DROPPED: readonly string[] = [
+    /**
+     * ⚠ **2026-11-27(1852)に、いちばん古い 1 件が枠から出た**。
+     * 🔑 配布済み:CHANGELOG.md の 2026-11-21 の節に原本
+     */
+    'テンプレートから作るに、記録のサンプルが 3 つ入りました',
     /**
      * ⚠ **2026-11-26(2084)に、いちばん古い 1 件が枠から出た**。
      * 🔑 配布済み:CHANGELOG.md の 2026-11-21 の節に原本

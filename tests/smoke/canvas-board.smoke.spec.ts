@@ -166,6 +166,7 @@ test('🔴 無限キャンバス: 切替・ズーム・パン・倍率を割り�
   await multiSelectAndAlign(page);
   await freehandPlace(page);
   await graphToBoard(page);
+  await narrowMinimap(page);
 
   expect(errors).toEqual([]);
 });
@@ -193,6 +194,10 @@ async function multiSelectAndAlign(page: import('@playwright/test').Page): Promi
   const c1 = detail.locator('#c1');
   const c2 = detail.locator('#c2');
   await expect(bar.locator('[data-pkc-canvas-cmd="align"]'), '選ぶ前から整列が出ている').toBeHidden();
+  // 🔴 常に出るボタン(選択・手書き)は、複数選択で整列・グループが現れても横に動かない
+  const selectBtn = bar.locator('[data-pkc-canvas-cmd="select"]');
+  const drawBtn = bar.locator('[data-pkc-canvas-cmd="draw"]');
+  const xBefore = [(await selectBtn.boundingBox())!.x, (await drawBtn.boundingBox())!.x];
 
   // 🔑 付箋の中の字(⠿ でない所)を Shift + クリック
   await c1.getByText('ひとつめ').click({ modifiers: ['Shift'] });
@@ -205,6 +210,23 @@ async function multiSelectAndAlign(page: import('@playwright/test').Page): Promi
 
   const align = bar.locator('[data-pkc-canvas-cmd="align"]');
   await expect(align).toBeVisible();
+  expect((await selectBtn.boundingBox())!.x, '複数選択で「選択」が横に動いた').toBe(xBefore[0]);
+  expect((await drawBtn.boundingBox())!.x, '複数選択で「手書き」が横に動いた').toBe(xBefore[1]);
+  // 整列・グループは常設ボタンの後ろにある
+  expect((await align.boundingBox())!.x, '整列が手書きより前にある').toBeGreaterThan(xBefore[1]!);
+  // 🔴 押している「選択」は字色と同じ色で塗りつぶさない(反転の塗りをやめた)
+  await clickReal(page, selectBtn);
+  await expect(selectBtn).toHaveAttribute('aria-pressed', 'true');
+  const paint = await selectBtn.evaluate((el) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--fg)';
+    document.body.append(probe);
+    const fg = getComputedStyle(probe).color;
+    probe.remove();
+    return { bg: getComputedStyle(el).backgroundColor, fg };
+  });
+  expect(paint.bg, '押している選択が字色で塗りつぶされている').not.toBe(paint.fg);
+  await clickReal(page, selectBtn);
   await clickReal(page, align);
   const menu = bar.locator('[data-pkc-field="canvas-align-menu"]');
   await expect(menu).toBeVisible();
@@ -224,6 +246,35 @@ async function multiSelectAndAlign(page: import('@playwright/test').Page): Promi
   await detail.locator('[data-pkc-field="canvas-viewport"]').focus();
   await page.keyboard.press('Escape');
   await expect(detail.locator('[data-pkc-canvas-selected]')).toHaveCount(0);
+}
+
+/** 🔴 スマホ幅(390px)ではミニマップを既定で出さない(押すと出る)。 */
+async function narrowMinimap(page: import('@playwright/test').Page): Promise<void> {
+  // ⚠ 作るのは広い画面(スマホ幅では作成の画面が違う)── キャンバスを開く直前に幅を狭める
+  await createEntry(page, 'text');
+  await page.fill('[data-pkc-field="editor-title"]', '狭い画面の板');
+  await page.fill('[data-pkc-field="editor-body"]', BOARD);
+  await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
+  await page.waitForSelector('[data-pkc-action="start-edit"]');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const detail = page.locator('[data-pkc-region="detail"]');
+  const bar = detail.locator('[data-pkc-field="canvas-bar"]');
+  const vp = detail.locator('[data-pkc-field="canvas-viewport"]');
+  // ⚠ スマホ幅は上の見出しが重なるので、押し所の判定ではなくボタン自身の click を撃つ
+  await bar.locator('[data-pkc-canvas-cmd="mode"]').evaluate((el) => (el as HTMLElement).click());
+  // ⚠ スマホ幅は詳細が一覧の裏へ回る(visibility: hidden)ので、見えるかではなく `hidden` 属性と大きさで見る
+  await expect(vp).toHaveCount(1);
+  await expect(vp.locator('[data-pkc-field="canvas-minimap"]'), 'スマホ幅でミニマップが既定で出ている').toHaveAttribute('hidden', '');
+  await bar.locator('[data-pkc-canvas-cmd="minimap"]').evaluate((el) => (el as HTMLElement).click());
+  const mm = vp.locator('[data-pkc-field="canvas-minimap"]');
+  await expect(mm).not.toHaveAttribute('hidden', '');
+  const r = (await mm.boundingBox())!;
+  const v = (await vp.boundingBox())!;
+  expect(r.width, 'スマホ幅のミニマップが大きい').toBeLessThanOrEqual(112);
+  expect(r.y + r.height, 'ミニマップが枠の下で切れている').toBeLessThanOrEqual(v.y + v.height);
+  // 🔴 枠は画面より縦に長くなりうる ── 下端に置くと画面の外で切れる(実画面の撮影で見つけた)。画面の中に収まること
+  expect(r.y + r.height, 'ミニマップが画面の下で切れている').toBeLessThanOrEqual(page.viewportSize()!.height);
+  await page.setViewportSize({ width: 1280, height: 800 });
 }
 
 /** 🔴 手書き: 描いて「ボードに置く」と透過 PNG の付箋が描いた所に置かれ、描く面は DOM から消える。 */

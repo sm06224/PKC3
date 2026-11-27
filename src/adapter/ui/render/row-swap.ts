@@ -42,6 +42,7 @@ import {
 } from '@features/markdown/source-ranges';
 import { findOpenEnds, scanContainers } from '@features/markdown/source-blocks';
 import { pairedBackspaceRange } from '@features/markdown/text-ops';
+import { closeCodeFence, CODE_LANG_CHOICES, codeFenceLang, setCodeFenceLang } from '@features/markdown/code-fence-lang';
 import { fieldHas, typedPairFor } from '../editing-field';
 import { tableOnTab } from '@features/markdown/table-assist';
 import {
@@ -386,6 +387,11 @@ interface Active {
 
 /** 原文の欄の隣の「リッチ」ボタン(リッチ編集へ戻す。PR-06)の印。 */
 export const RICH_BACK_BUTTON_ATTR = 'data-pkc-rich-back';
+/** 🔴 コードブロックの原文の欄の上の小さな帯(言語の選択・「下に段落を追加」)の印。 */
+export const CODE_BAR_ATTR = 'data-pkc-code-bar';
+/** 帯の中の言語の選択・「下に段落を追加」の印。 */
+export const CODE_LANG_ATTR = 'data-pkc-code-lang';
+export const CODE_ADD_BELOW_ATTR = 'data-pkc-code-add-below';
 
 /** 🔴 この字数を超える本文だけ、連続入力のときに開放終端の走査をまとめる(#1467) */
 const OPEN_END_SYNC_MAX_CHARS = 20_000;
@@ -1293,6 +1299,7 @@ export class RowSwap {
     }
     slot.append(ta);
     this.wire(ta);
+    this.syncCodeBar(active);
     this.syncRichBack(active);
     // ⚠ 高さは `syncActiveBox` が 1 か所で決める(上限つき ── S6 の全文差し替えで
     //    5000 行の箱を作らない)。ここで別に代入しない
@@ -1321,7 +1328,11 @@ export class RowSwap {
    * 出すのは「リッチ編集を使う設定で、1 つのブロックを開いている」ときだけ。
    */
   private syncRichBack(a: Active): void {
-    const want = a.rich === null && a.richAllowed && this.cb.richEnabled?.() === true;
+    // 🔴 戻せないブロック(コード・表・数式 …)には出さない ── 押しても断られるボタンを置かない。
+    //   ⚠ 空の欄は「字を入れたら戻せる」ので出す(判定は `RichCell.create` の 1 本)
+    const text = normalizeEol(a.textarea.value);
+    const convertible = text.trim() === '' || RichCell.create(document, text, this.richHooks()) !== null;
+    const want = a.rich === null && a.richAllowed && this.cb.richEnabled?.() === true && convertible;
     const cur = a.slot.querySelector<HTMLElement>(`[${RICH_BACK_BUTTON_ATTR}]`);
     if (!want) {
       cur?.remove();
@@ -1340,6 +1351,87 @@ export class RowSwap {
       this.sourceToRich();
     });
     a.slot.append(btn);
+  }
+
+  /**
+   * 🔴 **コードブロックの原文の欄の上に、小さな帯を出す**(言語の選択・「下に段落を追加」)。
+   * 出すのは開いた原文の 1 行目が囲みコードの開きのときだけ。字の組み替えは `code-fence-edit.ts` の 1 本。
+   * ⚠ 帯を押しても欄の blur で確定して閉じない(`ta` の blur が帯への移りを見逃す。`blur` 側の門)。
+   */
+  private syncCodeBar(a: Active): void {
+    a.slot.querySelector(`[${CODE_BAR_ATTR}]`)?.remove();
+    const ta = a.textarea;
+    if (a.rich !== null || codeFenceLang(normalizeEol(ta.value)) === null) return;
+    const bar = document.createElement('div');
+    bar.setAttribute(CODE_BAR_ATTR, '');
+    const label = document.createElement('label');
+    label.textContent = '言語';
+    const sel = document.createElement('select');
+    sel.setAttribute(CODE_LANG_ATTR, '');
+    sel.setAttribute('aria-label', 'コードの言語');
+    const fill = (): void => {
+      const cur = codeFenceLang(normalizeEol(ta.value)) ?? '';
+      const choices = CODE_LANG_CHOICES.includes(cur) ? CODE_LANG_CHOICES : [...CODE_LANG_CHOICES, cur];
+      sel.textContent = '';
+      for (const c of choices) {
+        const o = document.createElement('option');
+        o.value = c;
+        o.textContent = c === '' ? 'なし' : c;
+        sel.append(o);
+      }
+      sel.value = cur;
+    };
+    fill();
+    sel.addEventListener('change', () => {
+      const next = setCodeFenceLang(normalizeEol(ta.value), sel.value);
+      if (next === null) return;
+      const caret = ta.selectionStart;
+      ta.value = next;
+      ta.setSelectionRange(Math.min(caret, next.length), Math.min(caret, next.length));
+      this.syncActiveBox();
+      fill();
+      ta.focus();
+    });
+    // 欄の中で開きの行を直したら、選択も追う
+    ta.addEventListener('input', () => {
+      if (sel.isConnected && codeFenceLang(normalizeEol(ta.value)) !== null) fill();
+    });
+    sel.addEventListener('blur', () => {
+      // ⚠ 欄へ戻る・窓を離れただけのときは確定しない(欄の blur と同じ見方)
+      if (this.active?.textarea !== ta || ta.ownerDocument.activeElement === ta) return;
+      if (!ta.ownerDocument.hasFocus()) return;
+      const to = ta.ownerDocument.activeElement;
+      if (to instanceof Element && to.closest(`[${CODE_BAR_ATTR}]`) !== null) return;
+      this.commitActive();
+    });
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.setAttribute(CODE_ADD_BELOW_ATTR, '');
+    add.textContent = '下に段落を追加';
+    add.title = 'コードブロックを出て、下に新しい段落を作ります(Ctrl+Enter)';
+    // ⚠ 押しても焦点を奪わない(奪うと欄の blur が確定して閉じる)
+    add.addEventListener('mousedown', (ev) => ev.preventDefault());
+    add.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      this.exitCodeBlockBelow();
+    });
+    bar.append(label, sel, add);
+    a.slot.insertBefore(bar, ta);
+  }
+
+  /**
+   * 🔴 **コードブロックを出て、直下に空の段落を開く**(「下に段落を追加」/ コードの欄の `Ctrl+Enter`)。
+   * 閉じていない囲みは閉じてから確定する(次の段落が囲みの中に入らない)。最後のブロックでも `appendRow` に行く。
+   */
+  private exitCodeBlockBelow(): void {
+    const a = this.active;
+    if (a === null || a.rich !== null || a.composing) return;
+    const typed = normalizeEol(a.textarea.value);
+    if (codeFenceLang(typed) === null) return;
+    const text = closeCodeFence(typed);
+    const after = a.startLine + text.split('\n').length;
+    this.boundaryStep = NO_BOUNDARY_STEP;
+    if (this.commitActive(false, text)) this.queueOpen({ kind: 'insert', line: after });
   }
 
   /** 欄を差し替えている最中(外した欄の blur を確定に数えない)。 */
@@ -1375,6 +1467,7 @@ export class RowSwap {
     this.switchingField = true;
     try {
       a.slot.querySelector(`[${RICH_BACK_BUTTON_ATTR}]`)?.remove();
+      a.slot.querySelector(`[${CODE_BAR_ATTR}]`)?.remove();
       ta.replaceWith(rich.wrap);
     } finally {
       this.switchingField = false;
@@ -1545,6 +1638,7 @@ export class RowSwap {
     }
     this.wire(ta);
     // 🔴 戻り道(「リッチ」ボタン / Alt+M)を出す ── 片道を作らない(PR-06)
+    this.syncCodeBar(a);
     this.syncRichBack(a);
     this.syncActiveBox();
     ta.focus();
@@ -1791,6 +1885,22 @@ export class RowSwap {
           return;
         }
       }
+      /**
+       * 🔴 **コードブロックの欄の `Ctrl+Enter` は、コードを出て下に段落を作る**(帯の「下に段落を追加」と同じ 1 本)。
+       * ⚠ 囲みコードの欄だけ。ほかの欄の `Ctrl+Enter`(確定 + ノートの保存)は今までどおり。
+       */
+      if (
+        cmd === 'row-commit' &&
+        ke.key === 'Enter' &&
+        (ke.ctrlKey || ke.metaKey) &&
+        !ke.altKey &&
+        !ke.shiftKey &&
+        hasCodeBar(ta)
+      ) {
+        ev.preventDefault();
+        this.exitCodeBlockBelow();
+        return;
+      }
       if (cmd === 'row-commit') {
         ev.preventDefault();
         this.commitActive();
@@ -1845,7 +1955,10 @@ export class RowSwap {
      * 在ることが露見した(片方を壊しても誰も気づかない = どちらが効いているか
      * 分からない)ので、規則は `commitActive()` の 1 か所に寄せる。
      */
-    ta.addEventListener('blur', () => {
+    ta.addEventListener('blur', (ev) => {
+      // 🔴 コードブロックの帯(言語の選択)へ移っただけなら確定しない(選び終えたら欄へ戻る)
+      const to = (ev as FocusEvent).relatedTarget;
+      if (to instanceof Element && to.closest(`[${CODE_BAR_ATTR}]`) !== null) return;
       /**
        * 🔴 **ウィンドウを離れただけなら、行を閉じない**(#1163 依頼 305。Gemini 回答は案どおり)。
        *   別のアプリやブラウザの別のタブを見て戻ったら、行は確定されて閉じていた(続きを打つにはもう一度行を押す)。
@@ -2254,6 +2367,11 @@ function typedOf(a: Active): string {
 }
 
 /** 欄(原文の `<textarea>` / リッチのセル)を DOM から外す。⚠ 呼ぶ前に活性を落としておく(blur の再入を防ぐ)。 */
+/** この欄の上にコードブロックの帯があるか(= 囲みコードを開いている欄)。 */
+function hasCodeBar(ta: HTMLTextAreaElement): boolean {
+  return ta.parentElement?.querySelector(`[${CODE_BAR_ATTR}]`) != null;
+}
+
 function detachField(a: Active): void {
   if (a.rich !== null) {
     a.rich.dispose();

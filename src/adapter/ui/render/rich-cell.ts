@@ -56,6 +56,8 @@ export const RICH_INSERT_BUTTON_ATTR = 'data-pkc-rich-insert-open';
 export const RICH_INSERT_ACTION = 'rich-insert-block';
 export const RICH_INSERT_ID_ATTR = 'data-pkc-rich-insert';
 export const RICH_INSERT_SLASH_ATTR = 'data-pkc-rich-slash';
+/** 「↑」「↓」(ブロックを上下へ動かす)ボタンの印。値は `up` / `down`。 */
+export const RICH_MOVE_BUTTON_ATTR = 'data-pkc-rich-move';
 /** 打った字を 1 手にまとめる間(打つ手がこの時間止まったら 1 件記録する)。 */
 const TYPING_CHUNK_MS = 600;
 
@@ -240,10 +242,28 @@ export class RichCell {
     plus.addEventListener('mousedown', (ev) => ev.preventDefault());
     plus.addEventListener('click', (ev) => {
       ev.preventDefault();
+      // 🔴 root の「外を押したら一覧を閉じる」(binder `onCloseMenu`)へ届けない ── 届くと、開いた同じクリックで閉じる
+      ev.stopPropagation();
       if (this.insertMenu !== null) this.closeInsertMenu();
       else this.openInsertMenu(false, RICH_INSERT_ITEMS);
     });
     this.wrap.append(plus);
+    // 🔴 マウスだけで動かせるように、ブロックの上下の移動(`Alt+↑` / `Alt+↓` と同じ 1 本)
+    for (const dir of [-1, 1] as const) {
+      const mv = doc.createElement('button');
+      mv.type = 'button';
+      mv.setAttribute(RICH_MOVE_BUTTON_ATTR, dir < 0 ? 'up' : 'down');
+      mv.textContent = dir < 0 ? '↑' : '↓';
+      const label = dir < 0 ? '上へ移動' : '下へ移動';
+      mv.title = `${label}(Alt+${dir < 0 ? '↑' : '↓'})`;
+      mv.setAttribute('aria-label', label);
+      mv.addEventListener('mousedown', (ev) => ev.preventDefault());
+      mv.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        this.hooks.moveBlock(dir);
+      });
+      this.wrap.append(mv);
+    }
     CELLS.set(cell, this);
     this.wire(cell);
     this.cell = cell;

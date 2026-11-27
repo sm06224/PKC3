@@ -33,6 +33,8 @@ const NOT_BUTTONS = [
   "[data-pkc-region='calendar-grid'] tbody td",
   // 帯に入れた目次の器(div。ボタンではない)
   '.pkc-quick-toc[data-pkc-docked]',
+  // スマホ幅のミニマップの絵(svg。ボタンではない)
+  "[data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='canvas-minimap'] svg",
 ].sort();
 
 /** 丈を伸ばしつつ、意図して上限を残す規則(いまは無い)── 等値で固定。 */

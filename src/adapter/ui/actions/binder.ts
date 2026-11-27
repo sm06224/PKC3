@@ -270,7 +270,7 @@ import { chooseColumnRule } from '@adapter/ui/render/column-rule';
 import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
-import { choosePrintLayout, refreshNoteLayout, togglePrintLayout } from '@adapter/ui/render/note-layout';
+import { choosePrintLayout, isPrintLayoutOn, refreshNoteLayout, togglePrintLayout } from '@adapter/ui/render/note-layout';
 import { CLEAR_NOTE_LAYOUT, noteLayoutPatchFor, printLayoutToggledText } from '@features/page-layout';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
@@ -10680,7 +10680,8 @@ const ACTIONS: Record<string, ActionHandler> = {
     );
   },
   'graph-depth': (dispatcher, target) => {
-    const n = Number(target.getAttribute('data-pkc-graph-depth'));
+    // 🔴 `<select>`(選んだ値)でも、値を運ぶボタン(`data-pkc-graph-depth`)でも読める
+    const n = Number(target instanceof HTMLSelectElement ? target.value : target.getAttribute('data-pkc-graph-depth'));
     if (Number.isFinite(n)) dispatcher.dispatch({ type: 'SET_GRAPH_VIEW', depth: n });
   },
   /**
@@ -10688,6 +10689,13 @@ const ACTIONS: Record<string, ActionHandler> = {
    *   ボード(`entry=` の付箋 + `.pkc-line`)の新しいノートにして開く。図は描画と同じ `graphViewOf` の 1 本から組む。
    * ⚠ 新しいデータ形式は作らない(本文は PKC-Markdown)。編集中は作らない(理由を出す)。
    */
+  /**
+   * 🔴 **左のタブの関係グラフを、中央の広い画面で開く**(1 クリック)。⚠ 中央の面(`ViewMode` の `graph`)は
+   *   既にある ── ここは `openView` の 1 本に乗るだけ(開いた後の後始末を落とさない)。読むだけの操作。
+   */
+  'graph-open-wide': (dispatcher) => {
+    openView(dispatcher, 'graph');
+  },
   'graph-open-board': (dispatcher) => {
     const st = dispatcher.getState();
     if (st.phase !== 'ready') {
@@ -18029,11 +18037,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **印刷レイアウト表示を切り替える**(v4.0 Phase 1 / PR-03。情報ペインの「ページ設定」のボタン)。
    * ⚠ ショートカットキー・操作を探すと**同じ関数**(`togglePrintLayout`)── 切替の規則を 2 か所に置かない。
    */
-  'toggle-print-layout': (_dispatcher, _target, services) => {
+  'toggle-print-layout': (_dispatcher, target, services) => {
     /**
      * 🔴 **切り替えは知らせの有無に関係なく走らせる**(PR-04 で判明)。⚠ `showStatus?.(…(togglePrintLayout(…)))` と書くと、
      *   知らせの口が無いとき `?.` が**引数ごと評価を飛ばし**、切り替えそのものが起きなかった(`.claude/rules/src-invariants.md` §3 の `?.` の罠)。
      */
+    // 🔴 2 択ボタン(`通常` | `印刷レイアウト`)は押した側へそろえる(既にその側なら何も変えず知らせない)。選択の印の無い口は従来どおり切り替える
+    const choice = target instanceof HTMLElement ? target.getAttribute('data-pkc-print-layout-choice') : null;
+    if (choice === 'on' || choice === 'off') {
+      const want = choice === 'on';
+      if (isPrintLayoutOn(document.documentElement) === want) return;
+      choosePrintLayout(document.documentElement, want);
+      services.showStatus?.(printLayoutToggledText(want));
+      return;
+    }
     const on = togglePrintLayout(document.documentElement);
     services.showStatus?.(printLayoutToggledText(on));
   },
@@ -19740,7 +19757,7 @@ const ACTIONS: Record<string, ActionHandler> = {
   'forget-sync-records': (_dispatcher, _target, services) => {
     void services.forgetSyncRecords?.();
   },
-  /** 🔴 選択同期の範囲(#2066 段 5-B)── 「ワークスペース全体」/「選んだエントリだけ同期」。値は押した選択肢の属性。 */
+  /** 🔴 選択同期の範囲(#2066 段 5-B)── 「コレクション全体」/「選んだエントリだけ同期」。値は押した選択肢の属性。 */
   'set-sync-scope-mode': (_dispatcher, target, services) => {
     const v = target.getAttribute(SYNC_SCOPE_MODE_ATTR);
     if (v === 'all' || v === 'selective') void services.syncScope?.setMode(v);

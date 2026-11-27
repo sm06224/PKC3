@@ -27,7 +27,7 @@
     押して「ハイライトを外す」。保存はページの編集と**同じ 1 本**(同じ worker・同じ棚・同じ門)で、新しい PDF の添付になる。元の PDF は変わらない。
   - **付箋とペン**(#275)は、上のバーの「付箋」でページのどこかを押して字を入れ(Enter で付ける・Esc でやめる)、「ペン」でページの上をなぞる。
     付いた付箋は小さな印で、重ねると字が出て、押すと「直す / 外す」。保存はハイライトと**同じ 1 本**(PDF 本来の注釈 `/Text` と `/Ink` として新しい PDF に書く)。
-  - **書くのは本体**。この窓は選んだ字と頁番号を**放送で送るだけ**(ノートへは触れない)。
+  - **書くのは本体**。この窓は選択した文字と頁番号を**放送で送るだけ**(ノートへは触れない)。
   - 読めなかったら、ブラウザ内蔵の表示へ**自動で退避**する(断り文は出さない)。
 
   textLayer の規則は pdf.js の `web/pdf_viewer.css`(Apache-2.0)から必要な分だけ写した。
@@ -241,8 +241,8 @@
   <button id="extract" type="button" disabled title="一覧で選んだページ(Ctrl(Mac は ⌘)+クリック・Shift+クリックで複数)だけを、新しい PDF として添付に加えます(元の PDF は変わりません)">選んだページを別の PDF にする</button>
   <button id="note-tool" type="button" disabled aria-pressed="false" title="ページのどこかを押して、そこに付箋を付けます(字の無いページにも付けられます)。もう一度押すと付箋をやめます">付箋</button>
   <button id="pen-tool" type="button" disabled aria-pressed="false" title="ページの上をなぞって線を書きます(色は右の丸いボタンで選びます)。もう一度押すとペンをやめます">ペン</button>
-  <button id="hl-apply" type="button" disabled title="選んだ字にハイライトを付けます(色は右の丸いボタンで選びます)。付いたハイライトを押すと「ハイライトを外す」が出ます">ハイライト</button>
-  <button id="quote" type="button" disabled title="選んだ字を、ページ番号つきで引用します(この PDF につながっているノートがあればそちらの末尾、無ければ添付のノートの末尾)">ノートへ引用する</button>
+  <button id="hl-apply" type="button" disabled title="選択した文字にハイライトを付けます(色は右の丸いボタンで選びます)。付いたハイライトを押すと「ハイライトを外す」が出ます">ハイライト</button>
+  <button id="quote" type="button" disabled title="選択した文字を、ページ番号つきで引用します(この PDF につながっているノートがあればそちらの末尾、無ければ添付のノートの末尾)">ノートへ引用する</button>
 </div>
 <div id="edit-bar" hidden><span id="edit-note"></span><button id="edit-reset" type="button" title="まだ保存していない変更(並べ替え・回転・外したページ・ハイライト・付箋・ペンの線)を、すべて元に戻します">変更を元に戻す</button><button id="edit-unpick" type="button" title="一覧で選んだページの選びを、すべて外します(一覧の項目で Esc でも外せます)">選びを外す</button><span id="edit-warn" hidden></span></div>
 <div id="plist-hint">ドラッグか ↑↓ で並べ替え・↻ で回す・× で外す・Ctrl(Mac は ⌘)+クリックで選ぶ</div>
