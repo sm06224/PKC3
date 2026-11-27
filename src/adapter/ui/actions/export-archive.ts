@@ -12,7 +12,7 @@ import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { exportBlockedNote } from '@adapter/state/app-state';
 import { writeArchive, type ArchiveSource } from '@features/export/pkc3-archive';
-import { archiveFileName, type ArchiveKind } from '@features/export/archive-kind';
+import { archiveFileName, SITE_PACKAGE_SUFFIX, type ArchiveKind } from '@features/export/archive-kind';
 import { CORRUPT_REFUSAL, looksCorrupt } from '@features/storage/db-corruption';
 import {
   rescueArchiveDetail,
@@ -29,6 +29,8 @@ import {
 } from '@features/markdown/markdown-render';
 import { readFenceAssets } from '@features/asset/fence-asset-read';
 import { embedSourceNotice, mathSourceNotice, writePortableHtml } from '@features/export/pkc3-html';
+import { writePortableSiteZip } from '@features/export/pkc3-site-zip';
+import type { WidgetTheme } from '@features/markdown/widget-bridge';
 import { buildOoxmlFile } from '@adapter/platform/export/ooxml-client';
 import type { OoxmlMedia } from '@adapter/platform/export/ooxml-assemble';
 import type { DocxBlock } from '@features/export/docx';
@@ -209,13 +211,18 @@ export interface ExportDeps {
    * ⚠ 焼かないと、左寄せで読んでいる人が**書き出した HTML だけ中央**になる。
    */
   proseAlign?: ProseAlign;
+  /**
+   * 🔴 **配布パッケージのツールを単体で開いたときの配色**(#2098 後半)── 書き出した時点の画面の配色。
+   * ⚠ 省略すると明るい既定(index.html の中で開けば、親がそのときの配色を配り直す)。
+   */
+  toolTheme?: WidgetTheme;
 }
 
 // 🔑 file 名の「今日」は `dayStamp`(端末の暦日)1 本 ── ここに私的な stamp を持たない(#709)
 const stamp = (d: Date): string => dayStamp(d, '');
 
 /** 書き出す形式。⚠ **可逆なのはアーカイブだけ**(UI でそう言う)。 */
-export type ExportKind = 'archive' | 'html' | 'markdown';
+export type ExportKind = 'archive' | 'html' | 'markdown' | 'site';
 
 /**
  * 書き出しを始めたときに画面下へ出す字。⚠ **進行中の字なので `…` で終わる**(`status-notice.ts` の
@@ -226,6 +233,7 @@ export const EXPORT_STARTING: Record<ExportKind, string> = {
   archive: '書き出しています…',
   html: '閲覧用 HTML を書き出しています…',
   markdown: 'Markdown を書き出しています…',
+  site: '配布パッケージを書き出しています…',
 };
 
 /**
@@ -335,6 +343,11 @@ export async function exportFolder(
   dispatcher: Dispatcher,
   deps: ExportDeps,
   lid: string,
+  /**
+   * 🔴 **どの形で出すか**(#2098 後半)── `'archive'`(バックアップ)か `'site'`(配布パッケージ)。
+   * ⚠ 既定は持たせない(取り違えを tsc に止めさせる ── `exportEntry` と同じ向き)。
+   */
+  kind: 'archive' | 'site',
 ): Promise<number | null> {
   // ⚠ **読みの前**に断る(`exportEntry` と同じ理由 ── 30MB 読んでから断らない)
   const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
@@ -345,9 +358,20 @@ export async function exportFolder(
   try {
     // 🔴 直前の保存が disk に着いてから読む(読みは書込の chain の外に居る)
     await deps.settle();
-    const { source, warnings } = await folderSource(deps.source, lid);
+    // 🔴 配布パッケージは章の参照を展開してから絞り込む(閲覧用 HTML と同じ理由 ── #1459 段②)
+    const flattenStats: FlattenStats | undefined = kind === 'site' ? newFlattenStats() : undefined;
+    const { source, warnings } = await folderSource(
+      flattenStats === undefined ? deps.source : withFlattenedSectionEmbeds(deps.source, flattenStats),
+      lid,
+    );
     // 🔴 `archiveScope: 'notes'`(#1017 段④b。`exportEntry` と同じ理由)
-    return await exportArchive(dispatcher, { ...deps, source }, 'archive', warnings, 'notes');
+    return await exportArchive(
+      dispatcher,
+      { ...deps, source, ...(flattenStats === undefined ? {} : { flattenStats }) },
+      kind,
+      warnings,
+      'notes',
+    );
   } catch (e) {
     dispatcher.dispatch({
       type: 'OP_FAILED',
@@ -368,7 +392,8 @@ export async function exportSelection(
   dispatcher: Dispatcher,
   deps: ExportDeps,
   lids: readonly string[],
-  kind: 'archive' | 'html',
+  /** 🔴 `'site'` = 配布パッケージ(#2098 後半)── フォルダを選べば中のノートごと入る(バックアップと同じ扱い)。 */
+  kind: 'archive' | 'html' | 'site',
 ): Promise<number | null> {
   const blocked = exportBlockedNote(dispatcher.getState(), '書き出してください');
   if (blocked !== null) {
@@ -378,11 +403,11 @@ export async function exportSelection(
   try {
     await deps.settle();
     // 🔴 閲覧用 HTML は章の参照を展開してから絞り込む(`exportEntry` と同じ理由 ── #1459 段②)
-    const flattenStats: FlattenStats | undefined = kind === 'html' ? newFlattenStats() : undefined;
+    const flattenStats: FlattenStats | undefined = kind === 'html' || kind === 'site' ? newFlattenStats() : undefined;
     const { source, warnings } = await selectionSource(
       flattenStats === undefined ? deps.source : withFlattenedSectionEmbeds(deps.source, flattenStats),
       lids,
-      kind,
+      kind === 'site' ? 'archive' : kind,
     );
     return await exportArchive(
       dispatcher,
@@ -553,7 +578,7 @@ export async function exportArchive(
     const startingText = EXPORT_STARTING[kind].replace(/…$/, '');
     // 🔴 閲覧用 HTML は、別のノートの章の参照を書き出す側で展開する(#1459 段②)。入口が包み済みなら二重に包まない
     const flattenStats: FlattenStats | undefined =
-      kind === 'html' ? (deps.flattenStats ?? newFlattenStats()) : undefined;
+      kind === 'html' || kind === 'site' ? (deps.flattenStats ?? newFlattenStats()) : undefined;
     const src = withAssetProgress(
       flattenStats !== undefined && deps.flattenStats === undefined
         ? withFlattenedSectionEmbeds(deps.source, flattenStats)
@@ -582,6 +607,29 @@ export async function exportArchive(
       // PKC2 は light / full の別を manifest にしか書いておらず user が困っていた)
       detail = `${out.counts.entries} 件(添付 ${out.counts.assets})、閲覧用(取り込み直せません)`;
       // 🔴 展開した章の数は言う(渡した先で画面と同じ中身が読めること)。見つからなかった参照は注意に積む
+      if (flattenStats !== undefined && flattenStats.expanded > 0) {
+        detail += `、別のノートの章 ${String(flattenStats.expanded)} 件を展開${flattenTitlesNote(flattenStats.titles)}`;
+      }
+      if (flattenStats !== undefined) out.warnings.push(...flattenWarnings(flattenStats));
+    } else if (kind === 'site') {
+      /**
+       * 🔴 **配布パッケージ**(#2098 後半)── 閲覧用 HTML と同じ材料(描く口・外部の画像・紙面・本文の置き場所・SQL の答え・図)で、
+       *   複数のノートと HTML のツールを 1 つの zip にまとめる。⚠ 取り込み直せない片道の形(そう言う)。
+       */
+      const site = await writePortableSiteZip(src, iso, {
+        ...(deps.renderBody ? { render: deps.renderBody } : {}),
+        allowExternalImages: deps.allowExternalImages === true,
+        pageFormat: deps.pageFormat ?? DEFAULT_PAGE_FORMAT,
+        proseAlign: deps.proseAlign ?? DEFAULT_PROSE_ALIGN,
+        askSql: deps.askSql,
+        figures: { vector: deps.renderFigureVector, raster: deps.renderFigure },
+        ...(deps.toolTheme ? { toolTheme: deps.toolTheme } : {}),
+      });
+      out = site;
+      name = `${base}${SITE_PACKAGE_SUFFIX}`;
+      detail =
+        `${site.counts.entries} 件(添付 ${site.counts.assets}・ツール ${site.counts.tools})、` +
+        '展開して index.html を開きます(取り込み直せません)';
       if (flattenStats !== undefined && flattenStats.expanded > 0) {
         detail += `、別のノートの章 ${String(flattenStats.expanded)} 件を展開${flattenTitlesNote(flattenStats.titles)}`;
       }

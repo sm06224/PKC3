@@ -120,6 +120,16 @@ export const COLLECTION_PANE_COMMANDS: readonly CollectionCommand[] = [
     //   社外へ 1 件渡すつもりで押すと全ノート入りになっていた
     title: '全部のノートを、読むだけの HTML ファイル 1 つにまとめます(1 件だけ渡すときは、そのノートを選んでから押します)',
   },
+  /**
+   * 🔴 **配布パッケージ**(`.pkc3-site.zip`、#2098 後半)── 複数のノートと HTML のツールを 1 つの zip にまとめる。
+   * ⚠ 「閲覧用 HTML」(1 ファイル)との違いを説明で言い切る:展開して index.html を開くこと・タブで並べて開けること・ツールが動くこと。
+   */
+  {
+    action: 'export-site',
+    label: '配布パッケージで書き出す',
+    title:
+      '複数のノートと HTML のツールを 1 つの zip(.pkc3-site.zip)にまとめます。展開して index.html を開くだけで、インターネットにつながっていなくても読めて、ノートとツールをタブで並べて使えます(取り込み直せません)',
+  },
   {
     action: 'export-portable',
     label: 'PKC3 入り HTML で書き出す',

@@ -51,6 +51,12 @@ export interface StandaloneWidgetHeadOptions {
   readonly seed: Readonly<Record<string, string>>;
   /** 書き出した時点の親の配色。 */
   readonly theme: WidgetTheme;
+  /**
+   * 🔴 **箱の名乗り**(#2098 後半)。省略すると `STANDALONE_WIDGET_FRAME_ID`(親が居ないので照合されない)。
+   * 配布パッケージの `tools/*.html` は `index.html` のタブの `<iframe data-pkc-html-render-id="…">` と**同じ字**を渡す ──
+   * 親(`portable-widget-bridge`)が送り主を 1 対 1 で照合できるようにするため(高さ・テーマ・確認つきの入出力)。
+   */
+  readonly frameId?: string;
 }
 
 export interface StandaloneWidgetOptions extends StandaloneWidgetHeadOptions {
@@ -65,6 +71,11 @@ export interface StandaloneWidgetOptions extends StandaloneWidgetHeadOptions {
    * ⚠ 既定は全部オフ(厳格な CSP)。直書きの ` ```html ` の呼び手は渡さない。
    */
   readonly permissions?: WidgetPermissionSet;
+}
+
+/** 箱の名乗り(渡された字が安全な形のときだけ使う ── 属性・script の字に入るので英数と `-` `_` に限る)。 */
+function frameIdOf(opts: { readonly frameId?: string }): string {
+  return typeof opts.frameId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(opts.frameId) ? opts.frameId : STANDALONE_WIDGET_FRAME_ID;
 }
 
 /** 箱の中の名前(`--pkc-*`)として渡してよい物だけを、値を確かめて残す(呼び手の値を信じない)。 */
@@ -145,7 +156,7 @@ export function standaloneWidgetHead(opts: StandaloneWidgetHeadOptions): string 
     '<script>try{window.postMessage(' +
     `{type:${inlineJson(WIDGET_THEME_MSG_TYPE)},tone:${inlineJson(theme.tone)},tokens:${inlineJson(theme.tokens)}},'*');}catch(e){}` +
     '</script>';
-  return style + storage + widgetThemePreludeScript(STANDALONE_WIDGET_FRAME_ID, widgetId) + initialTheme;
+  return style + storage + widgetThemePreludeScript(frameIdOf(opts), widgetId) + initialTheme;
 }
 
 /** 箱の文書の組み手(`buildHtmlSandboxDoc` / `reactFrameDoc`)が必ず出す書き出し。 */
@@ -178,7 +189,7 @@ export function standaloneShell(doc: string, title: string, tone: WidgetTheme['t
 export function buildStandaloneWidgetHtml(opts: StandaloneWidgetOptions): string {
   const doc = buildHtmlSandboxDoc(
     opts.content,
-    STANDALONE_WIDGET_FRAME_ID,
+    frameIdOf(opts),
     opts.allowExternalImages === true,
     standaloneWidgetHead(opts),
     opts.permissions ?? DEFAULT_WIDGET_PERMISSIONS,

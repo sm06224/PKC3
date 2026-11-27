@@ -1320,6 +1320,8 @@ export async function pickCaptureTool(page: Page, row: Locator, tool: string): P
  */
 const COLLECTION_EXPORT_ACTIONS: ReadonlySet<string> = new Set([
   'export-html',
+  // 🔴 配布パッケージ(#2098 後半)
+  'export-site',
   'export-portable',
   'export-pkc2-html',
   'export-markdown',

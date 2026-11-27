@@ -48,11 +48,14 @@
  * 25. `requestFile` →「このノートの添付から選ぶ」→ 同じノートの添付(18 の memo.csv)だけが並び、箱の中で読める
  * 26. 確認バーを出したまま別のノートへ移る → 確認バーが消え、箱へ答えが返る / 添付のウィジェット(asset: + id=)も箱になる
  *     / 閲覧用 HTML のページのエラーは 0
+ * 27. 配布パッケージ(#2098 後半)を書き出す → `.pkc3-site.zip` の中に、ノート 1 件 1 ファイル・counter-tool のツール
+ *     (厳格な CSP・箱の名乗りが iframe と同じ)・memo.csv の生ファイルと data/asset-*.js が在り、シェルの箱は allow-scripts だけ
  */
 import { test, expect, type Frame, type Page } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readZipDirectory, readZipEntry } from '../../src/features/import/zip-reader';
 import {
   answerAppDialog,
   bootedHere,
@@ -213,6 +216,9 @@ test('id= の在る html のウィジェットは状態を保ち、配色に追�
 
   // ── #2097 / #2098 ── 22〜26 は同じ起動の続き(書き出した閲覧用 HTML を blob: の文書で開く ── 起動を増やさない)
   await exportedViewerWidgets(page);
+
+  // ── #2098 後半 ── 27 は同じ起動の続き(配布パッケージを書き出し、zip の中身を確かめる ── 起動を増やさない)
+  await exportedSitePackage(page);
 
   // ── #2090 ② ── 14〜16 は同じ起動の続き(起動を増やさない)
   await widgetPermissions(page);
@@ -709,6 +715,60 @@ async function exportedViewerWidgets(page: Page): Promise<void> {
     await v.close();
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * 🔴 **配布パッケージ(`.pkc3-site.zip`、#2098 後半)** ── 上の道中で作った「表のノート」「入出力のノート(memo.csv 添付)」
+ * 「添付ツールのノート(counter-tool.html)」を、アプリの書き出しの道(点検 → 書き出し → ダウンロード)から本物の zip にして中身を確かめる。
+ * ⚠ 展開して `file://` で開く検証(複数タブ・ツール・確認バー・添付の読み込み)は PR の手元の実展開の確認で見る
+ *   (`goto` は起動の数に入り、`blob:` の文書からは相対パスの `data/*.js` を読めない)。
+ */
+async function exportedSitePackage(page: Page): Promise<void> {
+  await gotoCollectionPane(page);
+  const dlWait = page.waitForEvent('download', { timeout: 30_000 });
+  await clickExportMenuItem(page, 'export-site');
+  // ⚠ 外へ渡す書き出しなので、閲覧用 HTML と同じ点検が出る ──「このまま書き出す」
+  expect(await answerAppDialog(page, 'ok', { timeout: 15_000 })).toContain('書き出す前に');
+  const dl = await dlWait;
+  // 27. 名前は二重拡張子で、中身は既存の zip の読み手で開ける
+  expect(dl.suggestedFilename(), '配布パッケージの名前になっていない').toMatch(/\.pkc3-site\.zip$/);
+  const zip = new Blob([await readFile((await dl.path())!)]);
+  const dir = await readZipDirectory(zip);
+  const text = async (name: string): Promise<string> => {
+    const e = dir.find((x) => x.name === name);
+    expect(e, `zip に ${name} が無い`).toBeDefined();
+    return (await readZipEntry(zip, e!)).text();
+  };
+  const names = dir.map((e) => e.name);
+  const w: Record<string, unknown> = {};
+  new Function('window', await text('manifest.js'))(w);
+  const m = w['__PKC_SITE_MANIFEST__'] as {
+    notes: { i: number; title: string }[];
+    tools: { name: string; path: string; frameId: string }[];
+    assets: { name: string; path: string; inline?: string }[];
+  };
+  const titles = m.notes.map((n) => n.title);
+  for (const t of ['添付ツールのノート', '入出力のノート', 'counter-tool.html', 'memo.csv']) {
+    expect(titles, `配布パッケージに「${t}」が無い`).toContain(t);
+  }
+  // ノートは 1 件 1 ファイル(目録の件数と同じだけ在る)
+  expect(names.filter((n) => /^data\/note-\d+\.js$/.test(n)).length).toBe(m.notes.length);
+  // HTML の添付はツールとして同梱(厳格な CSP・箱の名乗りが index.html の iframe と同じ字)
+  const tool = m.tools.find((t) => t.name === 'counter-tool');
+  expect(tool, 'counter-tool.html がツールとして入っていない').toBeDefined();
+  const toolHtml = await text(tool!.path);
+  expect(toolHtml).toContain(tool!.frameId);
+  expect(toolHtml).toContain("connect-src 'none'");
+  // 添付は生ファイル。ウィジェットの在るノートの memo.csv だけ data/asset-*.js も作る
+  const memo = m.assets.find((a) => a.name === 'memo.csv');
+  expect(memo, 'memo.csv が入っていない').toBeDefined();
+  expect(await text(memo!.path)).toBe('x,y\n1,2\n');
+  expect(memo!.inline, 'ウィジェットのノートの添付に data/asset-*.js が無い').toMatch(/^data\/asset-\d+\.js$/);
+  expect(names).toContain(memo!.inline!);
+  // シェルの箱は allow-scripts だけ
+  const index = await text('index.html');
+  expect(index).toContain("f.setAttribute('sandbox','allow-scripts')");
+  expect(index).not.toMatch(/allow-same-origin|allow-downloads/);
 }
 
 /** 外部の script と通信を使う道具(⚠ 宛先は `page.route` で受ける偽の CDN / API ── 外のネットワークへは出ない)。 */

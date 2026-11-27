@@ -25,6 +25,7 @@ import {
   exportEntryPptx,
   exportFolder,
   exportMarkdownToFolder,
+  exportSelection,
   type ExportDeps,
 } from '../../src/adapter/ui/actions/export-archive';
 import { exportPortable, type PortableExportDeps } from '../../src/adapter/ui/actions/export-portable';
@@ -119,7 +120,10 @@ function exportDeps(): ExportDeps & { files: string[]; reads: { n: number } } {
 const SECTION_ENTRIES: ReadonlyArray<[string, (d: Dispatcher, x: ReturnType<typeof exportDeps>) => Promise<unknown>]> = [
   ['exportEntry(バックアップ 1 件)', (d, x) => exportEntry(d, x, 'n1', 'archive')],
   ['exportEntry(閲覧用 HTML 1 件)', (d, x) => exportEntry(d, x, 'n1', 'html')],
-  ['exportFolder(フォルダごと)', (d, x) => exportFolder(d, x, 'n1')],
+  ['exportFolder(フォルダごと)', (d, x) => exportFolder(d, x, 'n1', 'archive')],
+  ['exportFolder(フォルダの配布パッケージ)', (d, x) => exportFolder(d, x, 'n1', 'site')],
+  ['exportArchive(配布パッケージ)', (d, x) => exportArchive(d, x, 'site')],
+  ['exportSelection(選んだノートの配布パッケージ)', (d, x) => exportSelection(d, x, ['n1'], 'site')],
   ['exportArchive(バックアップ)', (d, x) => exportArchive(d, x, 'archive')],
   ['exportArchive(閲覧用 HTML)', (d, x) => exportArchive(d, x, 'html')],
   ['exportArchive(Markdown zip)', (d, x) => exportArchive(d, x, 'markdown')],
