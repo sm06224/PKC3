@@ -154,6 +154,15 @@ describe('現在地の 1 通', () => {
     off();
   });
 
+  it('どの目印もまだ下にある(本文の先頭)ときは、1 つ目を現在地にする', () => {
+    const hs = headingBody();
+    const got: string[] = [];
+    const off = subscribeChartContext({ root, scrollRoot: null, lid: 'n', bind: { mode: 'heading', level: 2 } }, (s) => got.push(s.key));
+    ios[0]!.report(hs, ['below', 'below', 'below']);
+    expect(got).toEqual(['0']);
+    off();
+  });
+
   it('page / log-day の 1 通', () => {
     root.innerHTML = '<p>1</p>';
     const hr = line(document.createElement('hr'), 3);
@@ -207,6 +216,17 @@ describe('現在地の 1 通', () => {
     expect(liveChartContextWatches()).toBe(0);
   });
 
+  it('目印が同じでも本文の塊が差し替わったら、今の 1 通を送り直す(保存した表を描き直すため)', async () => {
+    const hs = headingBody();
+    const got: string[] = [];
+    const off = subscribeChartContext({ root, scrollRoot: null, lid: 'n', bind: { mode: 'heading', level: 2 } }, (s) => got.push(s.key));
+    ios[0]!.report(hs, ['above', 'in', 'below']);
+    expect(got).toEqual(['1']);
+    root.querySelector('p')!.replaceWith(document.createElement('table'));
+    await vi.waitFor(() => expect(got).toEqual(['1', '1']));
+    off();
+  });
+
   it('本文の塊が差し替わったら目印を集め直す', async () => {
     headingBody();
     const off = subscribeChartContext({ root, scrollRoot: null, lid: 'n', bind: { mode: 'heading', level: 2 } }, () => undefined);
@@ -214,8 +234,7 @@ describe('現在地の 1 通', () => {
     const h = line(document.createElement('h2'), 50);
     h.textContent = 'Q4';
     root.append(h);
-    await new Promise((r) => setTimeout(r, 5));
-    expect(ios[0]!.targets.size).toBe(4);
+    await vi.waitFor(() => expect(ios[0]!.targets.size).toBe(4));
     expect(ios[0]!.targets.has(h)).toBe(true);
     off();
   });

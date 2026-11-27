@@ -121,7 +121,12 @@ class ContextWatch {
   private collect(): void {
     const next = collectChartAnchors(this.root, this.bind);
     const same = next.length === this.anchors.length && next.every((a, i) => a.el === this.anchors[i]!.el && a.key === this.anchors[i]!.key);
-    if (same) return;
+    if (same) {
+      // 🔑 本文の塊が差し替わった(保存した)── 目印は同じでも、今の場所のデータが変わったかもしれない。
+      //    今の 1 通をもう一度届ける(受け手が本文を比べ、変わっていなければ何もしない)
+      if (this.last !== null) for (const fn of [...this.listeners]) fn(this.last);
+      return;
+    }
     for (const a of this.anchors) this.io?.unobserve(a.el);
     this.states.clear();
     this.anchors = next;

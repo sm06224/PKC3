@@ -62,8 +62,32 @@ export interface ChartBindingArgs {
 /** 連動先の表示(`連動: Q2 (2 / 4)` / `連動: ページ 2 / 4` / `連動: 2026-11-20 (3 / 10)`)。 */
 export function bindLabelText(mode: ChartBindSpec['mode'], frame: BoundChartFrame | null, index: number, total: number): string {
   if (frame === null) return '連動: (なし)';
-  if (mode === 'page') return `連動: ${frame.label}`;
+  if (mode === 'page' || index < 0) return `連動: ${frame.label}`;
   return `連動: ${frame.label} (${index + 1} / ${total})`;
+}
+
+/** 目印の数と本文の区切りの数が合わないときの文(どの節のデータかを取り違えて描かない)。 */
+export const BIND_MISMATCH_REASON = '本文の見出しの数とグラフの区切りの数が合わないため、この場所のデータを特定できません';
+
+/**
+ * 🔑 **現在地 → 時点**。heading / page は番号で引くが、⚠ 本文の目印の数(`signal.total`)と時点の数が違うときは
+ * 番号の対応が崩れている(setext 見出し・リストの中の見出しなど)── heading は見出しの字で引き直し、
+ * それでも引けなければ「特定できない」を返す(隣の節のデータを描かない)。
+ */
+export function resolveFrame(
+  data: BoundChartDataset,
+  s: ChartContextSignal,
+): { index: number; frame: BoundChartFrame | null; mismatch?: true } {
+  if (data.mode === 'log-day') {
+    const f = frameForSignal(data, s);
+    return { index: f === null ? -1 : data.frames.indexOf(f), frame: f };
+  }
+  if (s.total === data.frames.length) return { index: s.index, frame: data.frames[s.index] ?? null };
+  if (data.mode === 'heading') {
+    const k = data.frames.findIndex((f) => f.label === s.label);
+    if (k >= 0) return { index: k, frame: data.frames[k]! };
+  }
+  return { index: -1, frame: { key: '', label: s.label, spec: null, reason: BIND_MISMATCH_REASON }, mismatch: true };
 }
 
 /**
@@ -82,12 +106,16 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
   let lastSignal: ChartContextSignal | null = null;
   let disposed = false;
 
-  const freshData = (): BoundChartDataset => {
+  /** 本文が変わっていれば時点のデータを作り直す。作り直したら真。 */
+  const refreshData = (): boolean => {
     const now = args.getNoteBody();
-    if (now !== null && now !== body) {
-      body = now;
-      data = extractBoundChartFrames(now, base);
-    }
+    if (now === null || now === body) return false;
+    body = now;
+    data = extractBoundChartFrames(now, base);
+    return true;
+  };
+  const freshData = (): BoundChartDataset => {
+    refreshData();
     return data;
   };
 
@@ -156,11 +184,12 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
   };
 
   const applySignal = (s: ChartContextSignal, animate: boolean): void => {
-    const d = freshData();
-    const frame = frameForSignal(d, s);
-    const i = frame === null ? (bind.mode === 'log-day' ? -1 : s.index) : d.frames.indexOf(frame);
-    if (i === index && frame !== null && frame.spec !== null && view.element.getAttribute('data-pkc-gpu-chart-bind-key') === frame.key) return;
-    show(i, frame, animate);
+    // 🔴 同じ場所でも、本文が変わった(保存した)なら描き直す(古い数のまま残さない)
+    const changed = refreshData();
+    const d = data;
+    const r = resolveFrame(d, s);
+    if (!changed && r.index === index && r.frame !== null && r.frame.spec !== null && view.element.getAttribute('data-pkc-gpu-chart-bind-key') === r.frame.key) return;
+    show(r.index, r.frame, animate);
   };
 
   /** 本文の該当場所へ(上端に固定していればそのぶん下げる)。 */

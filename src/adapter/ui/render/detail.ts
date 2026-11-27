@@ -672,6 +672,8 @@ export class DetailRenderer {
   private held: HeldView | null = null;
   /** 最後に描き終えた本文と、そのときの描画設定の鍵(持ち越すときの控え)。 */
   private paintedBody: string | null = null;
+  /** 読む面で最後に描き始めた本文(`readFigureOpts` が読む)。 */
+  private readingBody: { readonly lid: string; readonly body: string } | null = null;
   private paintedKey: string | null = null;
   /** 飛んでいる添付の読み込み(画像・音・動画・囲み)の数。⚠ 0 でなければ持ち越さない(読み込み中の節点を止めない)。 */
   private hydrating = 0;
@@ -2121,6 +2123,8 @@ export class DetailRenderer {
          *   新しい字が欄を閉じるまで画面に出ない(打ったのに古い字のまま見える)。
          */
         const keptCell = captureCellInput(host);
+        // 🔑 いま描いている本文(連動グラフが読む ── 描き終える前に現在地が届いても、古い本文で時点を作らない)
+        this.readingBody = { lid, body };
         /**
          * 🔴 **ウィジェットの保存先の lid を器に持たせる**(PR-07)── 箱が名乗る lid は使わず、ここから引く。
          * ⚠ 塊を当てる**直前**に付け替える(当てる前に付けると、まだ前のノートの塊が新しい lid を名乗る時間が延びる)。
@@ -4442,8 +4446,8 @@ export class DetailRenderer {
    */
   /**
    * 🔴 **読む面の図の口**(v4.1 PR-8)── `figureOpts` に、スクロール連動グラフ(`"bind"`)が読む本文・lid・スクロールの器を足す。
-   * ⚠ 本文は**読むたびに引く**: 描き終えた本文(`paintedBody`)がこのノートの物ならそれ、描いている最中なら今描いている本文。
-   *   保存して本文が変われば、グラフの塊が差し替わらなくても次の現在地で時点のデータを作り直す。
+   * ⚠ 本文は**読むたびに引く**: このノートで最後に描き始めた本文(`readingBody`)。
+   *   保存して本文の塊が差し替わると、見張りが今の 1 通を送り直すので、同じ場所にいてもその場で作り直す(グラフの塊は差し替わらない)。
    * ⚠ 読む面だけが渡す ── 埋め込み・編集のプレビューでは連動の見張りを張らない。
    */
   private readFigureOpts(lid: string, body: string): HydrateGpuChartOptions {
@@ -4451,7 +4455,11 @@ export class DetailRenderer {
       ...this.figureOpts(),
       noteLid: lid,
       scrollRoot: this.scroller,
-      getNoteBody: () => (this.bodyHost?.getAttribute(PAINTED_ATTR) === lid && this.paintedBody !== null ? this.paintedBody : body),
+      getNoteBody: () => {
+        const r = this.readingBody;
+        if (r !== null && r.lid === lid) return r.body;
+        return this.bodyHost?.getAttribute(PAINTED_ATTR) === lid && this.paintedBody !== null ? this.paintedBody : body;
+      },
     };
   }
 

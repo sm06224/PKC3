@@ -5078,8 +5078,8 @@ dd[data-pkc-field='inspector-toc'] {
   position: sticky;
   top: 0;
   z-index: 3;
-  /* 包んでいる塊の余白から本文の字が透けない */
-  background: var(--bg);
+  /* 包んでいる塊の余白から本文の字が透けない(⚠ 本文の CSS が既に持つ変数だけを使う ── 新しい変数を足すと配布パッケージの明暗の写しが外れる) */
+  background: var(--surface);
 }
 .pkc-gpu-chart-sticky > .pkc-gpu-chart {
   box-shadow: var(--shadow);

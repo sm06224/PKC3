@@ -865,7 +865,11 @@ class ChartView implements GpuChartView {
     const doc = this.stage.ownerDocument;
     const c = doc.createElement('canvas');
     // 🔑 紙は明るい配色で(図の印刷と同じ)。今の表示範囲・今のデータのまま 2D で焼く ── GPU の状態には触らない
-    if (paintChart2d(c, this.spec, this.cur, w, h, 2, PAPER_CHART_THEME, null) === null) return false;
+    // ⚠ 切り替えの補間の途中なら、途中のコマではなく行き先を焼く(紙に中間の絵を残さない)
+    const tw = this.tween;
+    const pSpec = tw === null ? this.spec : tw.to;
+    const pRange = tw === null ? this.cur : tw.toRange;
+    if (paintChart2d(c, pSpec, pRange, w, h, 2, PAPER_CHART_THEME, null) === null) return false;
     const blob = await canvasToPng(c);
     c.width = 0;
     c.height = 0;
@@ -877,7 +881,7 @@ class ChartView implements GpuChartView {
     const img = doc.createElement('img');
     img.className = 'pkc-gpu-chart-print-img';
     img.setAttribute('data-pkc-gpu-chart-print', '');
-    img.alt = gpuChartAltText(this.spec);
+    img.alt = gpuChartAltText(pSpec);
     img.src = url;
     this.stage.after(img);
     this.printImg = { img, url };
@@ -1367,6 +1371,7 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
 
   const views = new Map<HTMLElement, GpuChartView>();
   const bindings = new Map<HTMLElement, ChartBindingHandle>();
+  let afterPrintOff: (() => void) | null = null;
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let disposed = false;
   const failHost = (host: HTMLElement, error: string): void => {
@@ -1495,16 +1500,26 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
     }
     const baked = await Promise.all(targets.map((h) => views.get(h)?.bakePrintImage() ?? Promise.resolve(false)));
     if (!baked.some(Boolean)) return;
+    // ⚠ 刷り終えたら外す口は塊ごとに 1 本だけ(刷り直しのたびに積もらせない)。来ない環境でも dispose / 次の焼きで返す
+    afterPrintOff?.();
     const win = (flushRoot as Node).ownerDocument?.defaultView ?? (typeof window === 'undefined' ? null : window);
-    win?.addEventListener('afterprint', () => {
-      for (const h of targets) views.get(h)?.dropPrintImage();
-    }, { once: true });
+    if (win === null) return;
+    const onAfter = (): void => {
+      afterPrintOff = null;
+      for (const v of views.values()) v.dropPrintImage();
+    };
+    win.addEventListener('afterprint', onAfter, { once: true });
+    afterPrintOff = () => {
+      win.removeEventListener('afterprint', onAfter);
+      afterPrintOff = null;
+    };
   };
 
   return registerLiveScope({
     dispose: () => {
       disposed = true;
       io?.disconnect();
+      afterPrintOff?.();
       for (const t of timers) clearTimeout(t);
       timers.clear();
       for (const h of [...bindings.keys()]) dropBinding(h);

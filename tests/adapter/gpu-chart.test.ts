@@ -917,6 +917,53 @@ describe('🔴 スクロール連動(見出しの節)', () => {
     scope.dispose();
   });
 
+  it('🔴 同じ節にいたまま表を保存しても、その場で新しい数に描き直す(古い数のまま残さない)', async () => {
+    let body = BOUND_BODY;
+    const root = document.createElement('div');
+    root.setAttribute('data-pkc-field', 'detail-body');
+    root.innerHTML = renderMarkdown(body, { sourceLineAnchors: true });
+    host.append(root);
+    const scope = hydrateGpuChart(root, { getNoteBody: () => body, noteLid: 'n1', scrollRoot: null });
+    const chart = root.querySelector<HTMLElement>(`[${GPU_CHART_SRC_ATTR}]`)!;
+    const io = ctxIos.find((i) => i.forContext)!;
+    io.readTo([...root.querySelectorAll('h2')], 1);
+    expect(ariaOf(chart)).toContain('件数');
+    // 保存 ── 表の塊だけが差し替わる(見出しとグラフの塊はそのまま・現在地も同じ)
+    body = body.replace('| 月 | 件数 |', '| 月 | 来場 |');
+    const table = root.querySelectorAll('table')[1]!;
+    const fresh = document.createElement('div');
+    (table.closest('[data-pkc-field="detail-body"] > *') ?? table).replaceWith(fresh);
+    await vi.waitFor(() => expect(ariaOf(chart)).toContain('来場'));
+    expect(keyOf(chart)).toBe('1');
+    scope.dispose();
+  });
+
+  it('🔴 本文の見出しの数と区切りの数が合わないときは、隣の節のデータを描かない', () => {
+    const { root, scope, chart } = boundNote();
+    // 本文の外の数え方で h2 が 1 つ増えた(リストの中の見出しなど)── 先頭に差し込む
+    const extra = document.createElement('h2');
+    extra.setAttribute('data-pkc-source-line', '1');
+    extra.textContent = '別の見出し';
+    const firstHead = root.querySelector('h2')!;
+    (firstHead.closest('[data-pkc-field="detail-body"] > *') ?? firstHead).before(extra);
+    const io = ctxIos.find((i) => i.forContext)!;
+    return vi.waitFor(() => expect(io.targets.size).toBe(4)).then(() =>
+      new Promise<void>((done) => {
+        const heads = [...root.querySelectorAll('h2')];
+        expect(heads).toHaveLength(4);
+        io.readTo(heads, 2); // DOM では 3 番目 = 本文の Q2(番号で引くと Q3 を描いてしまう)
+        expect(chart.querySelector('[data-pkc-field="gpu-chart-bind-label"]')!.textContent).toBe('連動: Q2 (2 / 3)');
+        expect(ariaOf(chart)).toContain('件数'); // 見出しの字で引き直した
+        io.readTo(heads, 0); // 本文に無い見出し ── 特定できないと出す
+        const view = chart.querySelector('[data-pkc-gpu-chart]')!;
+        expect(view.hasAttribute('data-pkc-gpu-chart-empty')).toBe(true);
+        expect(view.querySelector('[data-pkc-field="gpu-chart-empty"]')!.textContent).toContain('特定できません');
+        scope.dispose();
+        done();
+      }),
+    );
+  });
+
   it('本文が変わったら(保存)次の現在地で時点のデータを作り直す', () => {
     let body = BOUND_BODY;
     const root = document.createElement('div');
@@ -965,6 +1012,63 @@ describe('🔴 印刷の前の静止画(flush)', () => {
     expect(root.querySelector('img.pkc-gpu-chart-print-img')).toBeNull();
     expect(revoke).toHaveBeenCalledTimes(2);
     scope.dispose();
+  });
+
+  it('補間の途中で焼くと、途中のコマではなく行き先を焼く・刷り終えた口は 1 本だけ', async () => {
+    const q = rafQueue();
+    setGpuChartTestHooks({ createSurface: fakeFactory, ...q.hooks, reducedMotion: () => false });
+    const v = mountGpuChart(host, BARS([1, 2, 3]));
+    sized(v);
+    const { ctx: c2 } = fake2d();
+    // 目盛りの字を拾う(焼いた絵の y の範囲 = 途中のコマか行き先かの観測点)
+    const texts: string[] = [];
+    const rects: Array<[number, number]> = [];
+    const c2t = new Proxy(c2, {
+      get(t, k: string) {
+        if (k === 'fillText') return (str: string) => texts.push(str);
+        if (k === 'fillRect') return (_x: number, _y: number, w: number, h: number) => rects.push([w, h]);
+        return (t as Record<string, unknown>)[k];
+      },
+      set(t, k: string, v) {
+        (t as Record<string, unknown>)[k] = v;
+        return true;
+      },
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => c2t as never);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((cb: BlobCallback) => cb(new Blob(['png'], { type: 'image/png' })));
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:p');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const next = spec(JSON.stringify({ type: 'bar', engine: 'gpu', labels: ['L0', 'L1', 'L2'], datasets: [{ label: '行き先', data: [100, 100, 100] }] }));
+    v.updateData(next, { animate: true, resetViewport: true });
+    q.run(0);
+    q.run(50); // 途中
+    expect(v.animating).toBe(true);
+    texts.length = 0;
+    rects.length = 0;
+    expect(await v.bakePrintImage()).toBe(true);
+    expect(host.querySelector<HTMLImageElement>('img.pkc-gpu-chart-print-img')!.alt).toContain('行き先');
+    // 行き先(100)の目盛りまで出ている ── 途中のコマ(まだ 60 前後)ではない
+    expect(texts).toContain('100');
+    // 棒の高さも行き先(100 ≒ 描画域の 9 割超)── 途中のコマ(半分ほど)ではない。⚠ 地の塗り(幅いっぱい)は除く
+    const plotH = 320 - 8 - 24;
+    expect(rects.filter(([w, h]) => w < 500 && h > plotH * 0.85).length).toBe(3);
+    v.dispose();
+    expect(host.querySelector('img.pkc-gpu-chart-print-img')).toBeNull();
+
+    // 刷り直しても afterprint の口は 1 本
+    const root = document.createElement('div');
+    root.innerHTML = renderMarkdown('```chart live\n{"type":"line","datasets":[{"data":[1,3,2]}]}\n```\n');
+    host.append(root);
+    const add = vi.spyOn(window, 'addEventListener');
+    const remove = vi.spyOn(window, 'removeEventListener');
+    const scope = hydrateGpuChart(root);
+    await scope.flush!(root);
+    await scope.flush!(root);
+    const adds = add.mock.calls.filter((c) => (c[0] as string) === 'afterprint').length;
+    const removes = remove.mock.calls.filter((c) => (c[0] as string) === 'afterprint').length;
+    expect(adds - removes).toBe(1);
+    scope.dispose();
+    expect(remove.mock.calls.filter((c) => (c[0] as string) === 'afterprint').length - removes).toBe(1);
   });
 
   it('@media print で canvas の代わりに静止画を出す(画面では出さない)', () => {
