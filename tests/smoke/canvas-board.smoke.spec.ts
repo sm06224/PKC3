@@ -272,6 +272,8 @@ async function narrowMinimap(page: import('@playwright/test').Page): Promise<voi
   const v = (await vp.boundingBox())!;
   expect(r.width, 'スマホ幅のミニマップが大きい').toBeLessThanOrEqual(112);
   expect(r.y + r.height, 'ミニマップが枠の下で切れている').toBeLessThanOrEqual(v.y + v.height);
+  // 🔴 枠は画面より縦に長くなりうる ── 下端に置くと画面の外で切れる(実画面の撮影で見つけた)。画面の中に収まること
+  expect(r.y + r.height, 'ミニマップが画面の下で切れている').toBeLessThanOrEqual(page.viewportSize()!.height);
   await page.setViewportSize({ width: 1280, height: 800 });
 }
 

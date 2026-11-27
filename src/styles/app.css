@@ -4981,6 +4981,15 @@ dd[data-pkc-field='inspector-toc'] {
 .pkc-md-rendered .pkc-md-block:has(.pkc-widget-bar) > .pkc-code-lang {
   display: none;
 }
+/* 🔴 1 行にまとめる ── ブロック共通の上余白(コピー / 原文ボタンの段)を詰め、ウィジェットの行をその段へ上げる。
+ * 右端はコピー / 原文ボタン(絶対配置)の分だけ空けて重ねない */
+.pkc-md-rendered .pkc-md-block.pkc-md-block:has(.pkc-widget-bar) {
+  padding-top: 3px;
+}
+.pkc-md-rendered .pkc-md-block:has(.pkc-widget-bar) .pkc-widget-bar {
+  padding-right: 56px;
+  padding-left: 8px;
+}
 .pkc-md-rendered .pkc-widget-bar > button {
   font-size: var(--btn-fs-sm);
   padding: 0 8px;
@@ -5883,10 +5892,12 @@ dd[data-pkc-field='inspector-toc'] {
   white-space: nowrap;
   padding: 1px var(--s2);
 }
+/* 🔴 スマホ幅は右上に置く ── キャンバスの枠は画面より縦に長くなりうるので、下端に置くとミニマップが画面の外で切れる */
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='canvas-minimap'] {
   max-width: 110px;
   right: var(--s2);
-  bottom: var(--s2);
+  top: var(--s2);
+  bottom: auto;
 }
 [data-pkc-region='shell'][data-pkc-layout='phone'] [data-pkc-field='canvas-minimap'] svg {
   max-width: 100%;
@@ -13976,6 +13987,19 @@ h3[data-pkc-section] {
     --note-6: #7e22ce;
     --note-7: #be185d;
     --note-8: #64748b;
+    --pkc-tc-red: #e03131;
+    --pkc-tc-red-name: red;
+    --pkc-tc-orange: #d9480f;
+    --pkc-tc-orange-name: orange;
+    --pkc-tc-green: #2b8a3e;
+    --pkc-tc-green-name: green;
+    --pkc-tc-blue: #1c7ed6;
+    --pkc-tc-blue-name: blue;
+    --pkc-tc-purple: #ae3ec9;
+    --pkc-tc-purple-name: purple;
+    --pkc-tc-gray: #6c757d;
+    --pkc-tc-gray-name: gray;
+    --pkc-tc-grey-name: grey;
     color-scheme: light;
   }
   /* 🔴 音の再生機の貼り付きは紙には要らない(#1232 段 b)── 解かないと、紙の送りで頭に重なる */

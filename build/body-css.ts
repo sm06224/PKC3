@@ -365,6 +365,20 @@ export const PAPER_TOKENS: readonly string[] = [
   '--note-6',
   '--note-7',
   '--note-8',
+  // 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)── 紙はライトの値(書いた色のまま)へ戻す
+  '--pkc-tc-red',
+  '--pkc-tc-red-name',
+  '--pkc-tc-orange',
+  '--pkc-tc-orange-name',
+  '--pkc-tc-green',
+  '--pkc-tc-green-name',
+  '--pkc-tc-blue',
+  '--pkc-tc-blue-name',
+  '--pkc-tc-purple',
+  '--pkc-tc-purple-name',
+  '--pkc-tc-gray',
+  '--pkc-tc-gray-name',
+  '--pkc-tc-grey-name',
 ];
 
 /** 板・線の色と太さ(`place-board.ts` が要素へ置く)。⚠ トークンではないので焼かない。 */
