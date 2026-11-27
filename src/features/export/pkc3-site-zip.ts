@@ -45,7 +45,7 @@ import { DEFAULT_PAGE_FORMAT, pageFormatCss, type PageFormat } from '../page-for
 import { DEFAULT_PROSE_ALIGN, proseAlignCss, type ProseAlign } from '../prose-align';
 import type { ArchiveSource } from './pkc3-archive';
 import { buildPortableWidgetBridgeScript, portableWidgetBridgeCss } from './portable-widget-bridge';
-import { portableHydrateJs } from './portable-hydrate';
+import { NOTE_LINK_ATTR, portableHydrateJs } from './portable-hydrate';
 import {
   emptyCounts,
   openedAsSourceNotices,
@@ -846,7 +846,7 @@ try{
      ブラウザ任せだと最初の 1 つ = 別のノートの隠れた見出しへ飛ぶ) */
   panelsEl.addEventListener('click',function(ev){
     var a=ev.target&&ev.target.closest?ev.target.closest('a[href^="#"]'):null;
-    if(!a||a.hasAttribute('data-pkc-entry-ref'))return;
+    if(!a||a.hasAttribute('${NOTE_LINK_ATTR}'))return;
     var box=a.closest('.b');if(!box)return;
     var f=(a.getAttribute('href')||'').slice(1);if(f==='')return;
     var want=f;try{want=decodeURIComponent(f)}catch(_x){}
