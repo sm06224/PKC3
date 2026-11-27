@@ -111,8 +111,8 @@ export function widgetEntryPrefix(entryLid: string): string {
   return `${WIDGET_STORAGE_ROOT}${seg(entryLid)}.`;
 }
 
-/** 値の受け入れ条件(色・長さ・字体名の範囲。`;` `{` `}` `<` `>` は持たない)。 */
-function safeTokenValue(v: string): string | null {
+/** 値の受け入れ条件(色・長さ・字体名の範囲。`;` `{` `}` `<` `>` は持たない)。⚠ 単体の HTML の書き出しも同じ 1 本で見る。 */
+export function safeTokenValue(v: string): string | null {
   const t = v.trim();
   if (t === '' || t.length > 300) return null;
   if (/[;{}<>\\]/.test(t)) return null;
@@ -165,7 +165,9 @@ const THEME_PRELUDE_SOURCE =
   "function norm(c){if(!c||typeof c!=='object')return empty();" +
   "return {frontmatter:(c.frontmatter&&typeof c.frontmatter==='object'&&!Array.isArray(c.frontmatter))?c.frontmatter:{}," +
   'tables:Array.isArray(c.tables)?c.tables:[]};}' +
-  'function ask(){return new Promise(function(res){rq+=1;var n=rq;' +
+  // 🔑 親の居ない所(単体の HTML としてブラウザで直に開いた等。#2090)では待たずに空の答え ── 3 秒止めない
+  'function ask(){if(window.parent===window)return Promise.resolve(empty());' +
+  'return new Promise(function(res){rq+=1;var n=rq;' +
   'var t=setTimeout(function(){delete pend[n];res(empty());},CTO);' +
   'pend[n]=function(c){clearTimeout(t);delete pend[n];res(norm(c));};' +
   "try{window.parent.postMessage({type:CREQ,id:iframeId,reqId:n},'*');}catch(e){clearTimeout(t);delete pend[n];res(empty());}});}" +
@@ -237,6 +239,12 @@ export const WIDGET_LIVE_ATTR = 'data-pkc-widget-live';
  * ⚠ 保存つきの面の器には付けない(保存のたびに塊の HTML を変えない)。
  */
 export const WIDGET_SEED_ATTR = 'data-pkc-widget-seed';
+/**
+ * 🔴 **添付から読み込んだ HTML のウィジェットの器の印**(#2090。値は添付の鍵)。
+ * ⚠ 次の PR(アセット単位の権限)がこの属性を読んで対象を決める ── 綴りはここが正本(adapter に 2 本目を書かない)。
+ * 🔑 `id=` の無い添付の HTML も、読む面ではこの印を持つ器になる(テーマ連動・同じノートの参照・単体の HTML で保存)。
+ */
+export const WIDGET_ASSET_ATTR = 'data-pkc-widget-asset';
 
 /**
  * `id=` の在る ` ```html ` の器(placeholder)。
@@ -244,10 +252,19 @@ export const WIDGET_SEED_ATTR = 'data-pkc-widget-seed';
  *   無関係な段落を編集しても**塊の HTML が変わらず**、動いている箱は作り直されない(`apply-blocks.ts`)。
  * ⚠ 誰も埋めない面(書き出した HTML)では原文が字のまま読める。
  */
-export function widgetPlaceholderHtml(content: string, widgetId: string, allowExternalImages: boolean): string {
+export function widgetPlaceholderHtml(
+  content: string,
+  /** `id=` の在るときだけ(状態を持つ)。`null` = 添付の HTML の `id=` 無し(状態を持たない。#2090)。 */
+  widgetId: string | null,
+  allowExternalImages: boolean,
+  /** 添付から読み込んだ HTML の鍵(#2090)。 */
+  assetKey: string | null = null,
+): string {
   const src = escapeAttr(content);
+  const idAttrs = widgetId === null ? '' : ` ${WIDGET_ID_ATTR}="${escapeAttr(widgetId)}" ${WIDGET_LIVE_ATTR}="1"`;
+  const assetAttr = assetKey === null ? '' : ` ${WIDGET_ASSET_ATTR}="${escapeAttr(assetKey)}"`;
   return (
-    `<div class="pkc-widget-placeholder" ${WIDGET_SRC_ATTR}="${src}" ${WIDGET_ID_ATTR}="${escapeAttr(widgetId)}" ${WIDGET_LIVE_ATTR}="1"` +
+    `<div class="pkc-widget-placeholder" ${WIDGET_SRC_ATTR}="${src}"${idAttrs}${assetAttr}` +
     ` ${WIDGET_KIND_ATTR}="html"${allowExternalImages ? ' data-pkc-widget-ext="1"' : ''} data-pkc-md-block-kind="html">` +
     `<pre class="pkc-widget-source"><code class="language-html">${src}</code></pre></div>`
   );

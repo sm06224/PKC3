@@ -435,6 +435,11 @@ function buildRenderableSlotHtml(
    * 🔑 保存しない面(書き出し・プレビュー・埋め込み)の箱の**初期値**にだけ使う ── 保存つきの面は親が器を埋めるときに読む。
    */
   widgetStates: ReadonlyMap<string, Readonly<Record<string, string>>> = new Map(),
+  /**
+   * 🔴 **添付から読み込んだ中身の鍵**(#2090)。` ```html asset:鍵 ` は、保存つきの面では `id=` が無くても
+   *   ウィジェットの器になる(テーマ連動・同じノートの参照・単体の HTML で保存。次の PR の権限の対象)。
+   */
+  assetKey: string | null = null,
 ): string | null {
   switch (fence.lang) {
     case 'html':
@@ -462,7 +467,10 @@ function buildRenderableSlotHtml(
        * ⚠ `svg` は対象外(状態を持つ理由が無い)。読めない id は今までどおりの箱に落とす。
        */
       const widgetId = fence.lang === 'html' ? parseWidgetId(fence.rest) : null;
-      if (widgetId !== null && liveWidgets) return widgetPlaceholderHtml(content, widgetId, allowExternalImages);
+      // 🔑 添付の HTML(`asset:鍵`)は `id=` が無くても器にする(#2090)── 箱の CSP・sandbox は直書きと同じ 1 本
+      const widgetAsset = fence.lang === 'html' ? assetKey : null;
+      if (liveWidgets && (widgetId !== null || widgetAsset !== null))
+        return widgetPlaceholderHtml(content, widgetId, allowExternalImages, widgetAsset);
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
       // 🔑 器を出さない面の `id=` は、箱の中だけの `localStorage`(保存しない)を入れて描く(書き出しでも動く)
@@ -868,7 +876,16 @@ md.renderer.rules.fence = function (tokens, idx, options, env, self) {
         firstContentLine = raw + offset + 1;
       }
     }
-    return renderRenderableFence(fence, content, sourceLineAttrs, env, firstContentLine, token);
+    return renderRenderableFence(
+      fence,
+      content,
+      sourceLineAttrs,
+      env,
+      firstContentLine,
+      token,
+      // 🔑 書き出しで添付の字を借りた囲み(#444 段②)も、添付の鍵を器へ渡す(#2090。保存つきの面でだけ効く)
+      fenceAsset.kind === 'one' ? fenceAsset.key : null,
+    );
   }
   /**
    * ⚠ 素のコード囲みは `defaultFence` が token を読むので、**写しを渡す**
@@ -923,6 +940,8 @@ function renderRenderableFence(
    *   `token === null` を `false` にする)。
    */
   token: Token | null = null,
+  /** 添付から読み込んだ中身の鍵(#2090。`buildRenderableSlotHtml` の `assetKey`)。 */
+  assetKey: string | null = null,
 ): string {
   {
     if (fence.mode === 'norender') {
@@ -977,6 +996,7 @@ function renderRenderableFence(
       firstContentLine,
       (env as { liveWidgets?: boolean } | undefined)?.liveWidgets === true,
       (env as { widgetStates?: ReadonlyMap<string, Readonly<Record<string, string>>> } | undefined)?.widgetStates,
+      assetKey,
     );
     if (slot !== null) {
       return buildRenderableBlockHtml(fence, slot, content, sourceLineAttrs, occurrence);
@@ -1015,11 +1035,20 @@ export function renderFenceFromAsset(
    * 🔑 本文の経路(`renderMarkdown`)は 1 回の描画で env を 1 つ作って共有している ──
    *   ここもそれに揃える(規則を 2 つにしない)。
    */
-  env: { currentContainerId?: string; allowExternalImages?: boolean } = {},
+  env: {
+    currentContainerId?: string;
+    allowExternalImages?: boolean;
+    /** 🔴 保存つきの面(本文の読む面)だけ `true`(#2090)── 添付の HTML をウィジェットの器で出す。 */
+    liveWidgets?: boolean;
+    /** 保存しない面の箱の初期値(本文の ` ```json widget-state="…" `)。 */
+    widgetStates?: ReadonlyMap<string, Readonly<Record<string, string>>>;
+    /** 読み込んだ添付の鍵(器の `data-pkc-widget-asset`)。⚠ 囲みごとに呼び手が差し替える。 */
+    assetKey?: string;
+  } = {},
 ): string {
   content = asFenceContent(content);
   const fence = parseRenderableFence(info);
-  if (fence) return renderRenderableFence(fence, content, '', env);
+  if (fence) return renderRenderableFence(fence, content, '', env, undefined, null, env.assetKey ?? null);
   const lang = (info.trim().split(/\s+/)[0] ?? '').toLowerCase();
   const cls = lang === '' ? '' : ` class="language-${escapeHtmlAttr(lang)}"`;
   /**

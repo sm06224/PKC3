@@ -28,7 +28,18 @@ export interface FenceHydrateOptions {
   readonly getBlob: ((key: string) => Promise<Blob | null>) | null;
   /** 読んだ字の控え(打鍵のたびに IDB を読まない)。⚠ 持ち主が手放す時期を決める。 */
   readonly texts: Map<string, string>;
-  readonly env: { readonly allowExternalImages: boolean; readonly currentContainerId: string };
+  readonly env: {
+    readonly allowExternalImages: boolean;
+    readonly currentContainerId: string;
+    /**
+     * 🔴 **保存つきの面(本文の読む面)だけ `true`**(#2090)── 添付の HTML をウィジェットの器で出す
+     *   (` ```html asset:鍵 id="…" ` は状態保存つき、`id=` 無しはテーマ連動・単体の HTML で保存)。
+     * ⚠ 埋め込みの面(付箋の板・章の埋め込み)は渡さない ── 保存先の lid を持たない面で、別のノートへ越境させない。
+     */
+    readonly liveWidgets?: boolean;
+    /** 保存しない面の箱の初期値(本文の状態ブロック)。 */
+    readonly widgetStates?: ReadonlyMap<string, Readonly<Record<string, string>>>;
+  };
   /** 待っている間に世代が変わった / 器が捨てられた = 真。真なら何も触らない。 */
   readonly stale: () => boolean;
   /**
@@ -85,9 +96,11 @@ export async function hydrateFenceHosts(o: FenceHydrateOptions): Promise<void> {
    * 🔴 **この 1 回で 1 つ** ── `-both` の切替 id は「同じ(言語, 中身)の中で何番目か」で決まり、
    *   その数はこの object が憶える。囲みごとに作り直すと、同じ囲みを 2 つ書いたとき id が衝突する。
    */
-  const renderEnv: { currentContainerId?: string; allowExternalImages?: boolean } = {
+  const renderEnv: Parameters<typeof renderFenceFromAsset>[2] = {
     currentContainerId: env.currentContainerId,
     allowExternalImages: env.allowExternalImages,
+    liveWidgets: env.liveWidgets === true,
+    ...(env.widgetStates === undefined ? {} : { widgetStates: env.widgetStates }),
   };
   await Promise.all(
     [...new Set(hosts.map((h) => h.getAttribute('data-pkc-fence-asset-key') ?? ''))].map(
@@ -124,6 +137,8 @@ export async function hydrateFenceHosts(o: FenceHydrateOptions): Promise<void> {
            * ⚠ 位置の印(`data-pkc-source-line`)は器が持っているので、差し替えた要素へ**写す**。
            */
           const holder = document.createElement('div');
+          // 🔑 器の印(`data-pkc-widget-asset`)へ渡す鍵 ── env は 1 回の埋め込みで共有するので、囲みごとに差し替える
+          renderEnv.assetKey = key;
           holder.innerHTML = renderFenceFromAsset(info, text, renderEnv);
           o.prepare?.(holder);
           const next = holder.firstElementChild;

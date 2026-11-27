@@ -4966,6 +4966,7 @@ dd[data-pkc-field='inspector-toc'] {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--s2);
   margin-bottom: 2px;
 }

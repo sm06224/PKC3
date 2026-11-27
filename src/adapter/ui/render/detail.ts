@@ -180,6 +180,7 @@ import {
   type AttachmentFold,
 } from '@features/flavor/attachment-edit-fold';
 import { isAppMime } from '@features/launcher/tiles';
+import { widgetFenceForAsset } from '@features/markdown/widget-export';
 import { buildOfficeEntry, buildOfficeImageNote, buildOfficeSaveNote, officeEntryOf } from './office-entry-view';
 import { formatAssetRef, isImageAssetMime } from '@features/asset/asset-ref-format';
 import {
@@ -3802,6 +3803,23 @@ export class DetailRenderer {
       copy.textContent = '参照をコピー';
       info.append(copy);
       /**
+       * 🔴 **HTML の添付は、ウィジェットとして置く記法もコピーできる**(#2090)── ` ```html asset:鍵 id="…" ` を本文に貼ると、
+       *   その場で動き、状態を保存でき、「HTML で保存」で持ち出せる。⚠ 判定は起動の導線と同じ `isAppMime` の 1 本。
+       * 🔑 受け手は「参照をコピー」と同じ `copy-asset-ref`(貼れる字を要素が持つ ── 組み立ては純関数 `widgetFenceForAsset`)。
+       */
+      if (isAppMime(meta.mime)) {
+        const widget = document.createElement('button');
+        widget.type = 'button';
+        widget.setAttribute('data-pkc-action', 'copy-asset-ref');
+        widget.setAttribute('data-pkc-field', 'copy-widget-fence');
+        widget.setAttribute('data-pkc-asset-key', meta.assetKey);
+        widget.setAttribute('data-pkc-asset-ref', widgetFenceForAsset(meta.assetKey, meta.name || ''));
+        widget.setAttribute('data-pkc-asset-ref-kind', 'widget');
+        widget.title = '本文に貼ると、この HTML がノートの中でウィジェットとして動きます(状態の保存・HTML で保存ができます)';
+        widget.textContent = 'ウィジェット記法をコピー';
+        info.append(widget);
+      }
+      /**
        * 🔴 **外から開けるリンク**(2026-10-11)── 「参照」は本文に貼る物、こちらはブラウザやメールに貼る物。
        * ⚠ 字・説明は右クリックと同じ表(`ENTRY_MENU_ACTIONS` の `copy-asset-link`)から引く。
        *   key は押した要素が持つ(`data-pkc-asset-key`)── 押してから選択が移っても別の添付にならない。
@@ -4143,7 +4161,7 @@ export class DetailRenderer {
   private hydrateAssetRefs(
     rootEls: HTMLElement | readonly Element[],
     token: number,
-    env: { readonly allowExternalImages: boolean; readonly currentContainerId: string },
+    env: { readonly allowExternalImages: boolean; readonly currentContainerId: string; readonly liveWidgets?: boolean },
   ): Promise<void> {
     return this.tracked(this.hydrateAssetRefsInner(rootEls, token, env));
   }
@@ -4163,7 +4181,7 @@ export class DetailRenderer {
      * ⚠ 値は**その面が `renderMarkdown` に渡したのと同じ物**でなければならない
      *   ── 違えると、囲みの中の画像だけが設定と逆に振る舞う。
      */
-    env: { readonly allowExternalImages: boolean; readonly currentContainerId: string },
+    env: { readonly allowExternalImages: boolean; readonly currentContainerId: string; readonly liveWidgets?: boolean },
   ): Promise<void> {
     // 🔴 **囲みの中身も添付から来る**(#444 段①)── 同じ lender・同じ世代で埋める
     void this.tracked(this.hydrateFenceAssets(rootEls, token, env));
@@ -4388,7 +4406,7 @@ export class DetailRenderer {
   private async hydrateFenceAssets(
     rootEls: HTMLElement | readonly Element[],
     token: number,
-    env: { readonly allowExternalImages: boolean; readonly currentContainerId: string },
+    env: { readonly allowExternalImages: boolean; readonly currentContainerId: string; readonly liveWidgets?: boolean },
   ): Promise<void> {
     const roots: readonly Element[] = Array.isArray(rootEls)
       ? (rootEls as readonly Element[])

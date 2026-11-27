@@ -34,6 +34,7 @@ import {
   WIDGET_FRAME_ATTR,
 } from '@features/markdown/html-sandbox';
 import {
+  WIDGET_ASSET_ATTR,
   WIDGET_CONTEXT_REQ_MSG_TYPE,
   WIDGET_CONTEXT_RES_MSG_TYPE,
   WIDGET_ID_ATTR,
@@ -69,6 +70,8 @@ import {
   extractWidgetNoteContext,
   type WidgetNoteContext,
 } from '@features/markdown/widget-context';
+import { buildStandaloneWidgetHtml, widgetExportFileName } from '@features/markdown/widget-export';
+import { downloadBlob } from '@adapter/platform/download';
 import { confirmInApp } from './app-dialog';
 import { watchVisible } from './visible-watch';
 import { typingQuietIn } from './typing-gate';
@@ -97,6 +100,8 @@ export interface WidgetNoteHost {
   removeState(lid: string, widgetId: string): Promise<boolean>;
   /** 断りを知らせる。 */
   fail(message: string): void;
+  /** ノートの題名(単体の HTML のファイル名・`<title>` に使う。#2090)。引けなければ `null`。 */
+  titleOf?(lid: string): string | null;
 }
 
 let noteHost: WidgetNoteHost | null = null;
@@ -142,7 +147,10 @@ export function widgetLidOf(host: Element): string | null {
 
 interface FrameReg {
   readonly lid: string;
-  readonly widgetId: string;
+  /**
+   * `id=` の在る箱だけ。`null` = 添付の HTML の `id=` 無し(#2090)── **同じノートの参照だけ**答え、保存は受けない。
+   */
+  readonly widgetId: string | null;
   /** 保存が変わったとき(「状態を初期化」の押せる / 押せないを合わせる)。 */
   readonly onChange: () => void;
   /** 箱をはじめから置き直す(器の lid が変わったとき ── `remountStaleWidgets`)。 */
@@ -357,12 +365,15 @@ export function installWidgetBridge(targetWindow: Window = window): () => void {
         }
       }
       if (frame === null || reg === null || !frame.isConnected) return;
+      // 🔴 `id=` の無い箱(添付の HTML。#2090)は保存の箱ではない ── 保存要求は黙って捨てる
+      const regWidgetId = reg.widgetId;
+      if (regWidgetId === null) return;
       const op = isStorageOp(d);
       // 🔴 器の lid が置いたときと違う(別のノートへ持ち越された箱)── 書かせない
       const lidNow = widgetLidOf(frame);
       if (op === null) return; // `quota` の合図など(箱の中で既に例外を投げている)
       // 🔑 保存先は**登録した (lid, widgetId)**。箱が載せてきた lid / id は 1 字も使わない
-      const ok = lidNow === reg.lid ? applyWidgetStorageOp(reg.lid, reg.widgetId, op) : false;
+      const ok = lidNow === reg.lid ? applyWidgetStorageOp(reg.lid, regWidgetId, op) : false;
       if (typeof d.seq === 'number') {
         try {
           frame.contentWindow?.postMessage({ tag: WIDGET_STORAGE_MESSAGE, op: 'ack', seq: d.seq, ok }, '*');
@@ -382,23 +393,57 @@ export function installWidgetBridge(targetWindow: Window = window): () => void {
 }
 
 /**
- * ウィジェットの上のバー(親の側の UI)──「ノートへ保存」と「状態を初期化」(片道の操作を作らない ── 保存できるなら消せる)。
+ * ウィジェットの上のバー(親の側の UI)──「ノートへ保存」と「状態を初期化」(片道の操作を作らない ── 保存できるなら消せる)、
+ * 「HTML で保存」(#2090 ── そのウィジェットを単体の `.html` として手元へ落とす)。
+ *
+ * - `widgetId` が `null`(添付の HTML の `id=` 無し)のときは「HTML で保存」**だけ**の短いバーにする(状態を持たない)。
+ * - `download` を渡さない呼び手(React のランタイムが読めていない等)には「HTML で保存」を出さない。
  *
  * - **ノートへ保存**: 端末の保存が在り、かつノートを書けるときに押せる。押すと本文の ` ```json widget-state="…" ` を
  *   書く / 差し替える(1 回だけ。履歴に残る)。
  * - **状態を初期化**: 端末の保存か本文の状態ブロックが在るときに押せる。確認してから端末の保存を消し、
  *   本文に状態ブロックが在れば**それも消す**(端末だけ消して、置き直したときに本文から古い値が戻る矛盾を作らない)。
  */
-export function attachWidgetResetBar(
+export function attachWidgetBar(
   host: HTMLElement,
-  lid: string,
-  widgetId: string,
-  remount: () => void,
+  opts: {
+    readonly lid: string;
+    readonly widgetId: string | null;
+    readonly remount: () => void;
+    /** 「HTML で保存」を押したとき(⚠ 押した時点の状態・配色で組む)。 */
+    readonly download?: () => void;
+  },
 ): { readonly sync: () => void; readonly remove: () => void } {
   const doc = host.ownerDocument;
   const bar = doc.createElement('div');
   bar.className = 'pkc-widget-bar';
   bar.setAttribute('data-pkc-field', 'widget-bar');
+  const download = opts.download;
+  const dl = download === undefined ? null : doc.createElement('button');
+  if (dl !== null && download !== undefined) {
+    dl.type = 'button';
+    dl.textContent = 'HTML で保存';
+    dl.title =
+      opts.widgetId === null
+        ? 'このウィジェットを 1 つの HTML ファイルとして保存します(ブラウザで直接開けます)'
+        : 'このウィジェットを、いまの状態ごと 1 つの HTML ファイルとして保存します(ブラウザで直接開くと続きから使えます)';
+    dl.setAttribute('data-pkc-variant', 'ghost');
+    dl.setAttribute('data-pkc-field', 'widget-download');
+    dl.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      download();
+    });
+  }
+  const lid = opts.lid;
+  const remount = opts.remount;
+  const widgetId = opts.widgetId;
+  if (widgetId === null) {
+    // 🔑 状態を持たない箱 ── 「HTML で保存」だけ
+    if (dl !== null) bar.append(dl);
+    host.prepend(bar);
+    return { sync: () => undefined, remove: () => bar.remove() };
+  }
   const save = doc.createElement('button');
   save.type = 'button';
   save.textContent = 'ノートへ保存';
@@ -490,9 +535,35 @@ export function attachWidgetResetBar(
     });
   });
   bar.append(save, btn);
+  if (dl !== null) bar.append(dl);
   host.prepend(bar);
   sync();
   return { sync, remove: () => bar.remove() };
+}
+
+/**
+ * 🔴 **単体の HTML を落とす**(#2090 ③)。押した時点の保存(端末の保存 → 本文の状態ブロックの順。`resolveWidgetSeed`)と
+ * 親の配色を焼く。ObjectURL の作成と破棄は `downloadBlob` の 1 本(読み終えた頃に必ず revoke)。
+ * @param build 単体の HTML の字を組む(HTML のウィジェットは `buildStandaloneWidgetHtml`、React は箱の文書から)
+ */
+export function downloadStandaloneWidget(
+  doc: Document,
+  where: { readonly lid: string | null; readonly widgetId: string | null; readonly assetKey: string | null },
+  build: (args: {
+    readonly title: string;
+    readonly seed: Readonly<Record<string, string>>;
+    readonly theme: WidgetTheme;
+  }) => string,
+): string {
+  const { lid, widgetId, assetKey } = where;
+  const seed = lid !== null && widgetId !== null ? resolveWidgetSeed(lid, widgetId) : {};
+  const noteTitle = lid === null ? null : (noteHost?.titleOf?.(lid) ?? null);
+  // 🔑 名前は id → ノートの題名 → 添付の鍵(添付のファイル名はここから引けない ── 題名のほうが user に読める)
+  const name = widgetExportFileName({ widgetId, noteTitle: noteTitle ?? assetKey });
+  const title = name.replace(/\.html$/, '');
+  const html = build({ title, seed, theme: currentWidgetTheme(doc) });
+  downloadBlob(name, new Blob([html], { type: 'text/html;charset=utf-8' }));
+  return name;
 }
 
 /**
@@ -538,7 +609,14 @@ export function widgetMountParts(
   readonly seed: Readonly<Record<string, string>>;
 } {
   const widgetId = host.getAttribute(WIDGET_ID_ATTR);
-  if (widgetId === null) return { lid: null, widgetId: null, prelude: widgetThemePreludeScript(iframeId), seed: {} };
+  if (widgetId === null) {
+    /**
+     * 🔑 添付の HTML の `id=` 無し(#2090)── 器は保存つきの面(本文の読む面)でしか出ないので、器の lid を引く
+     *   (同じノートの参照に答えるため。保存はしない ── shim を入れず、`pkcWidget.storage` も `null`)。
+     */
+    const lid = host.hasAttribute(WIDGET_ASSET_ATTR) ? widgetLidOf(host) : null;
+    return { lid, widgetId: null, prelude: widgetThemePreludeScript(iframeId), seed: {} };
+  }
   // 🔴 保存つきの面で描いた器だけが lid を引く(埋め込み・プレビューの器は保存しない ── 別ノートへ越境させない)
   const lid = host.getAttribute(WIDGET_LIVE_ATTR) === '1' ? widgetLidOf(host) : null;
   /**
@@ -621,17 +699,38 @@ export function hydrateWidgets(root: ParentNode | readonly ParentNode[]): Mermai
       );
     }
     let bar = bars.get(host) ?? null;
-    if (bar === null && parts.lid !== null && parts.widgetId !== null) {
-      bar = attachWidgetResetBar(host, parts.lid, parts.widgetId, () => {
-        unmount(host, true);
-        place(host);
+    const assetKey = host.getAttribute(WIDGET_ASSET_ATTR);
+    // 🔑 バーは `id=` の在る箱(保存・初期化・HTML で保存)と、添付の HTML の箱(HTML で保存だけ。#2090)に出す
+    if (bar === null && parts.lid !== null && (parts.widgetId !== null || assetKey !== null)) {
+      const lidForBar = parts.lid;
+      const widForBar = parts.widgetId;
+      bar = attachWidgetBar(host, {
+        lid: lidForBar,
+        widgetId: widForBar,
+        remount: () => {
+          unmount(host, true);
+          place(host);
+        },
+        download: () => {
+          downloadStandaloneWidget(doc, { lid: lidForBar, widgetId: widForBar, assetKey }, ({ title, seed, theme }) =>
+            buildStandaloneWidgetHtml({
+              content,
+              title,
+              widgetId: widForBar,
+              seed,
+              theme,
+              allowExternalImages: ext,
+            }),
+          );
+        },
       });
       bars.set(host, bar);
     }
     bar?.sync();
     host.append(f);
+    // 🔑 lid の決まった箱は登録する(`id=` 無しの添付の箱は同じノートの参照だけ。保存は受け口で断る)
     const unregister =
-      parts.lid !== null && parts.widgetId !== null
+      parts.lid !== null
         ? registerWidgetFrame(f, {
             lid: parts.lid,
             widgetId: parts.widgetId,

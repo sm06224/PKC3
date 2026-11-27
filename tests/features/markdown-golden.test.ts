@@ -58,6 +58,9 @@ import { parseFrontmatter, extractVars } from '../../src/features/markdown/front
  *      ⚠ **2026-11-26(v4.0 Phase 2 / PR-08)にもう一度動いた**:箱の prelude に `window.pkcWidget.readNoteContext` /
  *        `readTables` / `readFrontmatter`(親へ問い合わせて同じノートの前書きと表を受け取る口)が入った。
  *        ⚠ 門は 1 つも開けていない(sandbox / CSP は同じ。答えるのは親が登録した箱だけ)。
+ *      ⚠ **2026-11-27(v4.1 Phase 1 / PR-2、#2090)にもう一度動いた**:問い合わせの口が、親の居ない所
+ *        (`window.parent === window` ── 単体の HTML としてブラウザで直に開いた)では待たずに空を返すようになった
+ *        (3 秒止めない)。⚠ 門は 1 つも開けていない(sandbox / CSP は同じ)。
  *   4. **行頭アラインの属性値を `end` → `opposite` にした**(2026-08-08、user 指摘)。
  *      裁定で `|>` の意味が「グローバルの寄せを反対にする」になった以上、logical end を
  *      表す `end` と同じ値にしておけない ── 説明的な形 `:::paragraph{align=end}` と

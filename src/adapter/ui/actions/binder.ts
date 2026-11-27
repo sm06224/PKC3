@@ -17964,7 +17964,12 @@ const ACTIONS: Record<string, ActionHandler> = {
       .closest<HTMLElement>('[data-pkc-asset-ref]')
       ?.getAttribute('data-pkc-asset-ref');
     if (!ref) return;
-    services.copyText?.(ref, '添付の参照をコピーしました(本文に貼れます)');
+    // 🔑 HTML の添付の「ウィジェット記法をコピー」(#2090)も同じ受け手 ── 知らせの字だけ変える
+    const widget = target.closest<HTMLElement>('[data-pkc-asset-ref-kind]')?.getAttribute('data-pkc-asset-ref-kind') === 'widget';
+    services.copyText?.(
+      ref,
+      widget ? 'ウィジェットの記法をコピーしました(本文に貼ると、ノートの中で動きます)' : '添付の参照をコピーしました(本文に貼れます)',
+    );
     /**
      * 🔴 **押した手応えを出す**(#427 段①で気づいた ── 対称の反対側)。
      * ⚠ 直す前は**この 2 つだけ合図が無かった** ── 本文のコピー

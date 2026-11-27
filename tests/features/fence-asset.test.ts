@@ -451,3 +451,57 @@ describe('囲みの添付の文字コード(#1087 A2)', () => {
   });
 });
 
+
+describe('🔴 添付の HTML のウィジェット(#2090 ①)── 純関数の層', () => {
+  const TOOL = '<p id="t">tool</p>\n';
+  const attrOf = (html: string, name: string): string | null => {
+    const m = new RegExp(`${name}="([^"]*)"`).exec(html);
+    return m === null ? null : m[1]!;
+  };
+
+  it('保存つきの面: 添付の中身 + `id=` は WIDGET_ASSET + ID + LIVE の器になる', () => {
+    const html = renderFenceFromAsset('html id="tool1"', TOOL, { liveWidgets: true, assetKey: 'ast-k' });
+    expect(html).toContain('class="pkc-widget-placeholder"');
+    expect(attrOf(html, 'data-pkc-widget-asset')).toBe('ast-k');
+    expect(attrOf(html, 'data-pkc-widget-id')).toBe('tool1');
+    expect(attrOf(html, 'data-pkc-widget-live')).toBe('1');
+  });
+
+  it('語順を問わず、本文の囲みの見出し(asset 先 / id 先)から同じ器になる(書き出しの経路)', () => {
+    const a = renderMarkdown('```html asset:ast-k id="tool1"\n```\n', { liveWidgets: true, fenceAssets: { 'ast-k': TOOL } });
+    const b = renderMarkdown('```html id="tool1" asset:ast-k\n```\n', { liveWidgets: true, fenceAssets: { 'ast-k': TOOL } });
+    for (const h of [a, b]) {
+      expect(attrOf(h, 'data-pkc-widget-asset')).toBe('ast-k');
+      expect(attrOf(h, 'data-pkc-widget-id')).toBe('tool1');
+    }
+  });
+
+  it('`id=` の無い添付の HTML: 器になるが ID / LIVE は付かない(状態を持たない)', () => {
+    const html = renderFenceFromAsset('html', TOOL, { liveWidgets: true, assetKey: 'ast-k' });
+    expect(attrOf(html, 'data-pkc-widget-asset')).toBe('ast-k');
+    expect(html).not.toContain('data-pkc-widget-id=');
+    expect(html).not.toContain('data-pkc-widget-live=');
+  });
+
+  it('⚠ 添付でない `id=` 無しの html・svg は今までどおり箱(器にしない)', () => {
+    expect(renderFenceFromAsset('html', TOOL, { liveWidgets: true })).not.toContain('pkc-widget-placeholder');
+    expect(renderFenceFromAsset('svg', '<svg></svg>', { liveWidgets: true, assetKey: 'ast-k' })).not.toContain(
+      'data-pkc-widget-asset',
+    );
+  });
+
+  it('🔴 書き出しの経路(liveWidgets なし): 器にせず箱へ落ち、本文の状態ブロックが初期値になる', () => {
+    const md = '```html asset:ast-k id="tool1"\n```\n\n```json widget-state="tool1"\n{"count":"5"}\n```\n';
+    const html = renderMarkdown(md, { fenceAssets: { 'ast-k': TOOL } });
+    expect(html).not.toContain('pkc-widget-placeholder');
+    expect(html).not.toContain('data-pkc-widget-asset');
+    expect(html).toContain('sandbox="allow-scripts"');
+    const srcdoc = (/srcdoc="([^"]*)"/.exec(html)?.[1] ?? '')
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+    expect(srcdoc).toContain('<p id="t">tool</p>');
+    expect(srcdoc, '状態ブロックが初期値になっていない').toContain('{"count":"5"}');
+  });
+});

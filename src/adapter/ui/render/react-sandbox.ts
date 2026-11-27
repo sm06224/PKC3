@@ -17,8 +17,15 @@ import { reactFrameDoc } from '@adapter/platform/render/react-frame-doc';
 import { watchVisible } from './visible-watch';
 import { typingQuietIn } from './typing-gate';
 import { registerLiveScope, type MermaidScope } from './mermaid-hydrate';
-import { attachWidgetResetBar, keepWidgetSeedFresh, registerWidgetFrame, widgetMountParts } from './widget-bridge';
+import {
+  attachWidgetBar,
+  downloadStandaloneWidget,
+  keepWidgetSeedFresh,
+  registerWidgetFrame,
+  widgetMountParts,
+} from './widget-bridge';
 import { widgetPrelude } from '@features/markdown/widget-bridge';
+import { standaloneShell, standaloneWidgetHead, STANDALONE_WIDGET_FRAME_ID } from '@features/markdown/widget-export';
 
 export const REACT_ATTR = 'data-pkc-react-src';
 
@@ -117,9 +124,32 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
         const { lid, widgetId } = parts;
         let bar = bars.get(host) ?? null;
         if (bar === null) {
-          bar = attachWidgetResetBar(host, lid, widgetId, () => {
-            unmount(host, true);
-            void place(host);
+          bar = attachWidgetBar(host, {
+            lid,
+            widgetId,
+            remount: () => {
+              unmount(host, true);
+              void place(host);
+            },
+            /**
+             * 🔴 **単体の HTML で保存**(#2090 ③)── ランタイム込みの箱の文書(`reactFrameDoc`)に、単体用の配色・保存・
+             *   `pkcWidget` を足して 1 枚にする。⚠ バーはランタイムを読めた後にしか出ない(読めなければ器に理由が出る)。
+             */
+            download: () => {
+              downloadStandaloneWidget(doc, { lid, widgetId, assetKey: null }, ({ title, seed, theme }) =>
+                standaloneShell(
+                  reactFrameDoc(
+                    source,
+                    runtime,
+                    tailwind,
+                    STANDALONE_WIDGET_FRAME_ID,
+                    standaloneWidgetHead({ widgetId, seed, theme }),
+                  ),
+                  title,
+                  theme.tone,
+                ),
+              );
+            },
           });
           bars.set(host, bar);
         }

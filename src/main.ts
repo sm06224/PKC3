@@ -7183,6 +7183,8 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
         );
       }),
     fail: (message) => dispatcher.dispatch({ type: 'OP_FAILED', error: message }),
+    // 🔑 単体の HTML のファイル名・題名(#2090)── 題名は一覧の控え(`entryMetas`)から引く(本文を読まない)
+    titleOf: (lid) => dispatcher.getState().entryMetas.get(lid)?.title ?? null,
   });
   /**
    * 🔴 **箱が「外部画像を止めた」と言ってきたら帯を出す**(2026-08-06)。
