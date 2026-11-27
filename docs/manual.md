@@ -587,7 +587,7 @@ abbr: addr
 | `--pkc-radius` / `--pkc-font` / `--pkc-font-mono` | 角丸・字体 |
 
 - `<html>` には `data-pkc-tone="light"` か `"dark"` が付きます。文字の色は何も書かなければ `--pkc-fg` です
-- スクリプトからは `window.pkcWidget` が使えます。`id`(`id=` の名前。無ければ `null`)、`getTheme()`(いまの `{ tone, tokens }`)、`onTheme(関数)`(配色が変わったときに呼ぶ。戻り値を呼ぶと止まる)、`storage`(`id=` のある枠では `localStorage` と同じもの。無ければ `null`)、`readTables()` / `readFrontmatter()` / `readNoteContext()`(上の「ノートの表と前書きを読む」)
+- スクリプトからは `window.pkcWidget` が使えます。`id`(`id=` の名前。無ければ `null`)、`getTheme()`(いまの `{ tone, tokens }`)、`onTheme(関数)`(配色が変わったときに呼ぶ。戻り値を呼ぶと止まる)、`storage`(`id=` のある枠では `localStorage` と同じもの。無ければ `null`)、`readTables()` / `readFrontmatter()` / `readNoteContext()`(上の「ノートの表と前書きを読む」)、`requestDownload()` / `requestFile()`(下の「ファイルの保存と読み込み」)
 
 **中身を添付から取る**。見出しに `asset:<添付の ID>` を書くと、中身をその添付から読みます。大きな CSV や図の原文を本文から出せます。ID は添付の **参照をコピー** で入る `asset:ast-…` の部分です(最後の `)` は入れません)。
 
@@ -633,6 +633,36 @@ abbr: addr
 - ファイルを開いたブラウザで状態を保存できれば、変えた状態は次に開いたときも残ります(保存できない環境では、閉じると消えます)
 - ファイル名は `id=` の名前(無ければノートの題名)です。ノートの表と前書きは入らないので、読むと空が返ります
 - 外への通信を止める設定は、PKC3 の中で動いていたときのまま入ります(添付から読み込んだ HTML のウィジェットに **権限** を許可していれば、その権限もそのまま入ります)
+
+**ファイルの保存と読み込み**。ウィジェットの中のスクリプトは、ファイルの保存(ダウンロード)と読み込み(アップロード)を PKC3 に頼めます。`id=` の無い ` ```html ` を含め、すべての ` ```html ` / ` ```react ` のウィジェットで使えます。
+
+| 書き方 | すること |
+|---|---|
+| `await window.pkcWidget.requestDownload({ name, mime, data })` | ファイルの保存を頼みます。`data` は `Blob` / `ArrayBuffer` / 型付き配列 / 文字列(UTF-8 で保存)。戻り値は `{ ok, action, reason? }`(`action` は `save` / `attach` / `cancel` / `rejected`) |
+| `await window.pkcWidget.requestFile({ accept, multiple, maxBytes })` | ファイルの読み込みを頼みます。`accept` は受け付ける形式(拡張子か MIME。例: `.csv,text/csv`)。戻り値は `{ ok, files, reason? }`(選んだファイルの 1 つは `{ name, mime, size, data }`、`data` は `ArrayBuffer`) |
+
+````
+```html
+<button id="save">CSV を保存</button>
+<script>
+document.getElementById('save').onclick = async () => {
+  const r = await window.pkcWidget.requestDownload({ name: '集計.csv', mime: 'text/csv', data: '名前,値\nA,1\n' });
+  console.log(r.action);
+};
+</script>
+```
+````
+
+- 頼まれると、ウィジェットのすぐ上に確認バーが出ます。ボタンを押すまでは、何も保存せず、ファイルを選ぶ画面も開きません
+- 保存の確認バー: **PC へ保存**(ダウンロード)/ **このノートへ添付**(いま開いているノートに添付します。ノートを書けないときは押せず、理由が出ます)/ **やめる**。ファイル名と大きさが出ます
+- 読み込みの確認バー: **PC から選ぶ** / **このノートの添付から選ぶ**(そのノートの本文が使っている添付だけが並びます。`accept` に合う添付が無ければ出ません)/ **やめる**
+- 実行ファイル・スクリプト・HTML・SVG などの形式(`.exe` / `.bat` / `.ps1` / `.sh` / `.js` / `.html` / `.svg` など)は、確認バーに「スクリプトや実行コードを含む可能性がある形式です」と注意が出ます。内容を確かめてから保存してください
+- ファイル名のフォルダ部分や使えない字は取り除きます。大きさは 1 回 50 MB まで、読み込みは 1 回 20 件までです
+- 1 つのウィジェットに出る確認バーは最新の 1 件だけです。新しい要求が来ると前の要求は取り消されます。短い間に何度も頼むと(1 秒に 4 回以上)断られます
+- ウィジェットの中からは、確認バーを通らずに保存・添付することはできません。ほかのノートの添付は見えず、選べません
+- `pkcWidget` を使っていない HTML ツールでも、`<a download>` のダウンロードのリンク(`blob:` / `data:` のもの)を押すと、同じ確認バーで保存できます
+- ほかのノートの埋め込みの中のウィジェットでは、**このノートへ添付** と **このノートの添付から選ぶ** は出ません(PC との受け渡しだけです)
+- **HTML で保存** したファイルをブラウザで直接開いたときは、確認バーは出ず、ブラウザの通常のダウンロードとファイル選択で動きます
 
 SQL の答えを本文に表示する ` ```sql embed ` は(→「SQL でデータを調べる」)、本文への添付の貼り方は(→「添付ファイルとメディア」)にあります。
 

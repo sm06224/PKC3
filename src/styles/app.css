@@ -5028,6 +5028,57 @@ dd[data-pkc-field='inspector-toc'] {
   background: transparent;
   border: 1px solid var(--border);
 }
+/* 🔴 ウィジェットのファイルの入出力の確認バー(#2097)── 箱の直前に 1 件だけ出す。押したときだけ保存・添付・読み込みを行う。
+ * 色は意味(情報)にだけ使う ── 地は無彩色、左端の線で示す。要注意の拡張子の注意は「注意」の色の字 */
+.pkc-widget-io-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: 0 0 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--info);
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: var(--btn-fs-sm);
+}
+.pkc-widget-io-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pkc-widget-io-risk {
+  flex-basis: 100%;
+  color: var(--warn);
+  font-weight: 600;
+}
+.pkc-widget-io-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-left: auto;
+}
+.pkc-widget-io-bar button {
+  font-size: var(--btn-fs-sm);
+  padding: 0 8px;
+  min-height: 0;
+}
+.pkc-widget-io-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-basis: 100%;
+  max-height: 12em;
+  overflow: auto;
+}
+.pkc-widget-io-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  overflow-wrap: anywhere;
+}
+.pkc-widget-io-list > button {
+  align-self: flex-start;
+}
 /* 設定画面の権限の名前(添付 HTML ウィジェットの追加権限) */
 .pkc-widget-permission-badge {
   display: inline-block;

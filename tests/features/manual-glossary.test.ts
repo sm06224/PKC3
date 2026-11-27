@@ -122,6 +122,8 @@ const LEGIT_COMPOUNDS: readonly string[] = [
   '/entry/',
   'entry=',
   'container=',
+  // 🔑 ウィジェットの `requestFile()` の戻り値の項目名(#2097)── コードの字
+  '`{ ok, files, reason? }`',
 ];
 
 /** 評価語・脅し語は別件(#1017)。ここで見るのは、それ以外の「使わない語」。 */
