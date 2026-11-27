@@ -89,15 +89,18 @@ function fakeCtx(): { ctx: GpuContext; renderer: FakeRenderer } {
   return { ctx: { backend: 'webgl2', canvas, three: THREE, renderer, pixelRatio: 1 } as unknown as GpuContext, renderer };
 }
 
-/** 2D canvas の偽物(呼ばれた操作を数える)。 */
-function fake2d(): { ctx: Record<string, unknown>; calls: Record<string, number> } {
+/** 2D canvas の偽物(呼ばれた操作を数える・`drawImage` の引数の順を残す・`getImageData` の透明度を選べる)。 */
+function fake2d(alpha = 255): { ctx: Record<string, unknown>; calls: Record<string, number>; drawn: unknown[] } {
   const calls: Record<string, number> = {};
+  const drawn: unknown[] = [];
   const ctx = new Proxy(
     { fillStyle: '', strokeStyle: '', lineWidth: 1, globalAlpha: 1, font: '', textAlign: '', textBaseline: '', lineJoin: '' } as Record<string, unknown>,
     {
       get(t, k: string) {
         if (k in t) return t[k];
         if (k === 'measureText') return (s: string) => ({ width: s.length * 6 });
+        if (k === 'drawImage') return (src: unknown) => drawn.push(src);
+        if (k === 'getImageData') return () => ({ data: new Uint8ClampedArray([10, 20, 30, alpha]) });
         return () => {
           calls[k] = (calls[k] ?? 0) + 1;
         };
@@ -108,7 +111,7 @@ function fake2d(): { ctx: Record<string, unknown>; calls: Record<string, number>
       },
     },
   );
-  return { ctx, calls };
+  return { ctx, calls, drawn };
 }
 
 const SIZE: GpuFrameSize = { width: 600, height: 320, pixelRatio: 1 };
@@ -309,7 +312,7 @@ describe('GPU の描画', () => {
     const session = (await surfaces[0]!.opts.onAcquire(ctx)) as GpuSession;
     session.render(SIZE);
     const order: string[] = [];
-    const { ctx: c2 } = fake2d();
+    const { ctx: c2, drawn } = fake2d();
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => c2 as never);
     vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (cb: BlobCallback) {
       order.push(`toBlob@${renderer.scenes.length}`);
@@ -318,9 +321,28 @@ describe('GPU の描画', () => {
     const blob = await session.capturePoster!();
     expect(blob).toBeInstanceOf(Blob);
     expect(order).toEqual(['toBlob@2']);
+    // 🔴 GPU の絵 → 軸の層 の順で重ねる(軸だけのポスターにしない)
+    expect(drawn).toEqual([ctx.canvas, v.element.querySelector('[data-pkc-gpu-chart-overlay]')]);
     expect(v.element.querySelector<HTMLCanvasElement>('[data-pkc-gpu-chart-overlay]')!.hidden).toBe(true);
     session.render(SIZE);
     expect(v.element.querySelector<HTMLCanvasElement>('[data-pkc-gpu-chart-overlay]')!.hidden).toBe(false);
+    v.dispose();
+  });
+
+  it('GPU の絵を写せない(透明)ときは、同じ座標の 2D で焼く(空白のポスターにしない)', async () => {
+    const v = mountGpuChart(host, spec(LINE_50K));
+    sized(v);
+    const { ctx } = fakeCtx();
+    const session = (await surfaces[0]!.opts.onAcquire(ctx)) as GpuSession;
+    session.render(SIZE);
+    const { ctx: c2, drawn, calls } = fake2d(0);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => c2 as never);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((cb: BlobCallback) => cb(new Blob(['png'], { type: 'image/png' })));
+    const blob = await session.capturePoster!();
+    expect(blob).toBeInstanceOf(Blob);
+    // 軸の層は重ねていない(透明の GPU の絵の上に軸だけ、を作らない)・2D で線を描いた
+    expect(drawn).toEqual([ctx.canvas]);
+    expect(calls.lineTo ?? 0).toBeGreaterThan(100);
     v.dispose();
   });
 
@@ -362,6 +384,22 @@ describe('操作(スクロールの取り合い 0)', () => {
     stage.dispatchEvent(zoom);
     expect(zoom.defaultPrevented).toBe(true);
     expect(v.range.xMax - v.range.xMin).toBeLessThan(home.xMax - home.xMin);
+    v.dispose();
+  });
+
+  it('拾ったキー(+ / - / 0 / 矢印)は全体のショートカットへ流さない', () => {
+    const v = mountGpuChart(host, spec(LINE_50K));
+    const stage = sized(v);
+    let reached = 0;
+    const onDoc = (): void => void (reached += 1);
+    document.addEventListener('keydown', onDoc);
+    stage.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true, cancelable: true }));
+    expect(v.range.xMax - v.range.xMin).toBeLessThan(50_000);
+    expect(reached).toBe(0);
+    // 拾わないキーは流す
+    stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    expect(reached).toBe(1);
+    document.removeEventListener('keydown', onDoc);
     v.dispose();
   });
 
@@ -417,7 +455,7 @@ describe('2D の簡易表示(GPU と同じ座標・同じ操作)', () => {
     btn('save').click();
     await flush();
     expect(saved).toHaveLength(1);
-    expect(saved[0]!.name).toBe('売上.png');
+    expect(saved[0]!.name).toMatch(/^売上-\d{8}\.png$/);
     v.dispose();
   });
 
@@ -480,6 +518,40 @@ describe('添付の CSV(`"source": "asset:鍵"`)', () => {
     await flush();
     expect(host.querySelector(`[${GPU_CHART_SRC_ATTR}]`)!.getAttribute('data-pkc-gpu-chart-error')).toContain('JSON として読めません');
     scope.dispose();
+  });
+});
+
+describe('同じ器を埋め直す', () => {
+  it('塊を畳んだ後に同じ器を渡すと、もう一度置く(「済み」の印で空のまま飛ばさない)', async () => {
+    host.innerHTML = renderMarkdown('```chart live\n{"type":"line","datasets":[{"data":[1,2]}]}\n```\n');
+    const a = hydrateGpuChart(host);
+    await flush();
+    expect(host.querySelectorAll('[data-pkc-gpu-chart]')).toHaveLength(1);
+    a.dispose();
+    expect(host.querySelectorAll('[data-pkc-gpu-chart]')).toHaveLength(0);
+    const b = hydrateGpuChart(host);
+    await flush();
+    expect(host.querySelectorAll('[data-pkc-gpu-chart]')).toHaveLength(1);
+    expect(surfaces).toHaveLength(2);
+    b.dispose();
+  });
+});
+
+describe('棒の当たり判定', () => {
+  it('系列を横にずらして描いた位置で当たる', async () => {
+    const src = '{"type":"bar","labels":["a","b"],"datasets":[{"label":"P","data":[5,5]},{"label":"Q","data":[5,5]}]}';
+    const v = mountGpuChart(host, spec(src));
+    const stage = sized(v);
+    const { ctx: c2 } = fake2d();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => c2 as never);
+    surfaces[0]!.opts.onFallback2d(stage, '理由');
+    const { layoutChart } = await import('../../src/adapter/ui/render/gpu-chart');
+    const { dataToPxX, dataToPxY } = await import('../../src/features/chart/gpu-chart-viewport');
+    const layout = layoutChart(c2 as never, spec(src), v.range, 600, 320);
+    // 区分 1 の Q の棒は x = 1 + 0.2 に描く
+    stage.dispatchEvent(new PointerEvent('pointermove', { pointerId: 3, clientX: dataToPxX(1.2, v.range, layout.rect), clientY: dataToPxY(5, v.range, layout.rect) }));
+    expect(v.element.querySelector('[data-pkc-gpu-chart-info="hover"]')!.textContent).toBe('Q: x b、y 5');
+    v.dispose();
   });
 });
 

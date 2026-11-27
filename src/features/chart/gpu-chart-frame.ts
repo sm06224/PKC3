@@ -93,11 +93,12 @@ export function buildChartFrame(
       let n = 0;
       for (let i = 0; i < d.xs.length; i++) {
         const y = d.ys[i]!;
-        if (Number.isNaN(y)) continue;
+        // ⚠ x か y が欠測なら線の切れ目(どちらの欠測も線分にしない)
+        if (Number.isNaN(y) || Number.isNaN(d.xs[i]!)) continue;
         shown++;
         if (i === 0) continue;
         const py = d.ys[i - 1]!;
-        if (Number.isNaN(py)) continue;
+        if (Number.isNaN(py) || Number.isNaN(d.xs[i - 1]!)) continue;
         const o = n * 4;
         segs[o] = nx(d.xs[i - 1]!);
         segs[o + 1] = ny(py);

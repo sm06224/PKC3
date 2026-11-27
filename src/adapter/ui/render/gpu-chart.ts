@@ -26,6 +26,8 @@ import {
   type GpuSurfaceOptions,
 } from '@adapter/platform/render/gpu-lease';
 import { downloadBlob } from '@adapter/platform/download';
+import { safeName } from '@features/export/file-name';
+import { dayStamp } from '@features/datetime/date-math';
 import {
   gpuChartAltText,
   gpuChartPointCount,
@@ -657,6 +659,8 @@ class ChartView implements GpuChartView {
           return;
       }
       e.preventDefault();
+      // ⚠ 拾ったキーは全体のショートカットへ流さない(`+` / `-` / `0` / 矢印)
+      e.stopPropagation();
     });
     const RO = (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
     if (RO !== undefined) {
@@ -748,13 +752,16 @@ class ChartView implements GpuChartView {
       return this.setHover({ px: cx, py: cy, color }, `${xl} × ${yl}: ${hit.value}`);
     }
     const sorted = spec.type !== 'scatter';
-    const hit = pickChartPoint(spec.series, this.cur, layout.rect, px, py, spec.type === 'scatter' ? 10 : 18, sorted);
+    // 🔑 棒は系列ごとに横へずらして描いている ── 当たり判定も同じずれで見る(描いた所と当たる所を揃える)
+    const n = spec.series.length;
+    const offsets = spec.type === 'bar' ? spec.series.map((_, si) => (si - (n - 1) / 2) * (spec.barSlot / Math.max(1, n))) : undefined;
+    const hit = pickChartPoint(spec.series, this.cur, layout.rect, px, py, spec.type === 'scatter' ? 10 : 18, sorted, offsets);
     if (hit === null) return this.setHover(null, '');
     const s = spec.series[hit.series]!;
     const xText = spec.xIsIndex ? (spec.labels[hit.x] ?? String(hit.x)) : String(hit.x);
     const color = rgbCss(seriesRgb(spec, theme, hit.series));
     this.setHover(
-      { px: dataToPxX(hit.x, this.cur, layout.rect), py: dataToPxY(hit.y, this.cur, layout.rect), color },
+      { px: dataToPxX(hit.x + (offsets?.[hit.series] ?? 0), this.cur, layout.rect), py: dataToPxY(hit.y, this.cur, layout.rect), color },
       `${s.label}: x ${xText}、y ${hit.y}`,
     );
   }
@@ -995,8 +1002,15 @@ class ChartView implements GpuChartView {
           const g = c.getContext('2d');
           if (g !== null) {
             g.drawImage(ctx.canvas, 0, 0, c.width, c.height);
-            g.drawImage(this.overlay, 0, 0, c.width, c.height);
-            blob = await canvasToPng(c);
+            // 🔴 空白にしない: 地は不透明に描いている ── 描画域の真ん中が透明なら、GPU の絵を写せていない
+            //    (WebGPU の canvas はタスクを抜けると絵が失効しうる)→ 下の 2D で焼く
+            const rect = this.layout?.rect;
+            const k = c.width / Math.max(1, this.stageSize().w);
+            const probe = rect === undefined ? null : g.getImageData(Math.floor((rect.x + rect.w / 2) * k), Math.floor((rect.y + rect.h / 2) * k), 1, 1);
+            if (probe !== null && (probe.data[3] ?? 0) > 0) {
+              g.drawImage(this.overlay, 0, 0, c.width, c.height);
+              blob = await canvasToPng(c);
+            }
           }
         } catch {
           blob = null;
@@ -1078,8 +1092,8 @@ class ChartView implements GpuChartView {
       this.info.hover.textContent = 'この端末では PNG にできませんでした';
       return;
     }
-    const base = (this.spec.title ?? 'グラフ').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60) || 'グラフ';
-    saveBlob(`${base}.png`, blob);
+    // 🔑 名前の規則は書き出しと同じ 1 か所(`safeName`)+ 日付(他の書き出しと同じ形)
+    saveBlob(`${safeName(this.spec.title ?? 'グラフ')}-${dayStamp(new Date(), '')}.png`, blob);
   }
 
   fail(message: string): void {
@@ -1228,6 +1242,11 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
       timers.clear();
       for (const v of views.values()) v.dispose();
       views.clear();
+      // 🔑 器の印を外す ── 同じ器を次の塊が埋め直せる(印が残ると「済み」と見て空のまま飛ばす)
+      for (const h of hosts) {
+        h.removeAttribute(STATE_ATTR);
+        h.removeAttribute(ERROR_ATTR);
+      }
     },
     prune: () => {
       for (const [host, v] of views) {

@@ -263,6 +263,8 @@ export function pickChartPoint(
   py: number,
   hitRadiusPx: number,
   sorted = false,
+  /** 系列ごとの描いた位置の x のずれ(棒は系列を横に並べて描く)。 */
+  xOffsets?: readonly number[],
 ): ChartPick | null {
   if (px < plotRect.x - hitRadiusPx || px > plotRect.x + plotRect.w + hitRadiusPx) return null;
   if (py < plotRect.y - hitRadiusPx || py > plotRect.y + plotRect.h + hitRadiusPx) return null;
@@ -273,14 +275,15 @@ export function pickChartPoint(
   let bestD2 = r2;
   const dx = hitRadiusPx / kx;
   series.forEach((s, si) => {
+    const off = xOffsets?.[si] ?? 0;
     let start = 0;
     let end = s.xs.length;
     if (sorted) {
-      const cx = viewport.xMin + (px - plotRect.x) / kx;
+      const cx = viewport.xMin + (px - plotRect.x) / kx - off;
       ({ start, end } = visibleIndexRange(s.xs, Math.max(viewport.xMin, cx - dx), Math.min(viewport.xMax, cx + dx)));
     }
     for (let i = start; i < end; i++) {
-      const x = s.xs[i]!;
+      const x = s.xs[i]! + off;
       const y = s.ys[i]!;
       if (Number.isNaN(x) || Number.isNaN(y)) continue;
       if (x < viewport.xMin || x > viewport.xMax || y < viewport.yMin || y > viewport.yMax) continue;
@@ -289,7 +292,7 @@ export function pickChartPoint(
       const d2 = ddx * ddx + ddy * ddy;
       if (d2 <= bestD2) {
         bestD2 = d2;
-        best = { series: si, index: i, x, y, dist: Math.sqrt(d2) };
+        best = { series: si, index: i, x: s.xs[i]!, y, dist: Math.sqrt(d2) };
       }
     }
   });

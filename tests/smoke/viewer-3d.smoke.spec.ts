@@ -281,7 +281,13 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   // PNG で保存
   const dl = page.waitForEvent('download');
   await clickReal(page, chart.locator('[data-pkc-gpu-chart-op="save"]'));
-  expect((await dl).suggestedFilename()).toBe('センサー.png');
+  // ⚠ ファイル名は観測点にしない ── この headless Chromium は非 ASCII の `<a download>` 名を丸ごと捨てる
+  //   (mermaid.smoke と同じ)。名前の規則は unit(`tests/adapter/gpu-chart.test.ts`)が見る。中身が PNG であることを見る
+  const png: Buffer[] = [];
+  for await (const c of await (await dl).createReadStream()) png.push(c as Buffer);
+  const pngBytes = Buffer.concat(png);
+  expect(pngBytes.subarray(1, 4).toString('latin1'), 'PNG ではない').toBe('PNG');
+  expect(pngBytes.length, 'PNG が小さすぎる(空の絵)').toBeGreaterThan(5_000);
   // ホバーで値が出る
   await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
   await page.mouse.move(gb.x + gb.width / 2 + 3, gb.y + gb.height / 2);

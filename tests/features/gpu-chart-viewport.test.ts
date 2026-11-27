@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHART_MIN_SPAN_RATIO,
+  clampChartRange,
   categoryTicks,
   dataToPxX,
   dataToPxY,
@@ -46,6 +47,9 @@ describe('zoom / pan', () => {
     for (let i = 0; i < 200; i++) r = zoomChartViewport(r, HOME, 10, 0.5, 0.5);
     expect(r.xMax - r.xMin).toBeGreaterThanOrEqual(100 * CHART_MIN_SPAN_RATIO * 0.999);
     expect(Number.isFinite(r.xMin)).toBe(true);
+  });
+  it('全体より広い範囲は全体へ戻す(はみ出しを片側へ寄せない)', () => {
+    expect(clampChartRange({ xMin: -50, xMax: 200, yMin: -30, yMax: 40 }, HOME)).toEqual(HOME);
   });
   it('パン: 右へ引けば範囲は左へ・全体の外へは出ない', () => {
     const cur = { xMin: 40, xMax: 60, yMin: -2, yMax: 2 };
