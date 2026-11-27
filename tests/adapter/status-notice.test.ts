@@ -327,7 +327,10 @@ describe('main.ts の配線(原文 pin ── 弱い。`main.ts` は走らない
   });
 
   it('🔴 OP_NOTICE の枝は、空の字と進行中の字を積まない', () => {
-    expect(code).toMatch(/if \(shouldPostNotice\(state\.notice\)\)\s*\n\s*appMessagePost\.post\(\{ kind: 'result', source: 'app', text: state\.notice \}\)/);
+    // 🔴 #2084: アプリの固定の字(ボタン名の案内)は伏せない ── 表(`fixedPartsOfAppText`)の部分を添えて積む
+    expect(code).toMatch(
+      /if \(shouldPostNotice\(state\.notice\)\)\s*\n\s*appMessagePost\.post\(\{ kind: 'result', source: 'app', text: state\.notice, \.\.\.fixedPartsOfAppText\(state\.notice\) \}\)/,
+    );
   });
 
   it('🔴 断り・エラーの直呼びは kind を渡している(6 か所)', () => {

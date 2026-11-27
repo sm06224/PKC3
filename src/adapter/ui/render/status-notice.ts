@@ -18,6 +18,7 @@
  * ここに置き、`main.ts` は渡すだけにする(`status-line.ts` / `status-open.ts` と同じ作法)。
  */
 import { isBlockedRefusal } from '@features/message/caution-events';
+import { fixedPartsOfAppText } from '@features/message/app-fixed-text';
 import type { MessageKind } from '@features/message/message-log';
 
 /** `showStatus` が積める種類(配信 / 処理は別の口が持つ)。 */
@@ -31,6 +32,13 @@ export interface StatusOptions {
    * ⚠ 画面下の 1 行へ出すのは変わらない ── 積むかどうかだけを切る。
    */
   readonly post?: boolean;
+  /**
+   * 🔴 **アプリが書いた固定の文の頭**(#2084)── メッセージへ積むとき、この部分は「」を伏せない(ボタン名を残す)。
+   * ⚠ 省けば表(`fixedPartsOfAppText`)から引く。⚠ user の字(題名・ファイル名・検索名…)を含めて渡さない。
+   */
+  readonly fixedHead?: string;
+  /** 🔴 **アプリが書いた固定の文の終わり**(#2084)── user の字が前に来る文の、後ろの案内だけを残す。省けば表から引く。 */
+  readonly fixedTail?: string;
 }
 
 /**
@@ -77,7 +85,7 @@ const REMEMBER_CAP = 64;
  *   読むことになる)。
  */
 export function createStatusPoster(
-  post: (input: { kind: MessageKind; source: string; text: string }) => void,
+  post: (input: { kind: MessageKind; source: string; text: string; fixedHead?: string; fixedTail?: string }) => void,
   /** 「既読になった」を聞く口(`appMessagePost.onUnreadChanged` で 0 のとき撃つ)。省けば憶えたまま。 */
   subscribeRead?: (onRead: () => void) => void,
 ): (text: string, opts?: StatusOptions) => void {
@@ -96,6 +104,16 @@ export function createStatusPoster(
         if (oldest !== undefined) remembered.delete(oldest);
       }
     }
-    post({ kind, source: 'status', text });
+    // 🔴 アプリの固定の字(ボタン名の案内)は伏せない(#2084)── 呼び側が渡せばそれ、無ければ表から引く
+    const table = fixedPartsOfAppText(text);
+    const fixedHead = opts?.fixedHead ?? table.fixedHead;
+    const fixedTail = opts?.fixedTail ?? table.fixedTail;
+    post({
+      kind,
+      source: 'status',
+      text,
+      ...(fixedHead !== undefined && fixedHead !== '' ? { fixedHead } : {}),
+      ...(fixedTail !== undefined && fixedTail !== '' ? { fixedTail } : {}),
+    });
   };
 }

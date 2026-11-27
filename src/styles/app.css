@@ -1211,6 +1211,12 @@ img[data-pkc-action='view-big']:focus-visible {
    *    直す前の CSS はそれより**ちょうど 8px 低い**。⚠ 検査は `<=` の片側だけだったので
    *    **縮む方向は素通り**していた(CLAUDE.md §1「tripwire は上限だけでなく下限も」)。 */
   height: calc(1.4em * 2 + 8px);
+  /* 🔴 **説明の長さでメニューの幅を変えない**(v4.0 仕上げ)── 幅は項目の字と `min-width` だけで決める。
+   *    ⚠ 直す前は説明の字が `max-content` に数えられ、長い説明の項目(書式の帯の「その他 ▾」の先頭「図」)に
+   *    焦点がある間はメニューが約 816px まで広がり、ポインタを別の項目へ動かすと 352px へ縮んだ ──
+   *    **押そうとした項目がポインタの下から逃げ**、押しても下の本文に当たって何も起きなかった。
+   *    `contain: inline-size` で説明の字を幅の計算から外し、説明は決まった幅の中で折り返す(2 行で切る)。 */
+  contain: inline-size;
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -3823,6 +3829,14 @@ dd[data-pkc-field='inspector-toc'] {
   width: 6rem;
   min-width: 0;
   font-size: var(--fs-sm);
+  /* 🔴 **左右の余白を 1 段小さく**(v4.0 仕上げ)── 情報ペインは 1440px でも 220px(`minmax(220px, 15vw)`)で、
+   *   この欄は種類・ボタンを下の行へ回して行いっぱい(約 119px)まで伸びても、入力欄の既定の余白(左右 8px)では
+   *   薄字「つなぐ先の題名」(12px × 7 字 ≒ 85.1px)に内寸 85px しか残らず、最後の字が欠けていた。
+   *   ⚠ 幅の下限(列の min-content)は広げない ── 余白を削って字の入る内寸を作る。
+   *   ⚠ 余白は下の別の規則で当てる(入力欄の共通の規則 `input:not(…):not(…)` は属性 1 つより強い)。 */
+}
+[data-pkc-region='inspector'] input[data-pkc-field='relation-target'] {
+  padding-inline: var(--s2);
 }
 [data-pkc-field='relation-kind'] {
   min-width: 0;
@@ -8951,6 +8965,15 @@ button[data-pkc-field='place-handle'][data-pkc-handle='plus'] {
 }
 [data-pkc-field='schedule-option'][hidden] {
   display: none;
+}
+/* 🔴 **「知らせ」の枠の中は折り返す**(v4.0 仕上げ)── この枠は重ねて出す枠ではなく左のペインの流れの中に在るので、
+ *   幅はペインの幅(1024px の画面で約 225px)しか無い。⚠ 直す前は `nowrap` のまま
+ *   「書き出す .ics の知らせる時間: 」+ 選択欄が 1 行に並び、選択欄がペインの右端を約 9px 越えて切れていた。
+ *   字は折り返し、選択欄は入りきらなければ次の行へ回す。 */
+[data-pkc-field='schedule-notify-panel'] [data-pkc-field='schedule-option'] {
+  flex-wrap: wrap;
+  white-space: normal;
+  min-width: 0;
 }
 /* 🔴 **「出すもの」のノートの一覧**(#855 20-A)── ノートごとの出し入れ。多いときは枠の中で縦に送る。
  *   見出しの下に細い線を引き、3 つの切替と見分ける。色の小さな四角は、そのノートの縦線の色 */

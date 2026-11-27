@@ -263,15 +263,27 @@ export function fixedHeadForLabels(text: string, labels: readonly string[]): str
   return names.every((n) => labels.includes(n)) ? text : '';
 }
 
-export function sanitizeMessageText(text: string, fixedHead = ''): string {
+export function sanitizeMessageText(text: string, fixedHead = '', fixedTail = ''): string {
   /**
    * 🔴 **アプリが書いた固定の文は、そのまま通す**(#1087)。⚠ 括弧で潰すと、案内に出てくるボタンの名前
    * (「容量の内訳」など ── user のデータではない)が「…」になり、80 字で切ると「次にすること」が落ちる。
    * 先頭が `fixedHead` と一致するときだけ、その部分を通し、残り(生の例外の字など)は今までどおり潰して切る。
+   * ⚠ 残りの終わりが `fixedTail` なら、それも通す(頭と終わりが重なるときは頭を優先し、残りは潰す)。
    */
   if (fixedHead !== '' && text.startsWith(fixedHead)) {
     const rest = text.slice(fixedHead.length);
-    return fixedHead.replace(LINE_BREAKS_RE, ' ') + (rest === '' ? '' : sanitizeMessageText(rest));
+    return fixedHead.replace(LINE_BREAKS_RE, ' ') + (rest === '' ? '' : sanitizeMessageText(rest, '', fixedTail));
+  }
+  /**
+   * 🔴 **アプリが書いた固定の文の終わりも、そのまま通す**(#2084)。⚠ 「検索を保存しました: 「(検索名)」(名前は「名前を直す」で
+   *   変えられます)」のように、user の字が**前**にあり、案内のボタン名が**後ろ**に来る文がある ── 頭の一致だけでは
+   *   後ろのボタン名まで「…」になった。末尾が `fixedTail` と一致するときだけ、その部分を通し、前の部分(user の字を含む)は
+   *   今までどおり潰して切る。
+   * 🔑 通すのは `fixedTail` の字そのものだけ ── user の字がたまたま同じ字で終わっても、見えるのはアプリの固定の字である。
+   */
+  if (fixedTail !== '' && text.endsWith(fixedTail)) {
+    const before = text.slice(0, text.length - fixedTail.length);
+    return (before === '' ? '' : sanitizeMessageText(before)) + fixedTail.replace(LINE_BREAKS_RE, ' ');
   }
   const unmarked = text.replace(MARKED_NAME_RE, '…');
   const collapsed = collapseBrackets(collapseBrackets(unmarked, '「', '」'), '『', '』');
