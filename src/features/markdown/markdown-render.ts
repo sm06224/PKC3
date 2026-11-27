@@ -22,6 +22,7 @@
  *   - Language class hint on fenced code blocks
  */
 
+import { shouldUseGpuChart } from '@features/chart/gpu-chart-spec';
 import { imageAttrsStyle, parseImageAttrs, type ImageAttrs } from './image-attrs';
 import { fenceStep } from './list-renumber';
 import MarkdownIt from 'markdown-it';
@@ -501,6 +502,15 @@ function buildRenderableSlotHtml(
        *   `<img>` を捨てないための条件である(mermaid で実測済み)。
        */
       const escapedChart = md.utils.escapeHtml(content);
+      /**
+       * 🔴 **大量データ・対話のグラフは GPU で直接描く**(v4.1 PR-7、#2095)── 記法は増やさない。
+       * ` ```chart live ` / `heatmap` / `"source": "asset:鍵"` / 2,000 点を超える ` ```chart ` だけを
+       * `gpu-chart.ts` の器へ振り分ける(判定は `shouldUseGpuChart` の 1 か所)。⚠ それ以外の ` ```chart ` は
+       * 今までどおりの器(Chart.js → PNG)のまま 1 バイトも変えない。⚠ 原文は属性に持つ(3d と同じ作法)。
+       */
+      if (shouldUseGpuChart(fence.rest, content)) {
+        return `<div class="pkc-gpu-chart-placeholder" data-pkc-gpu-chart-src="${escapedChart}" data-pkc-md-block-kind="chart"><pre class="pkc-chart-source"><code class="language-chart">${escapedChart}</code></pre></div>`;
+      }
       return `<div class="pkc-chart-placeholder" data-pkc-chart-src="${escapedChart}" data-pkc-md-block-kind="chart"><pre class="pkc-chart-source"><code class="language-chart">${escapedChart}</code></pre></div>`;
     }
     case 'plotly': {

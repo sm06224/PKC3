@@ -4947,6 +4947,111 @@ dd[data-pkc-field='inspector-toc'] {
   color: var(--muted);
   font-size: var(--fs-sm);
 }
+/* GPU で直接描くグラフ(` ```chart live ` / heatmap / 添付の CSV / 2,000 点超え。v4.1 PR-7)。⚠ 図と同じ扱い ── 原文は置けなかった面の受け皿 */
+.pkc-md-rendered [data-pkc-gpu-chart-state='ready'] .pkc-chart-source,
+.pkc-md-rendered [data-pkc-gpu-chart-state='loading'] .pkc-chart-source {
+  display: none;
+}
+.pkc-md-rendered [data-pkc-gpu-chart-state='loading'] {
+  min-height: 160px;
+}
+/* ⚠ GPU で描かない面(書き出した HTML など)では、なぜ原文なのかを 1 行で言う */
+.pkc-md-rendered [data-pkc-gpu-chart-src]:not([data-pkc-gpu-chart-state])::before {
+  content: '対話グラフ(PKC3 で開くと拡大・移動できるグラフで表示します)';
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 4px;
+}
+/* ⚠ 読めなかったときは理由を見せる(黙って原文だけ出さない) */
+.pkc-md-rendered [data-pkc-gpu-chart-state='failed']::before {
+  content: attr(data-pkc-gpu-chart-error);
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  margin-bottom: 4px;
+}
+/* 1 単位の情報 = カード(紙の地・角丸・ヘアライン)── 3D ビューアと同じ形 */
+.pkc-gpu-chart {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin: var(--s2) 0;
+}
+.pkc-gpu-chart-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  padding: var(--s1) var(--s2);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+.pkc-gpu-chart-title {
+  color: var(--fg);
+  font-weight: 600;
+}
+.pkc-gpu-chart-spacer {
+  flex: 1 1 auto;
+}
+.pkc-gpu-chart-btn {
+  font-size: var(--btn-fs-sm);
+}
+.pkc-gpu-chart-btn[data-pkc-gpu-chart-op='zoom-out'],
+.pkc-gpu-chart-btn[data-pkc-gpu-chart-op='zoom-in'] {
+  min-width: 2em;
+  text-align: center;
+}
+.pkc-gpu-chart-stage {
+  position: relative;
+  width: 100%;
+  min-height: 160px;
+  cursor: grab;
+  /* 🔴 指の縦スワイプは本文のスクロールへ流す(取り合い 0)── 横のドラッグでグラフを動かす */
+  touch-action: pan-y;
+  user-select: none;
+}
+.pkc-gpu-chart-stage:active {
+  cursor: grabbing;
+}
+.pkc-gpu-chart-stage:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* GPU の描画面・ポスター・2D の簡易表示・軸の層は描画面いっぱいに重ねる(軸の層が上) */
+.pkc-gpu-chart-stage > canvas,
+.pkc-gpu-chart-stage > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.pkc-gpu-chart-stage > .pkc-gpu-chart-overlay {
+  z-index: 1;
+  pointer-events: none;
+}
+.pkc-gpu-chart-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s2);
+  padding: var(--s1) var(--s2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pkc-gpu-chart-info > [data-pkc-gpu-chart-info='hover'] {
+  color: var(--fg);
+  flex: 1 1 auto;
+}
+.pkc-gpu-chart-note {
+  margin: 0;
+  padding: 0 var(--s2) var(--s1);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
 /* ウィジェット(` ```html id="…" `。PR-07)。⚠ 原文は箱を置けなかった面(書き出し等)の受け皿として残す */
 .pkc-md-rendered .pkc-widget-source {
   margin: 0;

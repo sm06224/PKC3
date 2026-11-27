@@ -54,6 +54,8 @@ export const WIDGET_FRAME_IN_HTML = new RegExp(`<iframe\\b[^>]*\\s${WIDGET_FRAME
 const COUNT_ATTRS = {
   mermaid: 'data-pkc-mermaid-src',
   chart: 'data-pkc-chart-src',
+  /** GPU で直接描くグラフ(v4.1 PR-7)。⚠ 焼けたものは属性を外すので数えない(添付の CSV を参照する物だけが残る)。 */
+  gpuChart: 'data-pkc-gpu-chart-src',
   plotly: 'data-pkc-plotly-src',
   /** React の囲み。⚠ 箱の中でランタイムごと動かす物なので、焼き込まず原文の字で出す(閲覧側に React を積まない)。 */
   react: 'data-pkc-react-src',
@@ -66,7 +68,7 @@ const COUNT_ATTRS = {
 export type CountKind = keyof typeof COUNT_ATTRS;
 
 export function countContainers(html: string): Record<CountKind, number> {
-  const out: Record<CountKind, number> = { mermaid: 0, chart: 0, plotly: 0, react: 0, math: 0, externalImage: 0, embed: 0 };
+  const out: Record<CountKind, number> = { mermaid: 0, chart: 0, gpuChart: 0, plotly: 0, react: 0, math: 0, externalImage: 0, embed: 0 };
   for (const kind of Object.keys(COUNT_ATTRS) as CountKind[]) {
     const re = new RegExp(`<[a-zA-Z][^>]*\\s${COUNT_ATTRS[kind]}="`, 'g');
     out[kind] = (html.match(re) ?? []).length;
@@ -95,6 +97,7 @@ export function openedAsSourceNotices(n: Record<CountKind, number>): string[] {
   const w: string[] = [];
   if (n.mermaid > 0) w.push(`図(mermaid)${n.mermaid} 件は、開いた先では原文の字で出ます`);
   if (n.chart > 0) w.push(`グラフ ${n.chart} 件は、開いた先では原文の字で出ます`);
+  if (n.gpuChart > 0) w.push(`対話グラフ ${n.gpuChart} 件は、開いた先では原文の字で出ます`);
   if (n.plotly > 0) w.push(`グラフ(plotly)${n.plotly} 件は、開いた先では原文の字で出ます`);
   if (n.react > 0) w.push(`React のコード ${n.react} 件は、開いた先では原文の字で出ます`);
   const math = mathSourceNotice(n.math);
@@ -240,5 +243,5 @@ export async function renderPortableNote(body: string, deps: PortableNoteDeps): 
 
 /** 数の入れ物(0 件)。 */
 export function emptyCounts(): Record<CountKind, number> {
-  return { mermaid: 0, chart: 0, plotly: 0, react: 0, math: 0, externalImage: 0, embed: 0 };
+  return { mermaid: 0, chart: 0, gpuChart: 0, plotly: 0, react: 0, math: 0, externalImage: 0, embed: 0 };
 }

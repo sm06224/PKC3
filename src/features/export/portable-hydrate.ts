@@ -262,7 +262,7 @@ export function portableHydrateJs(): string {
     // 図とグラフは**原文のまま**見せる(閲覧側に mermaid / chart.js を積まない)。
     // ⚠ **両方を回す** ── mermaid だけ書くと、グラフが**空の器**で出荷される
     //    (#188 のレビューで判明。片側だけ直す型の再演)
-    ['data-pkc-mermaid-src','data-pkc-chart-src','data-pkc-plotly-src','data-pkc-react-src'].forEach(function(attr){
+    ['data-pkc-mermaid-src','data-pkc-chart-src','data-pkc-gpu-chart-src','data-pkc-plotly-src','data-pkc-react-src'].forEach(function(attr){
       Array.prototype.forEach.call(box.querySelectorAll('['+attr+']'),function(el){
         var s=el.getAttribute(attr)||'';
         el.textContent='';var p=document.createElement('pre');p.className='d';

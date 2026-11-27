@@ -33,6 +33,7 @@ import { hydrate3d, mount3dViewer, resolveSceneModel, type Hydrate3dOptions } fr
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
+import { hydrateGpuChart } from './gpu-chart';
 import { hydratePlotly } from './plotly-raster';
 import { hydrateReact } from './react-sandbox';
 import { hydrateWidgets, remountStaleWidgets, WIDGET_LID_ATTR } from './widget-bridge';
@@ -108,6 +109,9 @@ export function hydrateFigures(
     // 🔑 ` ```3d ` の 3D ビューア(v4.0 PR-12)── 器が無ければ何もしない(Three.js を 1 バイトも読まない)。
     //    `asset:鍵` のモデルは呼び側が渡す口(`getAssetBlob`)で引く ── 渡さない面ではモデルだけ断る
     hydrate3d(root, opts3d),
+    // 🔑 大量データ・対話のグラフ(v4.1 PR-7、#2095)── 器が無ければ何もしない(Three.js を 1 バイトも読まない)。
+    //    `"source": "asset:鍵"` の CSV は 3D と同じ口(`getAssetBlob`)で引く
+    hydrateGpuChart(root, opts3d),
   ];
 }
 import { applyBlocks, EMPTY_VIEW, type BlockView } from './apply-blocks';
