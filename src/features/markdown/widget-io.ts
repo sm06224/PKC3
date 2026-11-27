@@ -65,8 +65,45 @@ export const WIDGET_IO_REASONS = {
   readFailed: 'ファイルを読み込めませんでした',
 } as const;
 
-/** MIME → 既定の拡張子(拡張子が無い名前に補う)。⚠ 知らない MIME は `.bin`。 */
-const MIME_EXT: Readonly<Record<string, string>> = {
+/**
+ * 🔴 **確認バーの字**(画面と閲覧用 HTML の両方が使う 1 本。#2097 / #2098)。
+ * ⚠ `{name}` / `{size}` / `{label}` は差し込む所(`fillWidgetIoLabel` ── `split` / `join` で差すので `$` を含む名前を壊さない)。
+ */
+export const WIDGET_IO_LABELS = {
+  save: 'PC へ保存',
+  saveTitle: 'このファイルをパソコンにダウンロードします',
+  attach: 'このノートへ添付',
+  cancel: 'やめる',
+  pickPc: 'PC から選ぶ',
+  pickPcTitle: 'パソコンのファイルを選んで、ウィジェットに渡します',
+  pickNote: 'このノートの添付から選ぶ',
+  pickNoteTitle: 'このノートに添付してあるファイルから選んで、ウィジェットに渡します',
+  give: '選んだ添付を渡す',
+  downloadAria: 'ウィジェットからの保存の確認',
+  fileAria: 'ウィジェットからの読み込みの確認',
+  noteListAria: 'このノートの添付',
+  downloadText: 'ウィジェットがファイルの保存を求めています:「{name}」({size})',
+  fileText: 'ウィジェットがファイルの読み込みを求めています',
+  fileTarget: '(対象: {label})',
+  /** 種類の並びの区切り。 */
+  acceptSep: '、',
+  noteItem: '{name}({size})',
+  /** 1 件あたりの上限を超えたときの断り(箱へ返す)。 */
+  perFileTooLarge: 'ファイルが大きすぎます(1 件 {size} まで)',
+} as const;
+
+/** 確認バーの字の差し込み(`{key}` を値で置く)。 */
+export function fillWidgetIoLabel(tpl: string, vals: Readonly<Record<string, string>>): string {
+  let out = tpl;
+  for (const [k, v] of Object.entries(vals)) out = out.split(`{${k}}`).join(v);
+  return out;
+}
+
+/**
+ * MIME → 既定の拡張子(拡張子が無い名前に補う)。⚠ 知らない MIME は `.bin`。
+ * 🔑 閲覧用 HTML の確認バー(`portable-widget-bridge.ts`)へもこの表をそのまま焼く(2 本目を書かない)。
+ */
+export const WIDGET_IO_MIME_EXT: Readonly<Record<string, string>> = {
   'text/csv': 'csv',
   'text/tab-separated-values': 'tsv',
   'text/plain': 'txt',
@@ -92,21 +129,24 @@ const MIME_EXT: Readonly<Record<string, string>> = {
   'video/mp4': 'mp4',
 };
 
+/** MIME の形(`type/subtype`)。⚠ 閲覧用 HTML の確認バーへも `.source` を焼く。 */
+export const WIDGET_IO_MIME_RE = /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/;
+
 /** MIME の受け入れ条件(`type/subtype`。引数 `;charset=…` は落とす)。読めなければ `application/octet-stream`。 */
 export function normalizeWidgetMime(raw: unknown): string {
   if (typeof raw !== 'string') return 'application/octet-stream';
   const t = raw.split(';')[0]!.trim().toLowerCase();
   if (t.length === 0 || t.length > 100) return 'application/octet-stream';
-  return /^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/.test(t) ? t : 'application/octet-stream';
+  return WIDGET_IO_MIME_RE.test(t) ? t : 'application/octet-stream';
 }
 
 /** MIME からの既定の拡張子(点なし)。 */
 export function widgetExtForMime(mime: string): string {
-  return MIME_EXT[normalizeWidgetMime(mime)] ?? 'bin';
+  return WIDGET_IO_MIME_EXT[normalizeWidgetMime(mime)] ?? 'bin';
 }
 
-/** 拡張子として残してよい字(英数字 1〜10 字)。 */
-const SAFE_EXT_RE = /^[A-Za-z0-9]{1,10}$/;
+/** 拡張子として残してよい字(英数字 1〜10 字)。⚠ 閲覧用 HTML の確認バーへも `.source` を焼く。 */
+export const WIDGET_IO_SAFE_EXT_RE = /^[A-Za-z0-9]{1,10}$/;
 
 /**
  * 🔴 **箱が名乗ったファイル名を、保存してよい名前にする**。
@@ -122,8 +162,8 @@ export function sanitizeWidgetFileName(rawName: unknown, mime: unknown): string 
   const last = raw.split(/[\\/]/).pop() ?? '';
   const dot = last.lastIndexOf('.');
   const extRaw = dot > 0 ? last.slice(dot + 1) : '';
-  const ext = SAFE_EXT_RE.test(extRaw) ? extRaw.toLowerCase() : widgetExtForMime(typeof mime === 'string' ? mime : '');
-  const stemRaw = dot > 0 && SAFE_EXT_RE.test(extRaw) ? last.slice(0, dot) : last;
+  const ext = WIDGET_IO_SAFE_EXT_RE.test(extRaw) ? extRaw.toLowerCase() : widgetExtForMime(typeof mime === 'string' ? mime : '');
+  const stemRaw = dot > 0 && WIDGET_IO_SAFE_EXT_RE.test(extRaw) ? last.slice(0, dot) : last;
   // 🔑 空・字が全部落ちた名前は「download」(`safeName` の既定 `pkc3` はノートの書き出しの名前)
   const stem = stemRaw.replace(/^[-.\s]+/, '').trim() === '' ? 'download' : safeName(stemRaw);
   return `${stem}.${ext}`;
@@ -133,12 +173,16 @@ export function sanitizeWidgetFileName(rawName: unknown, mime: unknown): string 
  * 実行できる・中で台本が動く形式の拡張子(保存は止めない ── 注意の文を出す)。
  * ⚠ `.html` / `.svg` も含める(ブラウザで開くと台本が動く)。
  */
-const RISKY_EXTS = new Set([
+export const WIDGET_IO_RISKY_EXTS: readonly string[] = [
   'exe', 'msi', 'msix', 'bat', 'cmd', 'com', 'scr', 'pif', 'cpl', 'ps1', 'psm1', 'vbs', 'vbe', 'js', 'jse', 'mjs', 'cjs',
   'wsf', 'wsh', 'sh', 'bash', 'zsh', 'command', 'app', 'dmg', 'pkg', 'deb', 'rpm', 'jar', 'hta', 'html', 'htm', 'xhtml',
   'shtml', 'mht', 'mhtml', 'svg', 'svgz', 'reg', 'lnk', 'url', 'desktop', 'appimage', 'apk', 'dll', 'iso', 'py', 'pl',
   'rb', 'php', 'xlsm', 'docm', 'pptm',
-]);
+];
+const RISKY_EXTS = new Set(WIDGET_IO_RISKY_EXTS);
+
+/** 要注意の拡張子のときの注意の文。 */
+export const WIDGET_IO_RISK_NOTICE = 'スクリプトや実行コードを含む可能性がある形式です。内容を確認してから保存してください';
 
 /** 要注意の拡張子か(大文字小文字を区別しない)。 */
 export function isRiskyWidgetDownloadExt(fileName: string): boolean {
@@ -149,9 +193,7 @@ export function isRiskyWidgetDownloadExt(fileName: string): boolean {
 
 /** 要注意の拡張子のときの注意の文(そうでなければ `null`)。 */
 export function widgetDownloadRiskNotice(fileName: string): string | null {
-  return isRiskyWidgetDownloadExt(fileName)
-    ? 'スクリプトや実行コードを含む可能性がある形式です。内容を確認してから保存してください'
-    : null;
+  return isRiskyWidgetDownloadExt(fileName) ? WIDGET_IO_RISK_NOTICE : null;
 }
 
 /** 要求の番号(箱が付ける。0 以上の整数だけ)。⚠ 流量の判定で中身を検める前に読む(軽い)。 */
@@ -217,8 +259,8 @@ export interface WidgetFileRequest {
   readonly maxBytes: number;
 }
 
-/** `accept` の 1 項(`.csv` / `text/csv` / `image/*`)。 */
-const ACCEPT_TOKEN_RE = /^(?:\.[A-Za-z0-9]{1,16}|[a-z0-9][a-z0-9.+-]{0,63}\/(?:\*|[a-z0-9][a-z0-9.+-]{0,63}))$/i;
+/** `accept` の 1 項(`.csv` / `text/csv` / `image/*`)。⚠ 閲覧用 HTML の確認バーへも `.source` を焼く。 */
+export const WIDGET_IO_ACCEPT_TOKEN_RE = /^(?:\.[A-Za-z0-9]{1,16}|[a-z0-9][a-z0-9.+-]{0,63}\/(?:\*|[a-z0-9][a-z0-9.+-]{0,63}))$/i;
 
 /** `accept` を検める(読めなければ `null`)。空は空。 */
 export function normalizeWidgetAccept(raw: unknown): string | null {
@@ -226,7 +268,7 @@ export function normalizeWidgetAccept(raw: unknown): string | null {
   if (typeof raw !== 'string' || raw.length > 300) return null;
   const parts = raw.split(',').map((s) => s.trim()).filter((s) => s !== '');
   if (parts.length > 20) return null;
-  for (const p of parts) if (!ACCEPT_TOKEN_RE.test(p)) return null;
+  for (const p of parts) if (!WIDGET_IO_ACCEPT_TOKEN_RE.test(p)) return null;
   return parts.join(',');
 }
 
@@ -262,7 +304,7 @@ export function widgetAcceptMatches(accept: string, name: string, mime: string):
 
 /** 確認バーに出す種類の短い説明(`accept` が空なら `null`)。 */
 export function widgetAcceptLabel(accept: string): string | null {
-  return accept === '' ? null : accept.split(',').join('、');
+  return accept === '' ? null : accept.split(',').join(WIDGET_IO_LABELS.acceptSep);
 }
 
 /** 流量の上限(1 つの箱に 1 つ)。`allow(now)` が `false` なら断る。 */
@@ -330,7 +372,7 @@ export function checkWidgetPickedFiles(
   if (files.length > limit) return WIDGET_IO_REASONS.tooMany;
   let total = 0;
   for (const f of files) {
-    if (f.size > req.maxBytes) return `ファイルが大きすぎます(1 件 ${humanBytes(req.maxBytes)} まで)`;
+    if (f.size > req.maxBytes) return fillWidgetIoLabel(WIDGET_IO_LABELS.perFileTooLarge, { size: humanBytes(req.maxBytes) });
     total += f.size;
   }
   if (total > WIDGET_IO_MAX_BYTES) return WIDGET_IO_REASONS.tooLarge;

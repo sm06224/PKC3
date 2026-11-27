@@ -54,6 +54,15 @@ const rels: Array<[string, string, string]> = [
 ];
 
 describe('portableClosure', () => {
+  it('🔴 添付の HTML ウィジェット(```html asset:鍵 id=…)の添付も入る ── 埋め込み済み PKC を開いた先でウィジェットとして起動できる(#2097)', async () => {
+    const tool: N[] = [
+      { lid: 'w', title: '道具', body: '```html asset:ast-tool id="calc"\n```\n\n```json widget-state="calc"\n{"n":"1"}\n```\n', order: 1 },
+      { lid: 'x', title: '無関係', body: 'asset:ast-other', order: 2 },
+    ];
+    const c = await portableClosure(source(tool, [], ['ast-tool', 'ast-other']), ['w']);
+    expect(c.assetKeys).toEqual(['ast-tool']);
+  });
+
   it('選んだ + 参照先(推移的)+ 祖先フォルダ + 添付だけ。兄弟・無関係・その添付は入らない', async () => {
     const c = await portableClosure(source(notes, rels, ['img-a', 'img-b', 'img-c']), ['sel']);
     expect([...c.lids].sort()).toEqual(['ref1', 'ref2', 'root', 'sel', 'sub']);

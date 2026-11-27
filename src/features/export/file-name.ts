@@ -12,16 +12,16 @@
  * ⚠ 判定は「最初の `.` より前」に掛かるので、`CON.pkc3.zip` も弾かれる ──
  * 拡張子を付けているから安全、ではない。⚠ 大文字小文字を区別しない。
  */
-const RESERVED = new Set(
-  [
-    'CON',
-    'PRN',
-    'AUX',
-    'NUL',
-    ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
-    ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
-  ].map((n) => n.toLowerCase()),
-);
+/** 🔑 閲覧用 HTML の確認バー(`portable-widget-bridge.ts`)へもこの一覧を焼く(小文字)。 */
+export const RESERVED_FILE_NAMES: readonly string[] = [
+  'CON',
+  'PRN',
+  'AUX',
+  'NUL',
+  ...Array.from({ length: 9 }, (_, i) => `COM${i + 1}`),
+  ...Array.from({ length: 9 }, (_, i) => `LPT${i + 1}`),
+].map((n) => n.toLowerCase());
+const RESERVED = new Set(RESERVED_FILE_NAMES);
 
 /** ファイル名に使えない文字を落とす(OS 差を避けて保守的に)。 */
 export function safeName(title: string): string {

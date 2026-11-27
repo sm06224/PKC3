@@ -38,6 +38,16 @@
  * 20. `pkcWidget.requestFile` →「PC から選ぶ」(ファイル選択)で渡した CSV を箱の中で読める
  * 21. `pkcWidget.requestFile` →「このノートの添付から選ぶ」で 18 の添付を選ぶ → 箱の中で読める
  * ⚠ 確認バーのボタンは出した直後(0.4 秒)押せない(すり替え対策)── 押せるようになるのを待ってから実クリックする。
+ *
+ * #2097 / #2098(v4.1 Phase 2 / PR-5)── 同じ起動の続き(起動を増やさない):
+ * 22. ここまでのノートを全部「閲覧用 HTML」で書き出し、PKC3 の無いページとして開く(`blob:` の文書 ── 起動を足さない)
+ * 23. 表のノートの「ノート内テーブル集計」が、書き出した HTML の中でも `readTables()` で同じ行数・合計を出す
+ *     / 箱は allow-scripts のみ / `getTheme()` に開いた先の配色が届き、OS を暗くすると箱を読み直さずに dark へ変わる
+ * 24. 入出力のノートで素の `<a download>` → 確認バー(自動では保存しない)→「PC へ保存」で .csv がダウンロードされる
+ *     /「このノートへ添付」は出ない(閲覧用 HTML は読むだけ)
+ * 25. `requestFile` →「このノートの添付から選ぶ」→ 同じノートの添付(18 の memo.csv)だけが並び、箱の中で読める
+ * 26. 確認バーを出したまま別のノートへ移る → 確認バーが消え、箱へ答えが返る / 添付のウィジェット(asset: + id=)も箱になる
+ *     / 閲覧用 HTML のページのエラーは 0
  */
 import { test, expect, type Frame, type Page } from '@playwright/test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -49,8 +59,10 @@ import {
   clickBarMoreItem,
   clickReal,
   collectPageErrors,
+  clickExportMenuItem,
   createEntry,
   gotoApp,
+  gotoCollectionPane,
   useSplitEditor,
   writesLanded,
 } from './helpers';
@@ -198,6 +210,9 @@ test('id= の在る html のウィジェットは状態を保ち、配色に追�
 
   // ── #2097 ── 17〜21 は同じ起動の続き(起動を増やさない。⚠ SW を外す `widgetPermissions` より前に置く)
   await widgetFileIo(page);
+
+  // ── #2097 / #2098 ── 22〜26 は同じ起動の続き(書き出した閲覧用 HTML を blob: の文書で開く ── 起動を増やさない)
+  await exportedViewerWidgets(page);
 
   // ── #2090 ② ── 14〜16 は同じ起動の続き(起動を増やさない)
   await widgetPermissions(page);
@@ -565,6 +580,133 @@ async function widgetFileIo(page: Page): Promise<void> {
     expect(downloads, '余計なダウンロードが起きた').toEqual(['out.csv']);
   } finally {
     page.off('download', onDl);
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * 🔴 **書き出した閲覧用 HTML の中のウィジェット**(#2097 / #2098)── 本物の書き出しを、PKC3 の無いページとして開く。
+ * ⚠ `blob:` の文書として読み込む(`goto` は起動の数に入る ── `scripts/smoke-budget.mjs`)。`file://` で直に開く側は PR の手元の確認で見る。
+ */
+async function exportedViewerWidgets(page: Page): Promise<void> {
+  await gotoCollectionPane(page);
+  const dlWait = page.waitForEvent('download', { timeout: 30_000 });
+  await clickExportMenuItem(page, 'export-html');
+  // ⚠ 外へ渡す書き出しの前の点検(18 で本文に入った添付のリンクを挙げる)──「このまま書き出す」
+  expect(await answerAppDialog(page, 'ok', { timeout: 15_000 })).toContain('書き出す前に');
+  const dl = await dlWait;
+  const text = await readFile((await dl.path())!, 'utf8');
+  expect(text.slice(0, 200).toLowerCase()).toContain('<!doctype html');
+  expect(text, '確認バーの親が入っていない').toContain('__pkcWidgetBridgeSweep');
+
+  const v = await page.context().newPage();
+  const errs: string[] = [];
+  v.on('pageerror', (e) => errs.push(String(e)));
+  v.on('console', (m) => {
+    if (m.type() === 'error') errs.push(m.text());
+  });
+  const dir = await mkdtemp(join(tmpdir(), 'pkc3-viewer-io-'));
+  try {
+    await v.emulateMedia({ colorScheme: 'light' });
+    /**
+     * ⚠ `setContent` を使わない ── この Chromium は、about:blank の最上位に `sandbox` 付きの `srcdoc` の iframe を置くと
+     *   **ブラウザごと落ちる**(閲覧用 HTML の中身と無関係。`<iframe sandbox="allow-scripts" srcdoc="x">` 1 行で再現。
+     *   http / file / blob の最上位では落ちない)。`blob:` へ移る(`goto` を使わない ── 起動の数に入らず、費用は setContent と同じ)。
+     */
+    await v.evaluate((h) => {
+      location.href = URL.createObjectURL(new Blob([h], { type: 'text/html' }));
+    }, text);
+    await v.waitForURL(/^blob:/);
+    await expect(v.locator('#pkc-body')).toBeVisible();
+    /** 題名で開く(⚠ 題名の無いノートは本文の中身で探す)。 */
+    const openWhere = async (pred: string): Promise<void> => {
+      const i = await v.evaluate((p) => {
+        const d = JSON.parse(document.getElementById('pkc-data')!.textContent!) as { entries: { title: string; html: string }[] };
+        return d.entries.findIndex((e) => e.title === p || e.html.includes(p));
+      }, pred);
+      expect(i, `書き出しに「${pred}」のノートが無い`).toBeGreaterThanOrEqual(0);
+      await v.locator('#pkc-list button').nth(i).click();
+    };
+    const frameIn = async (sel: string): Promise<Frame> => {
+      const el = v.locator(`#pkc-body ${sel}`).first();
+      await expect(el).toHaveCount(1, { timeout: 10_000 });
+      expect(await el.getAttribute('sandbox'), '閲覧用 HTML で sandbox が緩んだ').toBe('allow-scripts');
+      await el.scrollIntoViewIfNeeded();
+      return (await (await el.elementHandle())!.contentFrame())!;
+    };
+
+    // 23. 表のノート ── 書き出した先でも readTables が同じノートの表を返す
+    await openWhere('table-summary');
+    const sf = await frameIn('iframe[srcdoc*="data-sum"]');
+    await expect(sf.locator('[data-table-index="0"]'), '書き出した HTML で readTables が表を返さない').toContainText('表 1(markdown):3 行', {
+      timeout: 10_000,
+    });
+    await expect(sf.locator('[data-table-index="0"] [data-sum]')).toHaveAttribute('data-sum', '2400');
+    const theme = async (): Promise<{ tone: string | null; fg: string | null }> =>
+      sf.evaluate(() => {
+        const t = (window as unknown as { pkcWidget: { getTheme(): { tone: string | null; tokens: Record<string, string> } } }).pkcWidget.getTheme();
+        return { tone: t.tone, fg: t.tokens['--pkc-fg'] ?? null };
+      });
+    await expect.poll(async () => (await theme()).tone, { timeout: 10_000 }).toBe('light');
+    expect((await theme()).fg, '配色の変数が届いていない').toBeTruthy();
+    const lightFg = (await theme()).fg;
+    // OS を暗くする → 箱を読み直さずに dark へ(印を付けて、読み直されていないことを見る)
+    await sf.evaluate(() => {
+      (window as unknown as { __mark: number }).__mark = 1;
+    });
+    await v.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(async () => (await theme()).tone, { timeout: 10_000 }).toBe('dark');
+    expect((await theme()).fg, '暗い配色の値に変わっていない').not.toBe(lightFg);
+    expect(await sf.evaluate(() => (window as unknown as { __mark?: number }).__mark), '箱が読み直された').toBe(1);
+    await v.emulateMedia({ colorScheme: 'light' });
+
+    // 24. 入出力のノート ── 素の <a download> → 確認バー →「PC へ保存」
+    await openWhere('入出力のノート');
+    const io = await frameIn('iframe.pkc-html-render');
+    const bar = v.locator('#pkc-body [data-pkc-field="widget-io-bar"]');
+    const downloads: string[] = [];
+    v.on('download', (d) => downloads.push(d.suggestedFilename()));
+    await io.locator('#dl').click();
+    await expect(bar, '閲覧用 HTML で確認バーが出ない').toHaveCount(1, { timeout: 10_000 });
+    await expect(bar).toContainText('「out.csv」');
+    await v.waitForTimeout(500);
+    expect(downloads, '押す前に保存された(ドライブバイ)').toEqual([]);
+    await expect(bar.locator('[data-pkc-field="widget-io-attach"]'), '閲覧用 HTML に「このノートへ添付」が出た').toHaveCount(0);
+    await expect(bar.locator('[data-pkc-field="widget-io-save"]')).toBeEnabled();
+    const [got] = await Promise.all([v.waitForEvent('download'), clickReal(v, bar.locator('[data-pkc-field="widget-io-save"]'))]);
+    expect(got.suggestedFilename()).toBe('out.csv');
+    const file = join(dir, 'out.csv');
+    await got.saveAs(file);
+    expect(await readFile(file, 'utf8')).toBe('名前,値\nA,1\n');
+    await expect(bar).toHaveCount(0);
+
+    // 25. requestFile →「このノートの添付から選ぶ」(同じノートの添付だけ)
+    await io.locator('#up').click();
+    const pickNote = bar.locator('[data-pkc-field="widget-io-pick-note"]');
+    await expect(pickNote, 'このノートの添付が候補に出ない').toBeVisible({ timeout: 10_000 });
+    await expect(pickNote).toBeEnabled();
+    await clickReal(v, pickNote);
+    const items = bar.locator('[data-pkc-field="widget-io-note-asset"]');
+    await expect(items).toHaveCount(1);
+    await expect(bar.locator('.pkc-widget-io-item')).toContainText('memo.csv');
+    await items.check();
+    await clickReal(v, bar.locator('[data-pkc-field="widget-io-note-give"]'));
+    await expect.poll(() => io.locator('#out').textContent(), { timeout: 10_000 }).toBe('memo.csv|x,y\n1,2\n');
+    await expect(bar).toHaveCount(0);
+
+    // 26. 確認バーを出したまま別のノートへ移る → 消える(箱へは答えが返る)
+    await io.locator('#dl2').click();
+    await expect(bar).toHaveCount(1, { timeout: 10_000 });
+    await openWhere('添付ツールのノート');
+    await expect(v.locator('[data-pkc-field="widget-io-bar"]'), '別のノートへ移っても確認バーが残った').toHaveCount(0);
+    // 添付のウィジェット(asset: + id=)も箱になり、pkcWidget の id が届く
+    const af = await frameIn('iframe[data-pkc-widget-frame]');
+    await expect.poll(() => af.evaluate(() => (window as unknown as { pkcWidget?: { id: string } }).pkcWidget?.id ?? null), { timeout: 10_000 }).toBe('counter-tool');
+    await expect(af.locator('#val')).toHaveText(/^\d+$/);
+    expect(downloads, '余計なダウンロードが起きた').toEqual(['out.csv']);
+    expect(errs, '閲覧用 HTML でエラーが出た').toEqual([]);
+  } finally {
+    await v.close();
     await rm(dir, { recursive: true, force: true });
   }
 }

@@ -155,8 +155,11 @@ describe('🔴 送り主の同一性(なりすましを通さない)', () => {
    *   「B のほうが緩い」現在の差異が通ってしまう。**A が拒むものを B も拒む**か。
    */
   it('🔴 閲覧側(書き出し HTML)も送り主で決めている', () => {
-    const viewer = readFileSync('src/features/export/pkc3-html.ts', 'utf8');
-    expect(viewer, '閲覧側が送り主を見ていない').toContain('contentWindow===ev.source');
+    // 🔑 閲覧側の受け口は配る HTML 共通の親(portable-widget-bridge.ts)へ寄せた(#2097)── 閲覧側はそれを焼くだけ
+    expect(readFileSync('src/features/export/pkc3-html.ts', 'utf8')).toContain('buildPortableWidgetBridgeScript(');
+    const viewer = readFileSync('src/features/export/portable-widget-bridge.ts', 'utf8');
+    expect(viewer, '閲覧側が送り主を見ていない').toContain('contentWindow===src');
+    expect(viewer, '閲覧側が名乗りを照合していない').toContain("getAttribute('data-pkc-html-render-id')===id");
     // 名乗りは照合にしか使わない(名乗りで引いていない)
     expect(viewer, '閲覧側が名乗った id で querySelector している').not.toContain(
       "'iframe[data-pkc-html-render-id=\"'+d.id",
