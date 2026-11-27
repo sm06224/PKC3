@@ -5000,62 +5000,66 @@ dd[data-pkc-field='inspector-toc'] {
 /* 🔴 暗いテーマの文字色(`:文字:red:` と、文字色 ▾ の 6 色)── 明るい地向けの濃さのままだと暗い地で沈むので、
  * 暗いテーマだけ明るい同系色へ差し替える(本文の書き方は変えない。WCAG AA 4.5:1 は tests/features/dark-text-colors.test.ts で検算) */
 :root[data-pkc-tone='dark'] {
+  --pkc-tc-red: var(--pkc-dark-text-red);
+  --pkc-tc-red-name: var(--pkc-dark-text-red);
   --pkc-dark-text-red: #ffa8a8;
+  --pkc-tc-orange: var(--pkc-dark-text-orange);
+  --pkc-tc-orange-name: var(--pkc-dark-text-orange);
   --pkc-dark-text-orange: #ffc078;
+  --pkc-tc-green: var(--pkc-dark-text-green);
+  --pkc-tc-green-name: var(--pkc-dark-text-green);
   --pkc-dark-text-green: #8ce99a;
+  --pkc-tc-blue: var(--pkc-dark-text-blue);
+  --pkc-tc-blue-name: var(--pkc-dark-text-blue);
   --pkc-dark-text-blue: #a5d8ff;
+  --pkc-tc-purple: var(--pkc-dark-text-purple);
+  --pkc-tc-purple-name: var(--pkc-dark-text-purple);
   --pkc-dark-text-purple: #eebefa;
+  --pkc-tc-gray: var(--pkc-dark-text-gray);
+  --pkc-tc-gray-name: var(--pkc-dark-text-gray);
+  --pkc-tc-grey-name: var(--pkc-dark-text-gray);
   --pkc-dark-text-gray: #ced4da;
 }
-:root[data-pkc-tone='dark'] .pkc-md-rendered :is(
-  span[style^='color: red'],
-  span[style*='; color: red'],
-  span[style^='color: #e03131'],
-  span[style*='; color: #e03131']
-) {
-  color: var(--pkc-dark-text-red) !important;
+/* ⚠ 規則は `.pkc-md-rendered` から始める(本文 CSS の書き出しへ載る形 = tests/build/body-css.test.ts)。
+ * 変数の既定値は tokens.css(書いた色のまま)。暗いテーマだけ下の :root で明るい同系色へ上書きする */
+.pkc-md-rendered :is(span[style^='color: red'], span[style*='; color: red']) {
+  color: var(--pkc-tc-red-name) !important;
 }
-:root[data-pkc-tone='dark'] .pkc-md-rendered :is(
-  span[style^='color: orange'],
-  span[style*='; color: orange'],
-  span[style^='color: #d9480f'],
-  span[style*='; color: #d9480f']
-) {
-  color: var(--pkc-dark-text-orange) !important;
+.pkc-md-rendered :is(span[style^='color: #e03131'], span[style*='; color: #e03131']) {
+  color: var(--pkc-tc-red) !important;
 }
-:root[data-pkc-tone='dark'] .pkc-md-rendered :is(
-  span[style^='color: green'],
-  span[style*='; color: green'],
-  span[style^='color: #2b8a3e'],
-  span[style*='; color: #2b8a3e']
-) {
-  color: var(--pkc-dark-text-green) !important;
+.pkc-md-rendered :is(span[style^='color: orange'], span[style*='; color: orange']) {
+  color: var(--pkc-tc-orange-name) !important;
 }
-:root[data-pkc-tone='dark'] .pkc-md-rendered :is(
-  span[style^='color: blue'],
-  span[style*='; color: blue'],
-  span[style^='color: #1c7ed6'],
-  span[style*='; color: #1c7ed6']
-) {
-  color: var(--pkc-dark-text-blue) !important;
+.pkc-md-rendered :is(span[style^='color: #d9480f'], span[style*='; color: #d9480f']) {
+  color: var(--pkc-tc-orange) !important;
 }
-:root[data-pkc-tone='dark'] .pkc-md-rendered :is(
-  span[style^='color: purple'],
-  span[style*='; color: purple'],
-  span[style^='color: #ae3ec9'],
-  span[style*='; color: #ae3ec9']
-) {
-  color: var(--pkc-dark-text-purple) !important;
+.pkc-md-rendered :is(span[style^='color: green'], span[style*='; color: green']) {
+  color: var(--pkc-tc-green-name) !important;
 }
-:root[data-pkc-tone='dark'] .pkc-md-rendered :is(
-  span[style^='color: gray'],
-  span[style*='; color: gray'],
-  span[style^='color: grey'],
-  span[style*='; color: grey'],
-  span[style^='color: #6c757d'],
-  span[style*='; color: #6c757d']
-) {
-  color: var(--pkc-dark-text-gray) !important;
+.pkc-md-rendered :is(span[style^='color: #2b8a3e'], span[style*='; color: #2b8a3e']) {
+  color: var(--pkc-tc-green) !important;
+}
+.pkc-md-rendered :is(span[style^='color: blue'], span[style*='; color: blue']) {
+  color: var(--pkc-tc-blue-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #1c7ed6'], span[style*='; color: #1c7ed6']) {
+  color: var(--pkc-tc-blue) !important;
+}
+.pkc-md-rendered :is(span[style^='color: purple'], span[style*='; color: purple']) {
+  color: var(--pkc-tc-purple-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #ae3ec9'], span[style*='; color: #ae3ec9']) {
+  color: var(--pkc-tc-purple) !important;
+}
+.pkc-md-rendered :is(span[style^='color: gray'], span[style*='; color: gray']) {
+  color: var(--pkc-tc-gray-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: grey'], span[style*='; color: grey']) {
+  color: var(--pkc-tc-grey-name) !important;
+}
+.pkc-md-rendered :is(span[style^='color: #6c757d'], span[style*='; color: #6c757d']) {
+  color: var(--pkc-tc-gray) !important;
 }
 /* END dark-text-colors */
 /* ⚠ 箱を置けなかったときは**理由を見せる**(黙って原文だけ出さない) */

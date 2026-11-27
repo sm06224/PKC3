@@ -61,6 +61,20 @@
   --neon: #008f52;
   --neon-core: #046d3d;
   color-scheme: light;
+  /* 本文の文字色(`:字:red:` と 文字色 ▾ の 6 色)。明るい地では書いた色のまま。暗いテーマは app.css の dark-text-colors が上書きする */
+  --pkc-tc-red: #e03131;
+  --pkc-tc-red-name: red;
+  --pkc-tc-orange: #d9480f;
+  --pkc-tc-orange-name: orange;
+  --pkc-tc-green: #2b8a3e;
+  --pkc-tc-green-name: green;
+  --pkc-tc-blue: #1c7ed6;
+  --pkc-tc-blue-name: blue;
+  --pkc-tc-purple: #ae3ec9;
+  --pkc-tc-purple-name: purple;
+  --pkc-tc-gray: #6c757d;
+  --pkc-tc-gray-name: gray;
+  --pkc-tc-grey-name: grey;
 }
 
 :root[data-pkc-theme='dark'] {

@@ -71,7 +71,9 @@ describe('暗いテーマの文字色のコントラスト', () => {
       expect(css).toContain(`[style^='color: ${c.value}']`);
       expect(css).toContain(`[style*='; color: ${c.value}']`);
       expect(css).toContain(`[style^='color: ${c.id}']`);
-      expect(css).toContain(`var(--pkc-dark-text-${c.id})`);
+      expect(css).toContain(`var(--pkc-tc-${c.id})`);
+      expect(css).toContain(`var(--pkc-tc-${c.id}-name)`);
+      expect(css).toContain(`--pkc-tc-${c.id}: var(--pkc-dark-text-${c.id})`);
     });
   }
 });
