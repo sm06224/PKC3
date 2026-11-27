@@ -63,9 +63,11 @@ describe('🔴 テンプレートから作ると、入力欄の囲みと表が 1
   });
 });
 
-describe('組み込みのサンプル 3 本', () => {
+const RECORDS = SAMPLE_TEMPLATES.filter((s) => s.kind === 'record');
+
+describe('組み込みのサンプル(記録 3 本)', () => {
   it('3 本・題名・一覧の字が引ける', () => {
-    expect(SAMPLE_TEMPLATES.map((s) => s.title)).toEqual(['回帰テストの実施記録', '当番の引き継ぎ', '仮説と検証の記録']);
+    expect(RECORDS.map((s) => s.title)).toEqual(['回帰テストの実施記録', '当番の引き継ぎ', '仮説と検証の記録']);
     for (const s of SAMPLE_TEMPLATES) {
       expect(sampleById(s.id)).toBe(s);
       expect(sampleLabel(s)).toContain(s.title);
@@ -74,12 +76,12 @@ describe('組み込みのサンプル 3 本', () => {
   });
 
   it('使う入力欄の型が 9 種(text / textarea / number / select / radio / checkbox-group / date / datetime / checkbox)そろう', () => {
-    const all = SAMPLE_TEMPLATES.map((s) => s.body).join('\n');
+    const all = RECORDS.map((s) => s.body).join('\n');
     for (const t of ['text', 'textarea', 'number', 'select', 'radio', 'checkbox-group', 'date', 'datetime', 'checkbox'])
       expect(all, t).toMatch(new RegExp(`type: ${t}$`, 'm'));
   });
 
-  for (const s of SAMPLE_TEMPLATES) {
+  for (const s of RECORDS) {
     describe(s.title, () => {
       const made = make(s.body);
       const def = parseFormDef(fenceOf(made, 'yaml form').split('\n').slice(1, -1).join('\n'));

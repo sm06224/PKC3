@@ -7,7 +7,7 @@
  * ## 2 つの当て方
  * - **種類を変える**(見出し 1〜3 / 箇条書き / 番号付きリスト / チェックリスト / 引用)── いまのブロックの
  *   中身をそのまま新しい枠に入れ、**リッチ編集を続ける**(`mode: 'rich'`)。
- * - **差し込む**(コードブロック / 表 / 注意書き / 改ページ / 図)── 書式の帯と**同じ規則**
+ * - **差し込む**(コードブロック / 表 / 注意書き / 改ページ / 図 / 3D シーン)── 書式の帯と**同じ規則**
  *   (`applyFormat`)でテンプレートを作り、**原文の編集へ移る**(`mode: 'source'`。リッチでは表せない)。
  *   中身が空ならブロックをテンプレートに置き換え、空でなければブロックの後ろに空行を挟んで足す。
  *
@@ -15,7 +15,7 @@
  * ⚠ pure module(DOM も state も知らない)。
  */
 import { composeRichBlock, parseRichBlock, type RichBlockMeta } from './rich-block';
-import { applyFormat, type FormatOp } from './text-ops';
+import { applyFormat, insertBlock, SCENE_3D_BLOCK, type FormatOp } from './text-ops';
 
 export type RichInsertId =
   | 'h1'
@@ -29,7 +29,8 @@ export type RichInsertId =
   | 'table'
   | 'callout'
   | 'pagebreak'
-  | 'mermaid';
+  | 'mermaid'
+  | 'scene3d';
 
 export interface RichInsertItem {
   readonly id: RichInsertId;
@@ -57,6 +58,7 @@ export const RICH_INSERT_ITEMS: readonly RichInsertItem[] = [
   { id: 'callout', label: '注意書き', hint: '注意書きのブロック(:::note)を差し込み、原文で編集します', keys: ['注意', 'ちゅうい', 'メモ', 'note', 'callout'], kind: 'insert' },
   { id: 'pagebreak', label: '改ページ', hint: '改ページ(+++)を差し込みます(印刷・PDF ではここで次のページに移ります)', keys: ['改ページ', 'かいぺーじ', 'ページ', 'page', 'break', 'pagebreak'], kind: 'insert' },
   { id: 'mermaid', label: '図(Mermaid)', hint: '図のテンプレートを差し込み、原文で編集します', keys: ['図', 'ず', 'mermaid', 'diagram', 'chart'], kind: 'insert' },
+  { id: 'scene3d', label: '3D シーン', hint: '回して見られる 3D の図の最小形を差し込み、原文で編集します', keys: ['3d', '立体', 'りったい', 'scene', 'model'], kind: 'insert' },
 ];
 
 /** 差し込みの項目 → 書式の帯の op(テンプレートの正本)。 */
@@ -135,8 +137,9 @@ export function applyRichInsert(id: RichInsertId, source: string, stripSlash: bo
     const text = composeRichBlock(meta, content);
     return { text, start: text.length, end: text.length, mode: 'rich' };
   }
-  const op = INSERT_OP[id]!;
-  const tpl = applyFormat({ text: '', start: 0, end: 0 }, op);
+  // ⚠ 3D シーンは書式バーの op を持たない ── 「テンプレートを挿入」と同じ雛形(`SCENE_3D_BLOCK`)を使う
+  const empty = { text: '', start: 0, end: 0 };
+  const tpl = id === 'scene3d' ? insertBlock(empty, SCENE_3D_BLOCK) : applyFormat(empty, INSERT_OP[id]!);
   // 末尾の改行はブロックの区切り(行の範囲の書き戻しが空行を足す)── 落とす
   const body = tpl.text.replace(/\n+$/, '');
   const caret = Math.min(tpl.start, body.length);

@@ -174,7 +174,8 @@ describe('④ テンプレートから作る', () => {
     expect(dlg!.querySelector('[data-pkc-field="pick-template-note-note"]')?.textContent).toContain(
       'まだ自分のテンプレートがありません',
     );
-    expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note"]')).toHaveLength(3);
+    expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note"]')).toHaveLength(SAMPLE_TEMPLATES.length); // 記録 3 本 + v4.0 実践サンプル 5 種(全 8 件)
+    expect(SAMPLE_TEMPLATES).toHaveLength(8);
     expect(dlg!.querySelectorAll('[data-pkc-field="pick-template-note-sep"]'), '自分のテンプレートが無いのに区切りが出ている').toHaveLength(0);
     expect(sent.some((a) => a.type === 'CREATE_ENTRY')).toBe(false);
   });
@@ -204,6 +205,26 @@ describe('④ テンプレートから作る', () => {
     expect(d.getState().phase).toBe('editing');
     expect(d.getState().snippetScan, '自分のテンプレートの走査結果が動いた').toBe(before);
     expect([...d.getState().entryMetas.values()].some((m) => m.title === '議事録の型' || m.archetype === 'snippet')).toBe(false);
+  });
+
+  it('🔴 v4.0 実践サンプル(A4 報告書)を選ぶと、前書きのページ設定ごと通常のノートとして作られる(template: の行は足さない)', async () => {
+    const { d, sent, press } = setup();
+    press();
+    await tick();
+    const rows = [...openDialog()!.querySelectorAll<HTMLButtonElement>('[data-pkc-field="pick-template-note"]')];
+    const at = rows.findIndex((r) => r.textContent?.includes('A4 報告書'));
+    expect(at, 'A4 報告書が一覧に無い').toBeGreaterThan(0);
+    rows[at]!.click();
+    await tick();
+    const created = sent.find((a) => a.type === 'CREATE_ENTRY') as
+      | { body?: string; title: string; archetype: string }
+      | undefined;
+    expect(created?.title).toBe('A4 報告書(印刷レイアウト)');
+    expect(created?.archetype).toBe('text');
+    expect(created!.body!.startsWith('---\npage_format: a4-portrait\npage_margin: normal\n---\n')).toBe(true);
+    expect(created!.body).not.toContain('template:');
+    expect(created!.body).not.toContain('${date}');
+    expect(d.getState().phase).toBe('editing');
   });
 
   it('🔴 #2002 サンプルは、いま見ているフォルダの中に作られる(parentLid)', async () => {

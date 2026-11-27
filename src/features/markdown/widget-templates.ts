@@ -13,7 +13,7 @@ import { allFences, fenceInfo, splitLines } from './source-blocks';
 import { WIDGET_ID_RE } from './widget-bridge';
 import { widgetFenceId, widgetStateBlockId } from './widget-state-block';
 
-export type WidgetTemplateBaseId = 'tracker' | 'checklist' | 'calculator' | 'table-summary';
+export type WidgetTemplateBaseId = 'tracker' | 'checklist' | 'calculator' | 'table-summary' | 'table-filter' | 'pomodoro';
 
 export interface WidgetTemplate {
   readonly baseId: WidgetTemplateBaseId;
@@ -236,6 +236,175 @@ ${BASE_CSS}
 })();
 </script>`;
 
+/**
+ * 🔴 **表の検索・絞り込み**(v4.0 仕上げ PR-D)── 同じノートの表を `readTables()` で読み、キーワードで行を絞る。
+ * ⚠ 絞り込みは表示だけ(本文の表は書き換えない)。打った語と選んだ表は `localStorage` に残す。
+ */
+const TABLE_FILTER_HTML = `<div class="pkc-tool" id="tool">
+  <div class="row">
+    <strong>表の検索</strong>
+    <select id="pick" aria-label="表を選ぶ"></select>
+    <button type="button" id="reload">再読み込み</button>
+  </div>
+  <div class="row">
+    <input type="search" id="q" placeholder="キーワード(空白で区切ると全部を含む行)" style="flex:1">
+    <span id="count" class="muted"></span>
+  </div>
+  <div id="out" class="muted">読み込み中…</div>
+</div>
+${BASE_CSS}
+<style>
+.pkc-tool select{font:inherit;color:var(--pkc-fg,#222);background:var(--pkc-surface,#fff);border:1px solid var(--pkc-border,#ccc);border-radius:var(--pkc-radius,6px);padding:.2rem .4rem}
+.pkc-tool #out table td{text-align:left}
+.pkc-tool mark{background:var(--pkc-surface-2,#eee);color:var(--pkc-fg,#222);box-shadow:inset 0 -2px 0 var(--pkc-accent,#2563eb);border-radius:2px}
+</style>
+<script>
+(function () {
+  var S = window.localStorage;
+  var $ = function (id) { return document.getElementById(id); };
+  var tables = [];
+  var pick = Number(S.getItem('table') || '0') || 0;
+  $('q').value = S.getItem('query') || '';
+  function words() {
+    return $('q').value.toLowerCase().split(/\\s+/).filter(function (w) { return w !== ''; });
+  }
+  function cellNode(text, ws) {
+    var td = document.createElement('td');
+    var s = String(text);
+    var low = s.toLowerCase();
+    var hit = -1, len = 0;
+    for (var i = 0; i < ws.length; i++) { var at = low.indexOf(ws[i]); if (at >= 0 && (hit < 0 || at < hit)) { hit = at; len = ws[i].length; } }
+    if (hit < 0) { td.textContent = s; return td; }
+    var m = document.createElement('mark');
+    m.textContent = s.slice(hit, hit + len);
+    td.append(s.slice(0, hit), m, s.slice(hit + len));
+    return td;
+  }
+  function draw() {
+    var out = $('out');
+    out.textContent = '';
+    var sel = $('pick');
+    sel.textContent = '';
+    if (tables.length === 0) {
+      $('count').textContent = '';
+      out.textContent = 'このノートに表がありません。Markdown の表か csv / tsv / psv のコードブロックを書くと、ここで絞り込めます';
+      return;
+    }
+    if (pick >= tables.length) pick = 0;
+    tables.forEach(function (t, i) {
+      var o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = '表 ' + (t.index + 1) + '(' + t.rows.length + ' 行)';
+      sel.append(o);
+    });
+    sel.value = String(pick);
+    var t = tables[pick];
+    var ws = words();
+    var rows = t.rows.filter(function (r) {
+      var line = r.join(' ').toLowerCase();
+      return ws.every(function (w) { return line.indexOf(w) >= 0; });
+    });
+    $('count').textContent = rows.length + ' / ' + t.rows.length + ' 行';
+    var tbl = document.createElement('table');
+    if (t.headers.length > 0) {
+      var hr = document.createElement('tr');
+      t.headers.forEach(function (h) { var th = document.createElement('th'); th.textContent = h; hr.append(th); });
+      tbl.append(hr);
+    }
+    rows.forEach(function (r) {
+      var tr = document.createElement('tr');
+      r.forEach(function (c) { tr.append(cellNode(c, ws)); });
+      tbl.append(tr);
+    });
+    out.append(tbl);
+    if (rows.length === 0) {
+      var none = document.createElement('div');
+      none.textContent = '当てはまる行がありません';
+      out.append(none);
+    }
+  }
+  function load() {
+    if (!window.pkcWidget || typeof window.pkcWidget.readTables !== 'function') { tables = []; draw(); return; }
+    window.pkcWidget.readTables().then(function (ts) { tables = ts || []; draw(); }, function () { tables = []; draw(); });
+  }
+  $('q').addEventListener('input', function () { S.setItem('query', $('q').value); draw(); });
+  $('pick').addEventListener('change', function () { pick = Number($('pick').value) || 0; S.setItem('table', String(pick)); draw(); });
+  $('reload').addEventListener('click', load);
+  load();
+})();
+</script>`;
+
+/**
+ * 🔴 **作業タイマー**(v4.0 仕上げ PR-D)── 25 分作業 / 5 分休憩。完了した作業の回数を `localStorage` に残す。
+ * ⚠ 止めている間は `setInterval` を必ず解く(定常のコスト 0)。残り時間は終わる時刻から毎回計算する(タブが裏で間引かれてもずれない)。
+ */
+const POMODORO_HTML = `<div class="pkc-tool" id="tool">
+  <div class="row"><strong id="mode">作業</strong><span id="sets" class="muted"></span></div>
+  <div class="row"><output id="clock" style="font-size:2rem;font-variant-numeric:tabular-nums">25:00</output></div>
+  <div class="bar"><div class="fill" id="fill"></div></div>
+  <div class="row">
+    <button type="button" id="start">開始</button>
+    <button type="button" id="reset">リセット</button>
+    <button type="button" id="switch">作業と休憩を切り替え</button>
+  </div>
+  <div class="row">
+    <label class="muted">作業(分) <input type="number" id="work" min="1" max="120" step="1" style="width:4rem"></label>
+    <label class="muted">休憩(分) <input type="number" id="rest" min="1" max="60" step="1" style="width:4rem"></label>
+    <button type="button" id="clear">回数を 0 に戻す</button>
+  </div>
+</div>
+${BASE_CSS}
+<script>
+(function () {
+  var S = window.localStorage;
+  var $ = function (id) { return document.getElementById(id); };
+  var work = Number(S.getItem('work') || '25') || 25;
+  var rest = Number(S.getItem('rest') || '5') || 5;
+  var sets = Number(S.getItem('sets') || '0') || 0;
+  var mode = S.getItem('mode') === 'rest' ? 'rest' : 'work';
+  var timer = null;
+  var endAt = 0;
+  var left = total();
+  function total() { return (mode === 'work' ? work : rest) * 60000; }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function draw() {
+    var sec = Math.max(0, Math.ceil(left / 1000));
+    $('clock').textContent = pad(Math.floor(sec / 60)) + ':' + pad(sec % 60);
+    $('mode').textContent = mode === 'work' ? '作業' : '休憩';
+    $('sets').textContent = '完了 ' + sets + ' 回';
+    $('start').textContent = timer === null ? '開始' : '一時停止';
+    var all = total();
+    $('fill').style.width = (all > 0 ? Math.round((1 - left / all) * 100) : 0) + '%';
+    $('work').value = String(work);
+    $('rest').value = String(rest);
+  }
+  function stop() { if (timer !== null) { clearInterval(timer); timer = null; } }
+  function tick() {
+    left = Math.max(0, endAt - Date.now());
+    if (left === 0) {
+      stop();
+      if (mode === 'work') { sets += 1; S.setItem('sets', String(sets)); }
+      mode = mode === 'work' ? 'rest' : 'work';
+      S.setItem('mode', mode);
+      left = total();
+    }
+    draw();
+  }
+  $('start').addEventListener('click', function () {
+    if (timer !== null) { tick(); stop(); draw(); return; }
+    endAt = Date.now() + left;
+    timer = setInterval(tick, 250);
+    draw();
+  });
+  $('reset').addEventListener('click', function () { stop(); left = total(); draw(); });
+  $('switch').addEventListener('click', function () { stop(); mode = mode === 'work' ? 'rest' : 'work'; S.setItem('mode', mode); left = total(); draw(); });
+  $('clear').addEventListener('click', function () { sets = 0; S.setItem('sets', '0'); draw(); });
+  $('work').addEventListener('change', function () { var v = Number($('work').value); if (v >= 1) { work = v; S.setItem('work', String(v)); if (timer === null && mode === 'work') left = total(); } draw(); });
+  $('rest').addEventListener('change', function () { var v = Number($('rest').value); if (v >= 1) { rest = v; S.setItem('rest', String(v)); if (timer === null && mode === 'rest') left = total(); } draw(); });
+  draw();
+})();
+</script>`;
+
 /** 一覧(並び順の正本)。 */
 export const WIDGET_TEMPLATES: readonly WidgetTemplate[] = [
   {
@@ -261,6 +430,18 @@ export const WIDGET_TEMPLATES: readonly WidgetTemplate[] = [
     label: 'ノート内テーブル集計',
     hint: 'このノートの表を読み取り、行数と数値の列の合計・平均を表示します',
     html: TABLE_SUMMARY_HTML,
+  },
+  {
+    baseId: 'table-filter',
+    label: '表の検索・絞り込み',
+    hint: 'このノートの表をキーワードで絞り込む',
+    html: TABLE_FILTER_HTML,
+  },
+  {
+    baseId: 'pomodoro',
+    label: '作業タイマー',
+    hint: '25 分作業 / 5 分休憩を計り回数を記録',
+    html: POMODORO_HTML,
   },
 ];
 

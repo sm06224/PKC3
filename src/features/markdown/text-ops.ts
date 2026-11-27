@@ -442,6 +442,17 @@ export interface DiagramTemplate {
   readonly block: TemplateBlock;
 }
 
+/**
+ * 🔴 **3D シーンの雛形**(v4.0 仕上げ PR-D)── JSON を覚えなくても、` ```3d ` をそのまま描ける最小形で入れる。
+ * ⚠ 中身は `parse3dSceneSpec` で誤り 0 件(テストで確かめる)。リッチ編集の `/3d` もこれを使う(雛形の字を 2 本目書かない)。
+ */
+export const SCENE_3D_BLOCK = template(
+  '```3d\n{ "objects": [\n' +
+    '    { "type": "box", "position": [0, 0.5, 0], "color": "#4a90d9", "label": "土台" },\n' +
+    '    { "type": "sphere", "position": [0, 1.5, 0], "size": 0.6, "color": "#e0a030", "label": "上の段" }\n' +
+    '  ],\n  "camera": { "position": [3, 3, 4] },\n  "grid": true }\n```\n',
+);
+
 export const DIAGRAM_TEMPLATES: readonly DiagramTemplate[] = [
   {
     id: 'class',
@@ -474,6 +485,8 @@ export const DIAGRAM_TEMPLATES: readonly DiagramTemplate[] = [
         '  注文 ||--|{ 明細 : "含む"\n```\n',
     ),
   },
+  /** 🔴 3D シーン(v4.0 仕上げ PR-D)── UML の後ろ。「図」の一覧と「テンプレートを挿入」の両方から 1 クリックで入る。 */
+  { id: '3d', label: '3D シーン', block: SCENE_3D_BLOCK },
 ];
 
 /**

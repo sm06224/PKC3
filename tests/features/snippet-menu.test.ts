@@ -196,8 +196,11 @@ describe('UML の雛形 (#528 段①)', () => {
    * ⚠ これだけでは「描ける」の証拠にならない(smoke が見る)── ここが見るのは
    *   「囲みの形になっていること」と「4 種が別の種別であること」である。
    */
-  it('🔴 4 種とも mermaid の囲みで、種別が重なっていない', () => {
-    const heads = DIAGRAM_TEMPLATES.map((d) => {
+  it('🔴 UML の 4 種は mermaid の囲みで、種別が重なっていない(3D シーンは ```3d の囲み)', () => {
+    const uml = DIAGRAM_TEMPLATES.filter((d) => d.id !== '3d');
+    expect(uml).toHaveLength(4);
+    expect(DIAGRAM_TEMPLATES.find((d) => d.id === '3d')?.block.text.startsWith('```3d\n')).toBe(true);
+    const heads = uml.map((d) => {
       const lines = d.block.text.split('\n');
       expect(lines[0], `${d.id} が mermaid の囲みで始まっていない`).toBe('```mermaid');
       return lines[1];

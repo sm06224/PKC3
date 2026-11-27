@@ -23,6 +23,7 @@ export function recordTemplates(scan: SnippetScan | null): RecordTemplate[] {
   const own = (scan?.items ?? [])
     .filter((i) => hasFormFence(i.body))
     .map((i) => ({ key: i.lid, sample: false, title: i.title }));
-  const samples = SAMPLE_TEMPLATES.map((s) => ({ key: s.id, sample: true, title: s.title }));
+  // ⚠ 記録(入力欄つき)だけ ── 文書の見本(`kind: 'note'`)は「テンプレートから作る…」にだけ並ぶ
+  const samples = SAMPLE_TEMPLATES.filter((s) => s.kind === 'record').map((s) => ({ key: s.id, sample: true, title: s.title }));
   return [...own, ...samples];
 }

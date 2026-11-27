@@ -386,7 +386,7 @@ describe('「図」を押すと 5 種から選ぶ(#528 案 B)', () => {
     expect(openDialog(), '図の一覧が開いていない').not.toBeNull();
     const labels = rows().map((b) => b.textContent);
     // ⚠ 数を名指しで pin する ── 表と同じ物を写しただけでは、表が縮んでも通る
-    expect(labels).toHaveLength(5);
+    expect(labels).toHaveLength(6); // フローチャート + UML の 4 種 + 3D シーン(v4.0 仕上げ PR-D)
     expect(labels).toEqual(DIAGRAM_CHOICES.map((d) => d.label));
     expect(labels[0]).toBe('フローチャート');
     expect(labels, 'UML の 4 種が並んでいない').toEqual(

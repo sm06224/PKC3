@@ -13,7 +13,10 @@ import { LauncherRenderer } from '../../src/adapter/ui/render/launcher';
 import { bindActions } from '../../src/adapter/ui/actions/binder';
 import { recordTemplates } from '../../src/features/launcher/record-tiles';
 import { snippetItemOf } from '../../src/features/snippet/snippet-table';
-import { SAMPLE_TEMPLATES } from '../../src/features/snippet/sample-templates';
+import { SAMPLE_TEMPLATES as ALL_SAMPLES } from '../../src/features/snippet/sample-templates';
+
+/** 🔴 アプリの一覧に並ぶのは記録(`kind: 'record'`)だけ ── 文書の見本(`note`)は「テンプレートから作る…」にだけ並ぶ(v4.0 仕上げ PR-D)。 */
+const SAMPLE_TEMPLATES = ALL_SAMPLES.filter((s) => s.kind === 'record');
 import { formHtml } from '../../src/features/markdown/form-def';
 import type { EntryMeta } from '../../src/core/model/entry-meta';
 import type { LauncherTile } from '../../src/features/launcher/tiles';
@@ -61,6 +64,7 @@ describe('記録の節の並び', () => {
 
   it('自分のテンプレートが 0 件 / 走査がまだ(null)でもサンプルの入口は在る', () => {
     expect(recordTemplates(null)).toHaveLength(SAMPLE_TEMPLATES.length);
+    expect(ALL_SAMPLES.length, '文書の見本が無い(絞り込みの対照群が空)').toBeGreaterThan(SAMPLE_TEMPLATES.length);
     expect(recordTemplates({ items: [], total: 0, truncated: false })).toHaveLength(3);
   });
 
