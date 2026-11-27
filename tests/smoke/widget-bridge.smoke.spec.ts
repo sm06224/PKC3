@@ -14,8 +14,20 @@
  * 7. 端末のウィジェットの保存を空にして再読み込み → 本文の状態ブロックから値が戻る
  * 8. 「状態を初期化」→ 端末の保存も本文のブロックも消え、再読み込みしても戻らない
  * 9. 表のあるノートに「ノート内テーブル集計」を入れる → `readTables()` で読んだ行数と合計が出る
+ *
+ * #2090(v4.1 Phase 1 / PR-2)── これも同じ起動の続き(起動を増やさない):
+ * 11. HTML ファイルを添付 → 添付の画面の「ウィジェット記法をコピー」の字(` ```html asset:鍵 id="…" `)を本文へ
+ *     → ノートの中でウィジェットとして動く(sandbox は allow-scripts のみ)→ 0 → 2 → 再読み込みしても 2
+ * 12. 「HTML で保存」→ `.html` がダウンロードされ、中身に保存した状態が入る
+ * 13. 🔴 落とした単体の HTML を、PKC3 の無いページとして開く → エラー 0・2 の続きから動き、`pkcWidget` が待たずに空を返す
+ *     ⚠ 新しいページの文書として読み込む(`setContent`)── アプリの起動を足さない(`scripts/smoke-budget.mjs`)。
+ *       この文書はブラウザの保存を使えない(opaque)ので、その場限りの保存へ落ちる側を見る。
+ *       `file://` で開いてブラウザの保存に残る側は、単体の純関数の test と PR の手元の確認で見る。
  */
 import { test, expect, type Frame, type Page } from '@playwright/test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   answerAppDialog,
   bootedHere,
@@ -163,6 +175,9 @@ test('id= の在る html のウィジェットは状態を保ち、配色に追�
   // ── PR-08 ── 6〜9 は同じ起動の続き(起動を増やさない)
   await prOEight(page);
 
+  // ── #2090 ── 11〜13 は同じ起動の続き(起動を増やさない)
+  await assetWidget(page);
+
   expect(errors).toEqual([]);
 });
 
@@ -285,4 +300,124 @@ async function prOEight(page: Page): Promise<void> {
   await expect(ff!.locator('#out mark')).toHaveText('米');
   await ff!.locator('#pick').selectOption('1');
   await expect(ff!.locator('#count')).toHaveText('0 / 2 行');
+}
+
+/** 添付する HTML(`id=` で状態を持つカウンター。⚠ 直書きの COUNTER と別の id 名で、保存の鍵を混ぜない)。 */
+const TOOL_HTML =
+  '<!DOCTYPE html><html><head><meta charset="utf-8"><title>tool</title></head><body>' +
+  '<button id="inc">+1</button> <span id="val"></span>' +
+  '<script>' +
+  "var n = Number(localStorage.getItem('count') || '0');" +
+  "document.getElementById('val').textContent = String(n);" +
+  "document.getElementById('inc').onclick = function () { n += 1; localStorage.setItem('count', String(n)); document.getElementById('val').textContent = String(n); };" +
+  '</script></body></html>';
+
+const assetFrame = (page: Page): ReturnType<Page['locator']> =>
+  page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-asset] iframe.pkc-widget-frame');
+
+async function assetValue(page: Page): Promise<string | null> {
+  const el = await assetFrame(page).elementHandle();
+  if (el === null) return null;
+  const f = await el.contentFrame();
+  return f === null ? null : f.locator('#val').textContent().catch(() => null);
+}
+
+/** 一覧から題名でノートを開く(再読み込みのあと、どのノートが開くかに頼らない)。 */
+async function openByTitle(page: Page, title: string): Promise<void> {
+  const row = page.locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"]').filter({ hasText: title }).first();
+  await clickReal(page, row);
+  await expect(page.locator('[data-pkc-field="detail-title"]').first()).toHaveText(title);
+}
+
+async function assetWidget(page: Page): Promise<void> {
+  // 11. 新しいノートを作り、HTML ファイルを添付する
+  await createEntry(page, 'text');
+  await page.locator('[data-pkc-field="editor-title"]').fill('添付ツールのノート');
+  await page.locator('[data-pkc-field="editor-body"]').fill('メモ');
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+  await page.setInputFiles('[data-pkc-field="attach-input"]', {
+    name: 'counter-tool.html',
+    mimeType: 'text/html',
+    buffer: Buffer.from(TOOL_HTML, 'utf8'),
+  });
+  await expect(page.locator('[data-pkc-region="sidebar"] [data-pkc-action="select-entry"]').filter({ hasText: 'counter-tool.html' })).toHaveCount(1, { timeout: 15_000 });
+  await writesLanded(page);
+  // 添付の画面の「ウィジェット記法をコピー」── 貼れる字は要素が持つ
+  await openByTitle(page, 'counter-tool.html');
+  const copyBtn = page.locator('[data-pkc-field="copy-widget-fence"]');
+  await expect(copyBtn).toHaveText('ウィジェット記法をコピー');
+  const fence = (await copyBtn.getAttribute('data-pkc-asset-ref')) ?? '';
+  expect(fence, '記法の字が違う').toMatch(/^```html asset:\S+ id="counter-tool"\n```$/);
+  // 対照群: 「参照をコピー」は今までどおりリンクの字
+  expect(await page.locator('[data-pkc-field="copy-asset-ref"]').getAttribute('data-pkc-asset-ref')).toContain('](asset:');
+
+  // 本文へ貼る
+  await openByTitle(page, '添付ツールのノート');
+  await clickReal(page, '[data-pkc-action="start-edit"]');
+  await page.locator('[data-pkc-field="editor-body"]').fill(`添付のツール\n\n${fence}\n`);
+  await clickReal(page, '[data-pkc-action="commit-edit"]');
+  await writesLanded(page);
+  await expect(assetFrame(page), '添付の HTML がウィジェットにならない').toHaveCount(1, { timeout: 15_000 });
+  expect(await assetFrame(page).getAttribute('sandbox')).toBe('allow-scripts');
+  await expect.poll(() => assetValue(page), { timeout: 10_000 }).toBe('0');
+  const af = await (await assetFrame(page).elementHandle())!.contentFrame();
+  await af!.locator('#inc').click();
+  await af!.locator('#inc').click();
+  await expect.poll(() => assetValue(page)).toBe('2');
+  const keys = await widgetKeys(page);
+  expect(keys.some((k) => /\.counter-tool\.count$/.test(k)), '添付のウィジェットの保存の鍵が無い').toBe(true);
+  // バーの 3 つ(保存・初期化・HTML で保存)
+  const box = page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-asset]');
+  await expect(box.locator('[data-pkc-field="widget-bar"] button')).toHaveText(['ノートへ保存', '状態を初期化', 'HTML で保存']);
+
+  // 再読み込みしても 2 のまま
+  await page.reload();
+  await bootedHere(page);
+  await openByTitle(page, '添付ツールのノート');
+  await expect.poll(() => assetValue(page), { timeout: 15_000 }).toBe('2');
+
+  // 12. 「HTML で保存」→ ダウンロード
+  const dir = await mkdtemp(join(tmpdir(), 'pkc3-widget-dl-'));
+  try {
+    const [dl] = await Promise.all([
+      page.waitForEvent('download'),
+      clickReal(page, box.locator('[data-pkc-field="widget-download"]')),
+    ]);
+    expect(dl.suggestedFilename()).toBe('counter-tool.html');
+    const file = join(dir, 'counter-tool.html');
+    await dl.saveAs(file);
+    const text = await readFile(file, 'utf8');
+    expect(text.startsWith('<!DOCTYPE html><html lang="ja" data-pkc-tone=')).toBe(true);
+    expect(text, '保存した状態が入っていない').toContain('{"count":"2"}');
+    expect(text).toContain("connect-src 'none'");
+
+    // 13. 🔴 落とした単体の HTML を、PKC3 の無いページとして開く
+    const p2 = await page.context().newPage();
+    const errs: string[] = [];
+    p2.on('pageerror', (e) => errs.push(String(e)));
+    p2.on('console', (m) => {
+      if (m.type() === 'error') errs.push(m.text());
+    });
+    await p2.setContent(text);
+    await expect(p2.locator('#val'), '保存した状態の続きから始まらない').toHaveText('2');
+    await p2.locator('#inc').click();
+    await expect(p2.locator('#val')).toHaveText('3');
+    // pkcWidget が使え、親が居なくてもノートの参照は待たずに空
+    const ctx = await p2.evaluate(async () => {
+      const w = (window as unknown as { pkcWidget: { id: string; readTables: () => Promise<unknown[]> } }).pkcWidget;
+      const t0 = performance.now();
+      const tables = await w.readTables();
+      return { id: w.id, tables, ms: performance.now() - t0 };
+    });
+    expect(ctx.id).toBe('counter-tool');
+    expect(ctx.tables).toEqual([]);
+    expect(ctx.ms, 'ノートの参照が待たされた').toBeLessThan(1000);
+    // 地の色が塗られている(透けていない)
+    expect(await p2.evaluate(() => getComputedStyle(document.documentElement).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+    expect(errs, '単体の HTML でエラーが出た').toEqual([]);
+    await p2.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }

@@ -278,6 +278,16 @@ export function buildStorageShim(opts: ShimOptions): string {
   );
 }
 
+/**
+ * prelude の本体を**式として**呼ぶ JS(`<script>` で包まない)。
+ * 🔑 初期値を**その場で決める**呼び手(単体の HTML として書き出したウィジェット。#2090 ── ブラウザの保存から
+ *   続きを読むか、書き出した時点の値を使うかを開いたときに決める)のための口。Proxy の `localStorage` を 2 本書かない(§7)。
+ * @param seedExpr 初期値の JS の式(呼び手が組む。⚠ 字を埋めるなら `inlineJson` を通すこと)
+ */
+export function storageShimInvocation(seedExpr: string, limit: number, tag: string): string {
+  return `${SHIM_SOURCE}(${seedExpr},${String(limit)},${inlineJson(tag)});`;
+}
+
 /** 先頭の doctype(前に BOM / 空白 / コメントがあってもよい)。 */
 const DOCTYPE = /^(\ufeff?\s*(?:<!--[\s\S]*?-->\s*)*<!doctype[^>]*>)/i;
 

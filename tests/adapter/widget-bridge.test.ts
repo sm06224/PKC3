@@ -55,6 +55,7 @@ import {
 } from '../../src/features/markdown/widget-bridge';
 import { resetAppDialogForTest, DIALOG_REGION } from '../../src/adapter/ui/render/app-dialog';
 import { hydrateReact, setReactRuntimeLoader } from '../../src/adapter/ui/render/react-sandbox';
+import { hydrateFenceHosts } from '../../src/adapter/ui/render/fence-asset-hydrate';
 import {
   readWidgetStateBlock,
   removeWidgetStateBlock,
@@ -121,6 +122,7 @@ afterEach(() => {
   off = null;
   setWidgetNoteHost(null);
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   setReactRuntimeLoader(null);
 });
 
@@ -884,5 +886,228 @@ describe('🔴 箱の中の口を実際に走らせる(PR-08 レビュー:文字
     const p = api.readNoteContext();
     deliver({ type: WIDGET_CONTEXT_RES_MSG_TYPE, reqId: sent[1]!.reqId, context: { frontmatter: [1], tables: 'x' } });
     expect(await p).toEqual({ frontmatter: {}, tables: [] });
+  });
+});
+
+describe('🔴 添付の HTML のウィジェット(#2090 ①)と単体の HTML で保存(#2090 ③)', () => {
+  const TOOL = '<div id="n">0</div><script>var n=Number(localStorage.getItem("count")||0);</script>';
+  /** 本文に添付の囲みを描き、添付の中身で埋めて、ウィジェットを置く(読む面と同じ配線: hydrateFenceHosts → hydrateWidgets)。 */
+  async function mountAsset(
+    lid: string | null,
+    md: string,
+    live: boolean,
+  ): Promise<{ body: HTMLElement; scopes: ReturnType<typeof hydrateWidgets>[] }> {
+    const body = document.createElement('div');
+    body.className = 'pkc-md-rendered';
+    if (lid !== null) body.setAttribute(WIDGET_LID_ATTR, lid);
+    body.innerHTML = renderMarkdown(md, { liveWidgets: live });
+    document.body.append(body);
+    const scopes: ReturnType<typeof hydrateWidgets>[] = [];
+    await hydrateFenceHosts({
+      hosts: [...body.querySelectorAll<HTMLElement>('[data-pkc-fence-asset-key]')],
+      getBlob: async (k) => (k === 'ast-tool' ? new Blob([TOOL], { type: 'text/html' }) : null),
+      texts: new Map(),
+      env: { allowExternalImages: false, currentContainerId: 'c1', ...(live ? { liveWidgets: true } : {}) },
+      stale: () => false,
+      onReplaced: (next) => scopes.push(hydrateWidgets(next)),
+    });
+    return { body, scopes };
+  }
+
+  /** ダウンロードを捕まえる(⚠ `<a download>` の click を止める ── happy-dom がナビゲーションとして処理しないように)。 */
+  function catchDownloads(): { files: { name: string; blob: Blob; url: string }[]; revoked: string[] } {
+    const files: { name: string; blob: Blob; url: string }[] = [];
+    const revoked: string[] = [];
+    const pending = new Map<string, Blob>();
+    let n = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => {
+      n += 1;
+      const url = `blob:test/${n}`;
+      pending.set(url, b as Blob);
+      return url;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((u) => {
+      revoked.push(u);
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      files.push({ name: this.download, blob: pending.get(this.href)!, url: this.href });
+    });
+    return { files, revoked };
+  }
+
+  it.each([
+    ['asset が先', '```html asset:ast-tool id="tool1"\n```\n'],
+    ['id が先', '```html id="tool1" asset:ast-tool\n```\n'],
+  ])('🔴 `asset:` と `id=` を合わせると状態を持つウィジェットになる(%s)', async (_n, md) => {
+    setWidgetNoteHost(fakeHost({ L1: md }));
+    const { body, scopes } = await mountAsset('L1', md, true);
+    const ph = body.querySelector<HTMLElement>('.pkc-widget-placeholder')!;
+    expect(ph, '器にならない').not.toBeNull();
+    expect(ph.getAttribute('data-pkc-widget-asset')).toBe('ast-tool');
+    expect(ph.getAttribute('data-pkc-widget-id')).toBe('tool1');
+    expect(ph.getAttribute('data-pkc-widget-live')).toBe('1');
+    const f = frameOf(body);
+    // 🔴 直書きと同じ箱(緩めない)
+    expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(f.srcdoc).toContain("connect-src 'none'");
+    expect(f.srcdoc).toContain('localStorage.getItem("count")');
+    // 保存は器の (lid, id) へ
+    post(set('count', '7', 1), giveWindow(f));
+    expect(readWidgetStorage('L1', 'tool1')).toEqual({ count: '7' });
+    // バーは 3 つ(保存・初期化・HTML で保存)
+    const fields = [...body.querySelectorAll('[data-pkc-field="widget-bar"] button')].map((b) => b.getAttribute('data-pkc-field'));
+    expect(fields).toEqual(['widget-save', 'widget-reset', 'widget-download']);
+    expect(body.querySelector('[data-pkc-field="widget-download"]')!.textContent).toBe('HTML で保存');
+    for (const s of scopes) s.dispose();
+  });
+
+  it('🔴 `id=` の無い添付の HTML は器になるが保存は持たない(バーは「HTML で保存」だけ・同じノートの参照には答える)', async () => {
+    const md = '| 品目 | 金額 |\n|---|---|\n| 米 | 2000 |\n\n```html asset:ast-tool\n```\n';
+    setWidgetNoteHost(fakeHost({ L1: md }));
+    const { body, scopes } = await mountAsset('L1', md, true);
+    const ph = body.querySelector<HTMLElement>('.pkc-widget-placeholder')!;
+    expect(ph.getAttribute('data-pkc-widget-asset')).toBe('ast-tool');
+    expect(ph.hasAttribute('data-pkc-widget-id')).toBe(false);
+    expect(ph.hasAttribute('data-pkc-widget-live')).toBe(false);
+    const f = frameOf(body);
+    expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+    // 保存の shim は入れない(状態を持たない)
+    expect(f.srcdoc).not.toContain(WIDGET_STORAGE_MESSAGE);
+    const fields = [...body.querySelectorAll('[data-pkc-field="widget-bar"] button')].map((b) => b.getAttribute('data-pkc-field'));
+    expect(fields).toEqual(['widget-download']);
+    // 🔴 保存要求は捨てる(直の要求でも)
+    const w = giveWindow(f);
+    post(set('count', '9', 1), w);
+    expect(storageKeys()).toEqual([]);
+    // 同じノートの参照には答える(置いたノート 1 件の表)
+    post({ type: WIDGET_CONTEXT_REQ_MSG_TYPE, id: f.getAttribute('data-pkc-html-render-id'), reqId: 1 }, w);
+    await new Promise((r) => setTimeout(r, 0));
+    const res = w.posted.find((m) => (m as { type?: string }).type === WIDGET_CONTEXT_RES_MSG_TYPE) as {
+      context: { tables: unknown[] };
+    };
+    expect(res.context.tables.length, '同じノートの表が返らない').toBe(1);
+    for (const s of scopes) s.dispose();
+    expect(widgetFrameCount()).toBe(0);
+  });
+
+  it('🔴 埋め込みの面(liveWidgets なし)では器にならず、保存しない(別のノートへ越境しない)', async () => {
+    const md = '```html asset:ast-tool id="tool1"\n```\n';
+    setWidgetNoteHost(fakeHost({ L1: md }));
+    const { body, scopes } = await mountAsset('L1', md, false);
+    expect(body.querySelector('.pkc-widget-placeholder')).toBeNull();
+    expect(body.querySelector('[data-pkc-widget-asset]')).toBeNull();
+    const f = body.querySelector<HTMLIFrameElement>('iframe')!;
+    expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+    // 箱の中だけの保存(1 行目で止まらない)は入る
+    expect(f.srcdoc).toContain(WIDGET_STORAGE_MESSAGE);
+    post(set('count', '9', 1), giveWindow(f));
+    expect(storageKeys()).toEqual([]);
+    expect(widgetFrameCount()).toBe(0);
+    expect(body.querySelector('[data-pkc-field="widget-bar"]')).toBeNull();
+    for (const s of scopes) s.dispose();
+  });
+
+  it('🔴「HTML で保存」で、端末の保存と今の配色を焼いた単体の .html を落とし、ObjectURL を手放す', async () => {
+    const md = '```html asset:ast-tool id="tool1"\n```\n';
+    const host = fakeHost({ L1: md });
+    setWidgetNoteHost({ ...host, titleOf: () => '家計のノート' });
+    document.documentElement.setAttribute('data-pkc-tone', 'dark');
+    const dl = catchDownloads();
+    try {
+      const { body, scopes } = await mountAsset('L1', md, true);
+      post(set('count', '42', 1), giveWindow(frameOf(body)));
+      body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-download"]')!.click();
+      expect(dl.files).toHaveLength(1);
+      expect(dl.files[0]!.name).toBe('tool1.html');
+      const text = await dl.files[0]!.blob.text();
+      expect(dl.files[0]!.blob.type).toContain('text/html');
+      expect(text.startsWith('<!DOCTYPE html><html lang="ja" data-pkc-tone="dark">')).toBe(true);
+      expect(text, '端末の保存が焼かれていない').toContain('{"count":"42"}');
+      expect(text).toContain('localStorage.getItem("count")');
+      expect(text).toContain("connect-src 'none'");
+      // 🔴 ObjectURL は読み終えた頃に必ず revoke(即破棄)
+      await new Promise((r) => setTimeout(r, 1100));
+      expect(dl.revoked).toEqual([dl.files[0]!.url]);
+      for (const s of scopes) s.dispose();
+    } finally {
+      document.documentElement.removeAttribute('data-pkc-tone');
+    }
+  });
+
+  it('「HTML で保存」の seed は端末の保存 → 本文の状態ブロックの順(端末が空なら本文のブロック)', async () => {
+    const md = '```html asset:ast-tool id="tool1"\n```\n\n```json widget-state="tool1"\n{"count":"5"}\n```\n';
+    setWidgetNoteHost(fakeHost({ L1: md }));
+    const dl = catchDownloads();
+    const { body, scopes } = await mountAsset('L1', md, true);
+    localStorage.clear(); // 別の端末で開いた形(置いた後に端末の保存が空)
+    body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-download"]')!.click();
+    expect(await dl.files[0]!.blob.text()).toContain('{"count":"5"}');
+    // 端末の保存が在れば、そちらが勝つ
+    applyWidgetStorageOp('L1', 'tool1', { op: 'set', key: 'count', value: '8' });
+    body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-download"]')!.click();
+    const second = await dl.files[1]!.blob.text();
+    expect(second).toContain('{"count":"8"}');
+    expect(second).not.toContain('{"count":"5"}');
+    for (const s of scopes) s.dispose();
+  });
+
+  it('`id=` の無い添付の HTML の「HTML で保存」はノートの題名をファイル名にし、保存の shim を入れない', async () => {
+    const md = '```html asset:ast-tool\n```\n';
+    setWidgetNoteHost({ ...fakeHost({ L1: md }), titleOf: () => '計算 ツール' });
+    const dl = catchDownloads();
+    const { body, scopes } = await mountAsset('L1', md, true);
+    body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-download"]')!.click();
+    expect(dl.files[0]!.name).toBe('計算-ツール.html');
+    const text = await dl.files[0]!.blob.text();
+    expect(text).toContain('<title>計算-ツール</title>');
+    expect(text).not.toContain('pkc3-widget-export.');
+    for (const s of scopes) s.dispose();
+  });
+
+  it('直書きの `id=` の HTML と React の `id=` のバーにも「HTML で保存」が在る(React はランタイム込みの文書)', async () => {
+    const dl = catchDownloads();
+    setWidgetNoteHost(fakeHost({ L1: '' }));
+    const { body, scope } = mount('L1', '```html id="a"\n<p>x</p>\n```\n\n```react id="r"\nexport default function App(){return <b>r</b>}\n```\n');
+    expect(body.querySelectorAll('[data-pkc-field="widget-download"]')).toHaveLength(1);
+    setReactRuntimeLoader(() => Promise.resolve({ runtime: '/*RUNTIME*/', tailwind: '/*TW*/' }));
+    const rs = hydrateReact(body);
+    for (let i = 0; i < 10; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const btns = body.querySelectorAll<HTMLButtonElement>('[data-pkc-field="widget-download"]');
+    expect(btns).toHaveLength(2);
+    applyWidgetStorageOp('L1', 'r', { op: 'set', key: 'clicks', value: '3' });
+    body.querySelector<HTMLButtonElement>('.pkc-react-placeholder [data-pkc-field="widget-download"]')!.click();
+    expect(dl.files[0]!.name).toBe('r.html');
+    const text = await dl.files[0]!.blob.text();
+    expect(text.startsWith('<!DOCTYPE html><html lang="ja"')).toBe(true);
+    expect(text).toContain('/*RUNTIME*/');
+    expect(text).toContain('{"clicks":"3"}');
+    expect(text).toContain("connect-src 'none'");
+    rs.dispose();
+    scope.dispose();
+  });
+
+  it('🔴 親の居ない所(window.parent === window)では、ノートの参照は待たずに空で答える', async () => {
+    const html = buildHtmlSandboxIframe('<p>z</p>', '', 0);
+    const doc = html.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    const prelude = [...doc.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!).find((x) => x.includes('api.readTables='))!;
+    const sent: unknown[] = [];
+    const win: Record<string, unknown> = {
+      postMessage: (m: unknown) => sent.push(m),
+      addEventListener: () => undefined,
+      localStorage: null,
+    };
+    win.parent = win;
+    const fakeDoc = { documentElement: { style: { setProperty() {}, removeProperty() {} }, setAttribute() {} } };
+    new Function('window', 'document', prelude)(win, fakeDoc);
+    const api = win.pkcWidget as { readTables: () => Promise<unknown>; readNoteContext: () => Promise<unknown> };
+    vi.useFakeTimers();
+    try {
+      // ⚠ 時計を進めずに解決する(3 秒の待ちに入っていない)
+      await expect(api.readNoteContext()).resolves.toEqual({ frontmatter: {}, tables: [] });
+      await expect(api.readTables()).resolves.toEqual([]);
+      expect(sent.filter((m) => (m as { type?: string }).type === WIDGET_CONTEXT_REQ_MSG_TYPE)).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
