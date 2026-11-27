@@ -219,6 +219,10 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   // ウィジェットの箱と「状態を初期化」のバー(PR-07)。見えたときに adapter が器へ置く
   'pkc-widget-frame': 'src/adapter/ui/render/widget-bridge.ts',
   'pkc-widget-bar': 'src/adapter/ui/render/widget-bridge.ts',
+  // 添付 HTML ウィジェットの案内帯(#2090 ②)── 箱が CSP で止めたと申告したときに adapter が器へ置く
+  'pkc-widget-perm-notice': 'src/adapter/ui/render/widget-bridge.ts',
+  // 設定画面の「添付 HTML ウィジェットの追加権限」の権限名(#2090 ②)
+  'pkc-widget-permission-badge': 'src/adapter/ui/render/settings/widget-permissions.ts',
   // 3D ビューア(v4.0 PR-12)。` ```3d ` の器と添付の 3D モデルの面に、adapter が描いた後に置く(markdown は placeholder まで)
   'pkc-3d-viewer': 'src/adapter/ui/render/viewer-3d.ts',
   'pkc-3d-toolbar': 'src/adapter/ui/render/viewer-3d.ts',

@@ -20,11 +20,13 @@
  *
  * - HTML のウィジェットは、画面の箱と**同じ文書の組み方**(`buildHtmlSandboxDoc`)を通す ── CSP
  *   (`connect-src 'none'`・外部の script 不可・外部画像は書き出した人の設定のまま)も同じ。外へ出る口を足さない。
+ *   ⚠ 例外は添付 HTML ウィジェットに user が許した権限(#2090 ②)だけ ── 画面の箱と同じ CSP をそのまま引き継ぐ。
  * - `<script>` に埋める値は必ず `inlineJson`(`</script>` / `<!--` で文書を切らせない)。
  */
 import { safeName } from '@features/export/file-name';
 import { inlineJson, storageShimInvocation } from '@features/launcher/app-storage-shim';
 import { buildHtmlSandboxDoc } from './html-sandbox';
+import { DEFAULT_WIDGET_PERMISSIONS, type WidgetPermissionSet } from './widget-permissions';
 import {
   safeTokenValue,
   WIDGET_ID_RE,
@@ -58,6 +60,11 @@ export interface StandaloneWidgetOptions extends StandaloneWidgetHeadOptions {
   readonly title: string;
   /** 外部の画像を読み込ませるか(書き出した面の設定のまま。⚠ 既定は塞ぐ側)。 */
   readonly allowExternalImages?: boolean;
+  /**
+   * 添付 HTML ウィジェットに許している追加権限(#2090 ②)── 保存した 1 枚にもそのまま引き継ぐ。
+   * ⚠ 既定は全部オフ(厳格な CSP)。直書きの ` ```html ` の呼び手は渡さない。
+   */
+  readonly permissions?: WidgetPermissionSet;
 }
 
 /** 箱の中の名前(`--pkc-*`)として渡してよい物だけを、値を確かめて残す(呼び手の値を信じない)。 */
@@ -174,6 +181,7 @@ export function buildStandaloneWidgetHtml(opts: StandaloneWidgetOptions): string
     STANDALONE_WIDGET_FRAME_ID,
     opts.allowExternalImages === true,
     standaloneWidgetHead(opts),
+    opts.permissions ?? DEFAULT_WIDGET_PERMISSIONS,
   );
   return standaloneShell(doc, opts.title, opts.theme.tone);
 }

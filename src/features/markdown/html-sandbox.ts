@@ -45,9 +45,9 @@
 
 import {
   HTML_SANDBOX_BLOCKED_MSG_TYPE,
-  imgSrcDirective,
 } from './external-images';
 import { WIDGET_BASE_STYLE, widgetPrelude, widgetThemePreludeScript } from './widget-bridge';
+import { buildSandboxCsp, DEFAULT_WIDGET_PERMISSIONS, type WidgetPermissionSet } from './widget-permissions';
 
 /**
  * テーマを受け取る箱の印(v4.0 Phase 2 / PR-07)。親の `installWidgetBridge` が配色の変化をこの箱へ配る。
@@ -198,20 +198,18 @@ export function buildHtmlSandboxDoc(
   iframeId: string,
   allowExternalImages: boolean,
   headExtra: string = '',
+  /**
+   * 🔴 **添付 HTML ウィジェットに user が許した追加権限**(#2090 ②)。⚠ 既定は全部オフ(fail-closed)。
+   * ⚠ 本文に直書きした ` ```html ` の箱(`buildHtmlSandboxIframe`)はここを渡さない ── 常に既定値。
+   */
+  permissions: WidgetPermissionSet = DEFAULT_WIDGET_PERMISSIONS,
 ): string {
   // CSP:default-src は self + data:、script は inline only(外部 src 禁止)、
   // connect は none(fetch 禁止)、frame は none(再帰 iframe 禁止)。
-  // 🔴 **`img-src` だけが可変**(2026-08-06)── ここが唯一「外へ出られる」穴で、
-  //    開けるかどうかは user の設定と同意で決まる(`external-images.ts`)。
-  const cspContent =
-    "default-src 'self' data: blob:; " +
-    `img-src ${imgSrcDirective(allowExternalImages)}; ` +
-    "style-src 'self' 'unsafe-inline'; " +
-    "script-src 'unsafe-inline'; " +
-    "connect-src 'none'; " +
-    "frame-src 'none'; " +
-    "object-src 'none'; " +
-    "base-uri 'none'";
+  // 🔴 **`img-src` は user の設定と同意で決まる**(2026-08-06。`external-images.ts`)。
+  // 🔴 外部の script / style / font と `connect-src` は**添付 HTML ウィジェットの追加権限**でだけ開く(#2090 ②)。
+  //    組み立ては `widget-permissions.ts` の 1 本(既定の CSP は前と 1 文字も違わない)。
+  const cspContent = buildSandboxCsp(allowExternalImages, permissions);
 
   const resizeScript = sandboxResizeScript(iframeId);
 

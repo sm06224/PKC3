@@ -2763,6 +2763,10 @@ export interface BinderServices {
   revokeSameOrigin?(assetKey: string): void;
   /** 目次を見せる許可を取り消す(#195)。 */
   revokeExtension?(assetKey: string): void;
+  /** 添付 HTML ウィジェットの追加権限を 1 件(その鍵の全権限)外す(#2090 ②)。⚠ 鍵は**中身のハッシュ**。 */
+  revokeWidgetPermission?(assetKey: string): void;
+  /** 添付 HTML ウィジェットの追加権限をすべて外す(#2090 ②)。⚠ 確認は押し所の側(binder)で取る。 */
+  revokeAllWidgetPermissions?(): void;
   /**
    * ブラウザの AI に許した範囲を取り消す(#1407)。`origin` = 組み込み先のページの AI の行(段⑥)。
    * 無い = このブラウザの AI。
@@ -18511,6 +18515,22 @@ const ACTIONS: Record<string, ActionHandler> = {
   'revoke-extension': (_dispatcher, target, services) => {
     const key = target.getAttribute('data-pkc-asset-key');
     if (key !== null && key !== '') services.revokeExtension?.(key);
+  },
+  /**
+   * 🔴 **添付 HTML ウィジェットに許した追加権限を取り消す**(#2090 ②)── ウィジェットの「権限」で許したものの出口(片道にしない)。
+   */
+  'revoke-widget-permission': (_dispatcher, target, services) => {
+    const key = target.getAttribute('data-pkc-asset-key');
+    if (key !== null && key !== '') services.revokeWidgetPermission?.(key);
+  },
+  /** 🔴 **すべて取り消す**(#2090 ②)── 一括は確認してから。 */
+  'revoke-all-widget-permissions': (_dispatcher, target, services) => {
+    void confirmInApp(target, '添付 HTML ウィジェットに許可した追加権限をすべて取り消します。ウィジェットは外部へつながらない状態に戻ります', {
+      // ⚠ 危険色にしない ── 外へ出る口を閉じる向き(安全側)で、もう一度許せば戻せる
+      okLabel: 'すべて取り消す',
+    }).then((answer) => {
+      if (answer === 'ok') services.revokeAllWidgetPermissions?.();
+    });
   },
   /**
    * 🔴 **ブラウザの AI に許した範囲を取り消す**(#1407)。

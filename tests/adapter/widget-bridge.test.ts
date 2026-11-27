@@ -33,7 +33,13 @@ import {
   remountStaleWidgets,
   WIDGET_LID_ATTR,
   widgetFrameCount,
+  notifyWidgetBlocked,
+  remountAssetWidgets,
+  routeWidgetBlocked,
+  setWidgetPermissionGate,
+  widgetAssetLabel,
 } from '../../src/adapter/ui/render/widget-bridge';
+import { WidgetPermissionGate } from '../../src/adapter/platform/widget-permission-grants';
 import {
   applyWidgetStorageOp,
   clearEntryWidgetStorage,
@@ -954,9 +960,9 @@ describe('🔴 添付の HTML のウィジェット(#2090 ①)と単体の HTML 
     // 保存は器の (lid, id) へ
     post(set('count', '7', 1), giveWindow(f));
     expect(readWidgetStorage('L1', 'tool1')).toEqual({ count: '7' });
-    // バーは 3 つ(保存・初期化・HTML で保存)
+    // バーは 4 つ(保存・初期化・HTML で保存・権限 ── 権限は添付の HTML だけ。#2090 ②)
     const fields = [...body.querySelectorAll('[data-pkc-field="widget-bar"] button')].map((b) => b.getAttribute('data-pkc-field'));
-    expect(fields).toEqual(['widget-save', 'widget-reset', 'widget-download']);
+    expect(fields).toEqual(['widget-save', 'widget-reset', 'widget-download', 'widget-permissions']);
     expect(body.querySelector('[data-pkc-field="widget-download"]')!.textContent).toBe('HTML で保存');
     for (const s of scopes) s.dispose();
   });
@@ -974,7 +980,7 @@ describe('🔴 添付の HTML のウィジェット(#2090 ①)と単体の HTML 
     // 保存の shim は入れない(状態を持たない)
     expect(f.srcdoc).not.toContain(WIDGET_STORAGE_MESSAGE);
     const fields = [...body.querySelectorAll('[data-pkc-field="widget-bar"] button')].map((b) => b.getAttribute('data-pkc-field'));
-    expect(fields).toEqual(['widget-download']);
+    expect(fields).toEqual(['widget-download', 'widget-permissions']);
     // 🔴 保存要求は捨てる(直の要求でも)
     const w = giveWindow(f);
     post(set('count', '9', 1), w);
@@ -1109,5 +1115,189 @@ describe('🔴 添付の HTML のウィジェット(#2090 ①)と単体の HTML 
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('🔴 添付 HTML ウィジェットの追加権限(#2090 ②)', () => {
+  const KEY = `ast-${'c'.repeat(64)}`;
+  // ⚠ 外部の script を中身に書かない(happy-dom が srcdoc の中を読みに行き stderr を汚す)── 主張は CSP の字で測る
+  const TOOL = '<p id="tool">tool</p>';
+  let gate: WidgetPermissionGate;
+  beforeEach(() => {
+    gate = new WidgetPermissionGate(localStorage);
+    setWidgetPermissionGate(gate);
+  });
+  afterEach(() => setWidgetPermissionGate(null));
+
+  async function mountKey(md: string, lid = 'L1'): Promise<{ body: HTMLElement; scopes: ReturnType<typeof hydrateWidgets>[] }> {
+    const body = document.createElement('div');
+    body.className = 'pkc-md-rendered';
+    body.setAttribute(WIDGET_LID_ATTR, lid);
+    body.innerHTML = renderMarkdown(md, { liveWidgets: true });
+    document.body.append(body);
+    const scopes: ReturnType<typeof hydrateWidgets>[] = [];
+    await hydrateFenceHosts({
+      hosts: [...body.querySelectorAll<HTMLElement>('[data-pkc-fence-asset-key]')],
+      getBlob: async (k) => (k === KEY ? new Blob([TOOL], { type: 'text/html' }) : null),
+      texts: new Map(),
+      env: { allowExternalImages: false, currentContainerId: 'c1', liveWidgets: true },
+      stale: () => false,
+      onReplaced: (next) => scopes.push(hydrateWidgets(next)),
+    });
+    return { body, scopes };
+  }
+  const frames = (root: ParentNode): HTMLIFrameElement[] => [...root.querySelectorAll<HTMLIFrameElement>('iframe.pkc-widget-frame')];
+  const permBtn = (root: ParentNode): HTMLButtonElement | null =>
+    root.querySelector<HTMLButtonElement>('[data-pkc-field="widget-permissions"]');
+  const answer = async (checks: Record<string, boolean>, ok = true): Promise<void> => {
+    await new Promise((r) => setTimeout(r, 0));
+    const dialog = document.querySelector<HTMLDialogElement>(`[data-pkc-region="${DIALOG_REGION}"]`)!;
+    expect(dialog.open).toBe(true);
+    for (const [id, v] of Object.entries(checks)) {
+      const box = dialog.querySelector<HTMLInputElement>(`input[data-pkc-check-id="${id}"]`)!;
+      expect(box, id).not.toBeNull();
+      box.checked = v;
+    }
+    document.querySelector<HTMLButtonElement>(`[data-pkc-field="${ok ? 'dialog-ok' : 'dialog-cancel'}"]`)!.click();
+    for (let i = 0; i < 3; i += 1) await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it('🔴 直書きの ```html には「権限」も案内帯も出ず、常に厳格な CSP(台帳に何があっても)', () => {
+    // 直書きの箱が鍵を名乗れないこと ── 台帳に全権限があっても効かない
+    gate.set(KEY, 'external-scripts', true);
+    gate.set(KEY, 'network', true);
+    const { body, scope } = mount('L1', '```html id="a"\n<p>direct</p>\n```\n');
+    const f = frameOf(body);
+    expect(permBtn(body)).toBeNull();
+    expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(f.srcdoc).toContain("connect-src 'none'");
+    expect(f.srcdoc).toContain("script-src 'unsafe-inline'; ");
+    expect(f.srcdoc).not.toContain('https: http:');
+    // 止めた申告が来ても案内帯は出さず、一般の案内へそのまま回す
+    expect(notifyWidgetBlocked(f, ['script-src-elem', 'connect-src'])).toBe(false);
+    expect(routeWidgetBlocked(f, ['script-src-elem'])).toEqual(['script-src-elem']);
+    expect(body.querySelector('[data-pkc-field="widget-perm-notice"]')).toBeNull();
+    scope.dispose();
+  });
+
+  it('🔴 添付は既定で厳格 →「権限」で許すと即置き直して該当項目だけ開く(sandbox は不変)→ 外すと戻る', async () => {
+    const { body, scopes } = await mountKey(`\`\`\`html asset:${KEY}\n\`\`\`\n`);
+    const before = frames(body)[0]!;
+    expect(before.srcdoc).toContain("connect-src 'none'");
+    expect(before.srcdoc).toContain("script-src 'unsafe-inline'; ");
+    expect(permBtn(body)!.textContent).toBe('権限');
+    // 外部スクリプトだけ許す
+    permBtn(body)!.click();
+    await answer({ 'external-scripts': true, network: false });
+    const after = frames(body)[0]!;
+    expect(after, '置き直されていない').not.toBe(before);
+    expect(before.isConnected).toBe(false);
+    expect(after.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(after.srcdoc).toContain("script-src 'unsafe-inline' https: http:");
+    expect(after.srcdoc).toContain("connect-src 'none'");
+    expect(after.srcdoc).not.toContain('unsafe-eval');
+    expect(permBtn(body)!.textContent).toBe('権限 (1)');
+    expect(frames(body)).toHaveLength(1);
+    // 通信も足す
+    permBtn(body)!.click();
+    await answer({ network: true });
+    expect(frames(body)[0]!.srcdoc).toContain('connect-src https: http: wss: ws:');
+    expect(permBtn(body)!.textContent).toBe('権限 (2)');
+    // やめる → 何も変わらない(置き直さない)
+    const kept = frames(body)[0]!;
+    permBtn(body)!.click();
+    await answer({ 'external-scripts': false, network: false }, false);
+    expect(frames(body)[0]).toBe(kept);
+    expect(gate.get(KEY)).toEqual({ externalScripts: true, network: true });
+    // 外す
+    permBtn(body)!.click();
+    await answer({ 'external-scripts': false, network: false });
+    expect(frames(body)[0]!.srcdoc).toContain("connect-src 'none'");
+    expect(frames(body)[0]!.srcdoc).toContain("script-src 'unsafe-inline'; ");
+    expect(permBtn(body)!.textContent).toBe('権限');
+    for (const s of scopes) s.dispose();
+  });
+
+  it('🔴 止めた申告で案内帯が出て、「権限を開く」から許して置き直すと消える', async () => {
+    const { body, scopes } = await mountKey(`\`\`\`html asset:${KEY} id="t1"\n\`\`\`\n`);
+    const f = frames(body)[0]!;
+    // 画像・frame だけの申告は案内しない(権限で開かない)
+    expect(notifyWidgetBlocked(f, ['img-src', 'frame-src'])).toBe(false);
+    expect(routeWidgetBlocked(f, ['script-src-elem', 'connect-src', 'frame-src'])).toEqual(['frame-src']);
+    const notice = body.querySelector<HTMLElement>('[data-pkc-field="widget-perm-notice"]')!;
+    expect(notice).not.toBeNull();
+    expect(notice.textContent).toContain('外部スクリプトの読み込み・外部への通信を止めました');
+    expect(notice.textContent).toContain('権限を開く');
+    // 2 回目の申告で帯を増やさない
+    notifyWidgetBlocked(f, ['connect-src']);
+    expect(body.querySelectorAll('[data-pkc-field="widget-perm-notice"]')).toHaveLength(1);
+    notice.querySelector<HTMLButtonElement>('[data-pkc-field="widget-perm-notice-open"]')!.click();
+    await answer({ 'external-scripts': true, network: true });
+    expect(body.querySelector('[data-pkc-field="widget-perm-notice"]'), '置き直しても帯が残る').toBeNull();
+    const f2 = frames(body)[0]!;
+    expect(f2).not.toBe(f);
+    // 許した後に止められても(eval 等)、もう足りない権限は無い ── 案内しない
+    expect(notifyWidgetBlocked(f2, ['script-src', 'connect-src'])).toBe(false);
+    for (const s of scopes) s.dispose();
+  });
+
+  it('🔴 設定画面からの取り消し(remountAssetWidgets)で即厳格な CSP に戻る・変わっていない器は置き直さない', async () => {
+    gate.set(KEY, 'network', true);
+    const { body, scopes } = await mountKey(`\`\`\`html asset:${KEY}\n\`\`\`\n\n\`\`\`html asset:${KEY} id="t2"\n\`\`\`\n`);
+    const fs = frames(body);
+    expect(fs).toHaveLength(2);
+    for (const f of fs) expect(f.srcdoc).toContain('connect-src https: http: wss: ws:');
+    expect(remountAssetWidgets(KEY), '変わっていないのに置き直した').toBe(0);
+    gate.revoke(KEY);
+    expect(remountAssetWidgets(KEY)).toBe(2);
+    const now = frames(body);
+    expect(now).toHaveLength(2);
+    for (const f of now) {
+      expect(fs).not.toContain(f);
+      expect(f.srcdoc).toContain("connect-src 'none'");
+      expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+    }
+    // 別の鍵の取り消しは触らない
+    gate.set(KEY, 'network', true);
+    expect(remountAssetWidgets(`ast-${'d'.repeat(64)}`)).toBe(0);
+    expect(remountAssetWidgets(null)).toBe(2);
+    for (const s of scopes) s.dispose();
+  });
+
+  it('🔴 `id=` の在る添付は、読み直しの焼き直し(keepWidgetSeedFresh)でもその時点の権限を引く', async () => {
+    gate.set(KEY, 'network', true);
+    const { body, scopes } = await mountKey(`\`\`\`html asset:${KEY} id="t3"\n\`\`\`\n`);
+    const f = frames(body)[0]!;
+    f.dispatchEvent(new Event('load'));
+    applyWidgetStorageOp('L1', 't3', { op: 'set', key: 'k', value: 'v' });
+    gate.revoke(KEY); // 取り消した後に読み直された
+    f.dispatchEvent(new Event('load'));
+    expect(f.srcdoc).toContain('"k":"v"');
+    expect(f.srcdoc, '古い権限で焼き直した').toContain("connect-src 'none'");
+    for (const s of scopes) s.dispose();
+  });
+
+  it('🔴「HTML で保存」は許している権限を単体の HTML の CSP に引き継ぐ(未許可なら厳格)', async () => {
+    setWidgetNoteHost({ ...fakeHost({ L1: '' }), titleOf: () => '道具のノート' });
+    const files: Blob[] = [];
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => {
+      files.push(b as Blob);
+      return `blob:t/${files.length}`;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const { body, scopes } = await mountKey(`\`\`\`html asset:${KEY}\n\`\`\`\n`);
+    const dl = (): HTMLButtonElement => body.querySelector<HTMLButtonElement>('[data-pkc-field="widget-download"]')!;
+    dl().click();
+    const strict = await files[0]!.text();
+    expect(strict).toContain("connect-src 'none'");
+    expect(strict).not.toContain('https: http:');
+    gate.set(KEY, 'external-scripts', true);
+    dl().click();
+    const opened = await files[1]!.text();
+    expect(opened).toContain("script-src 'unsafe-inline' https: http:");
+    expect(opened).toContain("connect-src 'none'");
+    expect(widgetAssetLabel(KEY)).toBe('道具のノート');
+    for (const s of scopes) s.dispose();
   });
 });

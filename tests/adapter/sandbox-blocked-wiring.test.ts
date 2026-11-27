@@ -20,6 +20,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { CenterRouter } from '../../src/adapter/ui/render/center';
 import { installHtmlSandboxBlockedReporter } from '../../src/features/markdown/html-sandbox';
+import { routeWidgetBlocked } from '../../src/adapter/ui/render/widget-bridge';
 import { appExternalImages } from '../../src/adapter/ui/render/external-images';
 import type { AppState } from '../../src/adapter/state/app-state';
 
@@ -82,8 +83,10 @@ describe('箱の申告 → 画面(#528 段③)', () => {
     await settle();
 
     const win = box('pkc-html-render-aaa');
-    const off = installHtmlSandboxBlockedReporter((_iframe, blocked, kinds) => {
-      center.noteBlockedBox(LID, blocked, kinds);
+    const off = installHtmlSandboxBlockedReporter((iframe, blocked, kinds) => {
+      // 🔑 main.ts と同じ形(添付 HTML ウィジェットでない箱は種別をそのまま流す)
+      const rest = routeWidgetBlocked(iframe, kinds);
+      center.noteBlockedBox(LID, blocked, rest);
     });
     post(
       {
@@ -113,8 +116,10 @@ describe('箱の申告 → 画面(#528 段③)', () => {
     await settle();
 
     const win = box('pkc-html-render-bbb');
-    const off = installHtmlSandboxBlockedReporter((_iframe, blocked, kinds) => {
-      center.noteBlockedBox(LID, blocked, kinds);
+    const off = installHtmlSandboxBlockedReporter((iframe, blocked, kinds) => {
+      // 🔑 main.ts と同じ形(添付 HTML ウィジェットでない箱は種別をそのまま流す)
+      const rest = routeWidgetBlocked(iframe, kinds);
+      center.noteBlockedBox(LID, blocked, rest);
     });
     post(
       { type: 'pkc-html-blocked-images', id: 'pkc-html-render-bbb', blocked: 0, kinds: [] },
@@ -137,7 +142,10 @@ describe('boot の 1 行(弱い pin)', () => {
   it('main.ts は受け取った種別をそのまま中継する', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync('src/main.ts', 'utf8');
-    expect(src).toContain('installHtmlSandboxBlockedReporter((_iframe, blocked, kinds) => {');
-    expect(src).toContain('center.noteBlockedBox(lid, blocked, kinds);');
+    expect(src).toContain('installHtmlSandboxBlockedReporter((iframe, blocked, kinds) => {');
+    // 🔑 添付 HTML ウィジェットの案内帯で言えた種別だけを抜き、残りをそのまま流す(#2090 ②)。
+    //    振り分けは `routeWidgetBlocked`(widget-bridge.test.ts が直書きの箱では種別を 1 つも抜かないことを見る)
+    expect(src).toContain('const rest = routeWidgetBlocked(iframe, kinds);');
+    expect(src).toContain('center.noteBlockedBox(lid, blocked, rest);');
   });
 });

@@ -344,6 +344,14 @@ export const SKIPPED_KEYS: readonly { readonly key: string; readonly why: string
     why: '許可である。その端末でその相手を見て許したもの',
   },
   {
+    key: 'pkc3.widget-grants.external-scripts',
+    why: '許可である。その端末で、添付した HTML ウィジェットの中身を見て許したもの(運ぶと、相手の端末でも外部スクリプトが読み込まれる)',
+  },
+  {
+    key: 'pkc3.widget-grants.network',
+    why: '許可である。その端末で、添付した HTML ウィジェットの中身を見て許したもの(運ぶと、相手の端末でも外部への通信が開く)',
+  },
+  {
     key: 'pkc3.embed-origins',
     why: '許可である。その端末でその相手を見て許したもの',
   },

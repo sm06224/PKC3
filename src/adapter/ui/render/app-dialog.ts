@@ -383,6 +383,82 @@ export function confirmCheckInApp(
 }
 
 /**
+ * 🔴 **チェック欄をいくつか並べて聞く**(#2090 ② ── 添付 HTML ウィジェットの追加権限)。
+ *
+ * ⚠ 器・列・取り消しの扱いは `confirmInApp` と**同じ**(背面の操作の抑止・重なったら順番・`Escape` / 「やめる」= `cancel`・
+ *   閉じた後のフォーカス復帰)── 違うのは本文の下にチェック欄が並ぶことだけ。
+ * ⚠ 字はすべて `textContent`(HTML にしない)。
+ * @returns 答えと、欄ごとの入れ具合(`items` と同じ並び)
+ */
+export function confirmChecksInApp(
+  host: HTMLElement,
+  opts: {
+    readonly title: string;
+    readonly lead: string;
+    readonly items: readonly {
+      readonly id: string;
+      readonly label: string;
+      readonly description?: string;
+      readonly checked: boolean;
+    }[];
+    /** 欄の下に添える注記(1 行ずつ)。 */
+    readonly notes?: readonly string[];
+    readonly okLabel?: string;
+    readonly cancelLabel?: string;
+  },
+): Promise<{ readonly answer: DialogAnswer; readonly checked: Readonly<Record<string, boolean>> }> {
+  return enqueue(async () => {
+    const f = ensureFrame(host);
+    f.title.textContent = opts.title;
+    f.body.textContent = '';
+    const lead = document.createElement('p');
+    lead.textContent = opts.lead;
+    f.body.append(lead);
+    const boxes: [string, HTMLInputElement][] = [];
+    for (const it of opts.items) {
+      const label = document.createElement('label');
+      label.setAttribute('data-pkc-field', 'dialog-check-label');
+      label.setAttribute('data-pkc-check-id', it.id);
+      label.style.display = 'block';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = it.checked;
+      box.setAttribute('data-pkc-field', 'dialog-check');
+      box.setAttribute('data-pkc-check-id', it.id);
+      const name = document.createElement('strong');
+      name.textContent = it.label;
+      label.append(box, document.createTextNode(' '), name);
+      if (it.description !== undefined && it.description !== '') {
+        const d = document.createElement('small');
+        d.style.display = 'block';
+        d.textContent = it.description;
+        label.append(d);
+      }
+      f.body.append(label);
+      boxes.push([it.id, box]);
+    }
+    if (opts.notes !== undefined && opts.notes.length > 0) {
+      const ul = document.createElement('ul');
+      ul.setAttribute('data-pkc-field', 'dialog-notes');
+      for (const n of opts.notes) {
+        const li = document.createElement('li');
+        li.textContent = n;
+        ul.append(li);
+      }
+      f.body.append(ul);
+    }
+    f.ok.textContent = opts.okLabel ?? '保存';
+    f.cancel.textContent = opts.cancelLabel ?? 'やめる';
+    f.ok.removeAttribute('data-pkc-danger');
+    f.cancel.hidden = false;
+    const answer = await open(f, 'cancel');
+    const checked: Record<string, boolean> = {};
+    for (const [id, box] of boxes) checked[id] = box.checked;
+    return { answer, checked };
+  });
+}
+
+/**
  * 🔴 **1 行の字を聞く**(`window.prompt` の置き換え。#633 段③ ── スタックの題名)。
  *
  * ⚠ `confirmInApp` と同じ器・同じ列(重なったら順番に出す)。

@@ -162,6 +162,8 @@ const ALL_IDS = [
   'app-open-target',
   'external-images',
   'same-origin',
+  // 2026-11-27(#2090 ②): 添付 HTML ウィジェットの追加権限の一覧(個別・一括の取り消し)を足した ── 節 +1
+  'widget-permissions',
   'extensions',
   'agents',
   // 2026-10-11(#1407): 埋め込み先のページの AI を許すページの一覧(アドレスの追加・外す)を足した ── 節 +1
