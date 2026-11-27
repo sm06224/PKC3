@@ -67,8 +67,13 @@ import {
   orbitCameraPosition,
   orbitFromPosition,
   orbitPan,
+  orbitPreset,
   orbitRotate,
   orbitZoom,
+  orbitZoomStep,
+  wheelDeltaPx,
+  wheelZoomsStage,
+  type OrbitPreset,
   type OrbitState,
   type Vec3,
 } from '@features/viewer3d/orbit-math';
@@ -93,17 +98,17 @@ const REAL_LOADERS: LoaderModules = {
     // 🔴 1 枚にまとめた版では枝ごと落とす(条件はこの場で直接書く ── 別 module の定数だと除去が効かない)
     if (typeof __PKC_PORTABLE__ !== 'undefined' && __PKC_PORTABLE__) throw new Error(GPU_PORTABLE_UNAVAILABLE);
     return import('three/examples/jsm/loaders/GLTFLoader.js');
-  }, loadError('glTF を読む機能')),
+  }, loadError('glTF の読み込み機能')),
   stl: retryableImport(async () => {
     // 🔴 上と同じ ── 1 枚にまとめた版では枝ごと落とす
     if (typeof __PKC_PORTABLE__ !== 'undefined' && __PKC_PORTABLE__) throw new Error(GPU_PORTABLE_UNAVAILABLE);
     return import('three/examples/jsm/loaders/STLLoader.js');
-  }, loadError('STL を読む機能')),
+  }, loadError('STL の読み込み機能')),
   obj: retryableImport(async () => {
     // 🔴 上と同じ ── 1 枚にまとめた版では枝ごと落とす
     if (typeof __PKC_PORTABLE__ !== 'undefined' && __PKC_PORTABLE__) throw new Error(GPU_PORTABLE_UNAVAILABLE);
     return import('three/examples/jsm/loaders/OBJLoader.js');
-  }, loadError('OBJ を読む機能')),
+  }, loadError('OBJ の読み込み機能')),
 };
 
 let loaders: LoaderModules = REAL_LOADERS;
@@ -368,7 +373,19 @@ class Viewer {
   readonly labelsLayer: HTMLElement;
   readonly note: HTMLElement;
   readonly info: { format: HTMLElement; size: HTMLElement; backend: HTMLElement };
-  readonly buttons: { reset: HTMLButtonElement; wireframe: HTMLButtonElement; grid: HTMLButtonElement };
+  readonly buttons: {
+    reset: HTMLButtonElement;
+    wireframe: HTMLButtonElement;
+    grid: HTMLButtonElement;
+    zoomOut: HTMLButtonElement;
+    zoomIn: HTMLButtonElement;
+    expand: HTMLButtonElement;
+    presets: Record<OrbitPreset, HTMLButtonElement>;
+  };
+  /** 🔴 描画面を「有効」にしたか(クリックで入り、Esc・外側のクリックで抜ける)。有効の間だけ、ただのホイールでもズームする。 */
+  active = false;
+  /** 「拡大」(描画面の高さを大きくする)の入り切り。 */
+  expanded = false;
 
   surface: GpuSurface | null = null;
   state: Viewer3dState = 'loading';
@@ -421,17 +438,26 @@ class Viewer {
       ),
       backend: mkInfo('backend', '準備中'),
     };
-    const mkBtn = (op: string, label: string, title: string, pressed?: boolean): HTMLButtonElement => {
+    const mkBtn = (op: string, label: string, title: string, pressed?: boolean, aria?: string): HTMLButtonElement => {
       const b = doc.createElement('button');
       b.type = 'button';
       b.className = 'pkc-3d-btn';
       b.setAttribute('data-pkc-3d-op', op);
       b.textContent = label;
       b.title = title;
+      if (aria !== undefined) b.setAttribute('aria-label', aria);
       if (pressed !== undefined) b.setAttribute('aria-pressed', String(pressed));
       return b;
     };
     this.buttons = {
+      zoomOut: mkBtn('zoom-out', '−', 'ズームアウトします(小さく見せます。キーボードの - でも)', undefined, 'ズームアウト'),
+      zoomIn: mkBtn('zoom-in', '+', 'ズームインします(大きく見せます。キーボードの + でも)', undefined, 'ズームイン'),
+      presets: {
+        oblique: mkBtn('preset-oblique', '斜め', '斜め上から見る視点にします'),
+        front: mkBtn('preset-front', '正面', '正面(水平)から見る視点にします'),
+        top: mkBtn('preset-top', '上面', '真上から見下ろす視点にします'),
+      },
+      expand: mkBtn('expand', '拡大', '描画領域を大きくします(もう一度押すと元の大きさに戻ります)', false),
       reset: mkBtn('reset', '視点をリセット', '最初の視点に戻します(キーボードの 0 でも戻せます)'),
       wireframe: mkBtn('wireframe', 'ワイヤーフレーム', '塗りつぶさずに線だけで表示します', this.wireframe),
       grid: mkBtn('grid', 'グリッド', '床のグリッドを表示します', this.grid),
@@ -443,9 +469,15 @@ class Viewer {
       this.info.size,
       this.info.backend,
       spacer,
+      this.buttons.zoomOut,
+      this.buttons.zoomIn,
+      this.buttons.presets.oblique,
+      this.buttons.presets.front,
+      this.buttons.presets.top,
       this.buttons.reset,
       this.buttons.wireframe,
       this.buttons.grid,
+      this.buttons.expand,
     );
 
     this.stage = doc.createElement('div');
@@ -455,7 +487,7 @@ class Viewer {
     this.stage.setAttribute('role', 'img');
     this.stage.setAttribute(
       'aria-label',
-      `${formatText}。ドラッグで回転、Shift + ドラッグか右ドラッグで移動、ホイールで拡大・縮小、矢印キーでも回せます`,
+      `${formatText}。ドラッグで回転、Shift + ドラッグか右ドラッグで移動、Ctrl + ホイールで拡大・縮小(クリックして有効にするとホイールだけでも)、矢印キーでも回せます`,
     );
     const height = Math.round(opts.height ?? spec?.height ?? SCENE_DEFAULT_HEIGHT);
     this.stage.style.height = `${height}px`;
@@ -511,10 +543,25 @@ class Viewer {
     this.on(this.buttons.reset, 'click', () => this.resetView());
     this.on(this.buttons.wireframe, 'click', () => this.toggle('wireframe'));
     this.on(this.buttons.grid, 'click', () => this.toggle('grid'));
+    this.on(this.buttons.zoomOut, 'click', () => this.zoomStep(-1));
+    this.on(this.buttons.zoomIn, 'click', () => this.zoomStep(1));
+    this.on(this.buttons.expand, 'click', () => this.setExpanded(!this.expanded));
+    for (const key of Object.keys(this.buttons.presets) as OrbitPreset[]) {
+      this.on(this.buttons.presets[key], 'click', () => this.applyPreset(key));
+    }
     this.on(stage, 'contextmenu', (e) => e.preventDefault());
     // ⚠ 描画面の上の 2 回押しで、本文の側(編集を開くなど)を動かさない
     this.on(stage, 'dblclick', (e) => e.stopPropagation());
+    // 🔴 描画面を「有効」にする(クリックで入る)。外側のクリック・Esc で抜ける ── 抜けている間のホイールは親のスクロールへ流す
+    const doc = stage.ownerDocument;
+    const onOutside = (e: Event): void => {
+      if (e.target instanceof Node && stage.contains(e.target)) return;
+      this.setActive(false);
+    };
+    doc.addEventListener('pointerdown', onOutside, true);
+    this.cleanups.push(() => doc.removeEventListener('pointerdown', onOutside, true));
     this.on(stage, 'pointerdown', (e) => {
+      this.setActive(true);
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       try {
         stage.setPointerCapture?.(e.pointerId);
@@ -555,13 +602,24 @@ class Viewer {
       stage,
       'wheel',
       (e) => {
+        // 🔴 スクロールの取り合いを 0 にする: Ctrl/⌘ + ホイール(ピンチ含む)か有効なときだけ奪う。
+        //   ただのホイールは preventDefault せず、親(ノート)のスクロールへ流す。
+        //   ⚠ `preventDefault` を呼ぶ経路があるので非 passive で登録する(Ctrl + ホイールのページ拡大も止める)
+        if (!wheelZoomsStage(e.ctrlKey || e.metaKey, this.active)) return;
         e.preventDefault();
-        if (this.orbit !== null) this.orbit = orbitZoom(this.orbit, e.deltaY);
+        if (this.orbit !== null) this.orbit = orbitZoom(this.orbit, wheelDeltaPx(e.deltaY, e.deltaMode));
         this.requestDraw();
       },
       { passive: false },
     );
     this.on(stage, 'keydown', (e) => {
+      if (e.key === 'Escape' && this.active) {
+        // 有効を抜ける(⚠ 背後のノート選択解除などへ Esc を流さない)
+        this.setActive(false);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       let handled = true;
       const o = this.orbit;
@@ -579,11 +637,11 @@ class Viewer {
         }
         case '+':
         case '=':
-          if (o !== null) this.orbit = orbitZoom(o, -200);
+          if (o !== null) this.orbit = orbitZoomStep(o, 1);
           break;
         case '-':
         case '_':
-          if (o !== null) this.orbit = orbitZoom(o, 200);
+          if (o !== null) this.orbit = orbitZoomStep(o, -1);
           break;
         case '0':
           this.resetView();
@@ -636,6 +694,34 @@ class Viewer {
   resetView(): void {
     if (this.home !== null) this.orbit = this.home;
     this.requestDraw();
+  }
+
+  /** 描画面の有効 / 無効(ホイールでのズームの許可)。 */
+  setActive(on: boolean): void {
+    if (this.active === on) return;
+    this.active = on;
+    if (on) this.stage.setAttribute('data-pkc-3d-active', '');
+    else this.stage.removeAttribute('data-pkc-3d-active');
+  }
+
+  /** ボタンの 1 段ズーム(+1 = 寄る、-1 = 引く)。 */
+  zoomStep(dir: 1 | -1): void {
+    if (this.orbit !== null) this.orbit = orbitZoomStep(this.orbit, dir);
+    this.requestDraw();
+  }
+
+  /** 視点のプリセット(注視点と距離は保つ)。 */
+  applyPreset(preset: OrbitPreset): void {
+    if (this.orbit !== null) this.orbit = orbitPreset(this.orbit, preset);
+    this.requestDraw();
+  }
+
+  /** 「拡大」── 描画面の高さを大きくする(大きさの変化は `ResizeObserver` が描き直しに繋ぐ)。 */
+  setExpanded(on: boolean): void {
+    this.expanded = on;
+    this.buttons.expand.setAttribute('aria-pressed', String(on));
+    this.root.toggleAttribute('data-pkc-3d-expanded', on);
+    // ⚠ 高さは CSS(`[data-pkc-3d-expanded]` の規則)が決める ── 元の高さは inline のまま残し、戻すときは属性を外すだけ
   }
 
   toggle(which: 'wireframe' | 'grid'): void {
@@ -840,7 +926,7 @@ class Viewer {
     this.info.backend.textContent = BACKEND_LABEL['2d']!;
     this.info.backend.setAttribute('data-pkc-3d-backend', '2d');
     this.buttons.wireframe.disabled = true;
-    this.buttons.wireframe.title = '簡易表示はいつも線で表示します';
+    this.buttons.wireframe.title = '2D 簡易表示では常にワイヤーフレームで表示します';
     this.showNote(reason);
     const spec = this.source.kind === 'scene' ? this.source.spec : null;
     const doc = this.stage.ownerDocument;
