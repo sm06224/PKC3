@@ -17412,7 +17412,20 @@ h6:hover > .pkc-heading-anchor,
  * - ⚠ `--neon-r`(光の半径)は `features/neon/near-cards.ts` の `NEON_RADIUS` と揃える(`tests/adapter/neon-glow.test.ts` が突き合わせる)。
  * - `--nbn-*` は `--nb-*` の単位なしの 0 / 1(`clip-path` の長さを辺ごとに 1px(内側)か -14px(外へ広げる)にするため)。
  * - 飾りだけ: `pointer-events: none`・読み上げの対象なし(疑似要素)。
+ *
+ * 🔴 **点き方・消え方(#2096)**── 時間の正本は `features/neon/near-cards.ts` の `NEON_ENTER_DELAY_MS`(45)/ `NEON_ENTER_DURATION_MS`(220)/
+ * `NEON_LEAVE_DURATION_MS`(260)(`tests/adapter/neon-glow.test.ts` が突き合わせる)。近づくと 45ms 溜めてから 220ms で浮かび上がり(`ease-out`)、
+ * 離れると `render/neon-glow.ts` が印を余韻の印(`[data-pkc-glow-out]`)へ付け替え、最後の局所座標のまま 260ms で消える(`ease-out`)。
+ * - 疑似要素で描く物は `opacity`(合成だけ)で補間する。疑似要素が新しく作られたコマは `@starting-style` で 0 から始める。
+ * - 背景で描く物(横スクロールの器・表・入力欄・追記欄)は、光の色の濃さを `--neon-alpha`(登録した数。⚠ `inherits: false` ── 子孫へ継承させない)で掛けて補間する。
+ * - ⚠ キーボードのフォーカスの線は遅らせない(フォーカスの規則は別で、`transition` を持たない)。近接の光はフォーカスのある物には出ない(余韻の印でも同じ)。
+ * - ⚠ `@property` / `@starting-style` は入れ子(CSS Nesting)にしない(`build/body-css.ts` の読み手は宣言の中の `{}` を読めない)。
  */
+@property --neon-alpha {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
 @media screen {
   [data-pkc-log-days] > [data-pkc-log-card] {
     --neon-r: 160px;
@@ -17467,7 +17480,7 @@ h6:hover > .pkc-heading-anchor,
       .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]),
       .pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]),
       [data-pkc-field='sql-input-wrap']:not(:focus-within)
-    )[data-pkc-glow-near][data-pkc-glow-near]::before {
+    ):is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out])::before {
     content: '';
     position: absolute;
     inset: calc(-1 * var(--nb-t)) calc(-1 * var(--nb-r)) calc(-1 * var(--nb-b)) calc(-1 * var(--nb-l));
@@ -17477,7 +17490,6 @@ h6:hover > .pkc-heading-anchor,
     max-height: none;
     margin: 0;
     transform: none;
-    opacity: 1;
     border: solid transparent;
     border-width: calc(2 * var(--nb-t)) calc(2 * var(--nb-r)) calc(2 * var(--nb-b)) calc(2 * var(--nb-l));
     border-radius: inherit;
@@ -17505,7 +17517,7 @@ h6:hover > .pkc-heading-anchor,
    * ポインタを中心にした放射状のマスクで「近い所だけ」にする(`mask-clip: no-clip` で箱の外の影も残す。マスクの像は箱より 14px 広く取る)。
    * ⚠ 枠を持たない辺(記録の途中の塊の上下)へは出さない(`clip-path` で箱の縁より 1px 内側に切る ── 縁ちょうどだと、小数の位置で縁の 1 行に線のすぐ外の濃い影が漏れて、カードの中に横線が出る。⚠ 箱は枠の有無にかかわらず 1px 外へ広げ、クリップ線が本来の縁に来るようにする ── 内側へ切るだけだと、塊の境目で横のにじみが 1px 途切れる)。角丸は `border-radius: inherit` で影も回り込む。
    * ⚠ バーのボタンには付けない(バーは `overflow: hidden` で切られるので、線はボタンの箱の内側 2px だけで描く)。 */
-  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details), [data-pkc-region='inspector'] > [data-pkc-card])[data-pkc-glow-near][data-pkc-glow-near]::after {
+  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details), [data-pkc-region='inspector'] > [data-pkc-card]):is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out])::after {
     content: '';
     position: absolute;
     inset: -1px;
@@ -17520,6 +17532,52 @@ h6:hover > .pkc-heading-anchor,
     mask-origin: border-box;
     mask-clip: no-clip;
   }
+  /* 点き方(#2096): 45ms 溜めてから 220ms で浮かび上がる。消え方: 余韻の印の間に 260ms で消える(どちらも `ease-out`。合成だけの `opacity`)。
+   * 引用の左の線(下の塊の `blockquote` の `::before`)も同じ時間 */
+  :is(
+      [data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details),
+      [data-pkc-region='inspector'] > [data-pkc-card],
+      [data-pkc-region='rail'] button,
+      .pkc-details:not([data-pkc-log-card]),
+      .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]),
+      .pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]),
+      [data-pkc-field='sql-input-wrap'],
+      blockquote:not(.pkc-section-callout)
+    )[data-pkc-glow-near][data-pkc-glow-near]::before,
+  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details), [data-pkc-region='inspector'] > [data-pkc-card])[data-pkc-glow-near][data-pkc-glow-near]::after {
+    opacity: 1;
+    transition: opacity 220ms ease-out 45ms;
+  }
+  :is(
+      [data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details),
+      [data-pkc-region='inspector'] > [data-pkc-card],
+      [data-pkc-region='rail'] button,
+      .pkc-details:not([data-pkc-log-card]),
+      .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]),
+      .pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]),
+      [data-pkc-field='sql-input-wrap'],
+      blockquote:not(.pkc-section-callout)
+    )[data-pkc-glow-out][data-pkc-glow-out]::before,
+  :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details), [data-pkc-region='inspector'] > [data-pkc-card])[data-pkc-glow-out][data-pkc-glow-out]::after {
+    opacity: 0;
+    transition: opacity 260ms ease-out 0ms;
+  }
+  /* 疑似要素が新しく作られたコマ(近づいた最初)は 0 から(でないと溜めの間に満点で出てしまう)。⚠ 入れ子にしない(独立の塊) */
+  @starting-style {
+    :is(
+        [data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details),
+        [data-pkc-region='inspector'] > [data-pkc-card],
+        [data-pkc-region='rail'] button,
+        .pkc-details:not([data-pkc-log-card]),
+        .pkc-md-block[data-pkc-render-lang]:not([data-pkc-render-lang='csv'], [data-pkc-log-card]),
+        .pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]),
+        [data-pkc-field='sql-input-wrap'],
+        blockquote:not(.pkc-section-callout)
+      )[data-pkc-glow-near][data-pkc-glow-near]::before,
+    :is([data-pkc-log-days] > [data-pkc-log-card]:not(.pkc-md-block, .pkc-details), [data-pkc-region='inspector'] > [data-pkc-card])[data-pkc-glow-near][data-pkc-glow-near]::after {
+      opacity: 0;
+    }
+  }
 }
 
 /**
@@ -17531,31 +17589,31 @@ h6:hover > .pkc-heading-anchor,
  *   器の外へはみ出すため描かない(線だけ)。⚠ 静止の線の層は B1 の規則の写し ── B1 の層を変えたらここも合わせる。
  */
 @media screen and (forced-colors: none) {
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-glow-near] {
-    --ng: radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), var(--neon-core), var(--neon) 34%, color-mix(in srgb, var(--neon) 70%, transparent) 66%, transparent);
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card]:is([data-pkc-glow-near], [data-pkc-glow-out]) {
+    --ng: radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), color-mix(in srgb, var(--neon-core) calc(100% * var(--neon-alpha)), transparent), color-mix(in srgb, var(--neon) calc(100% * var(--neon-alpha)), transparent) 34%, color-mix(in srgb, var(--neon) calc(70% * var(--neon-alpha)), transparent) 66%, transparent);
     --sf: linear-gradient(var(--surface), var(--surface));
     background-repeat: no-repeat;
   }
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-glow-near]:not([data-pkc-log-card='first'], [data-pkc-log-card='last'], [data-pkc-log-card='solo']) {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card]:is([data-pkc-glow-near], [data-pkc-glow-out]):not([data-pkc-log-card='first'], [data-pkc-log-card='last'], [data-pkc-log-card='solo']) {
     background-image: var(--sf), var(--ng), var(--hl), var(--hl);
     background-size: calc(100% - 4px) 100%, 100% 100%, 1px 100%, 1px 100%;
     background-position: 2px 0, 0 0, left top, right top;
   }
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='first'][data-pkc-glow-near] {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='first']:is([data-pkc-glow-near], [data-pkc-glow-out]) {
     background-image: var(--sf), var(--sf), radial-gradient(circle at 100% 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng), var(--hl), var(--hl), var(--hl),
       radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
     background-size: calc(100% - 4px) calc(100% - var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), var(--rl) var(--rl), var(--rl) var(--rl), 100% 100%,
       1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
     background-position: 2px 100%, var(--rl) 2px, left top, right top, 0 0, left top, right top, left top, left top, right top;
   }
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='last'][data-pkc-glow-near] {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='last']:is([data-pkc-glow-near], [data-pkc-glow-out]) {
     background-image: var(--sf), var(--sf), radial-gradient(circle at 100% 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng), var(--hl), var(--hl), var(--hl),
       radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
     background-size: calc(100% - 4px) calc(100% - var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), var(--rl) var(--rl), var(--rl) var(--rl), 100% 100%,
       1px 100%, 1px 100%, 100% 1px, var(--rl) var(--rl), var(--rl) var(--rl);
     background-position: 2px 0, left var(--rl) bottom 2px, left bottom, right bottom, 0 0, left top, right top, left bottom, left bottom, right bottom;
   }
-  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='solo'][data-pkc-glow-near] {
+  [data-pkc-log-days][data-pkc-log-days][data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card][data-pkc-log-card][data-pkc-log-card='solo']:is([data-pkc-glow-near], [data-pkc-glow-out]) {
     background-image: var(--sf), var(--sf), var(--sf), radial-gradient(circle at 100% 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 100%, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 100% 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), radial-gradient(circle at 0 0, var(--surface) calc(var(--rl) - 2px), transparent calc(var(--rl) - 2px)), var(--ng),
       var(--hl), var(--hl), var(--hl), var(--hl), radial-gradient(circle at 100% 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 100%, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 100% 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl)), radial-gradient(circle at 0 0, transparent calc(var(--rl) - 1px), var(--hairline) calc(var(--rl) - 1px) var(--rl), transparent var(--rl));
     background-size: calc(100% - 4px) calc(100% - 2 * var(--rl)), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px), calc(100% - 2 * var(--rl)) calc(var(--rl) - 2px),
@@ -17675,21 +17733,21 @@ h6:hover > .pkc-heading-anchor,
 }
 @media screen and (forced-colors: none) {
   /* 枠を持たない包み(コードの枠・SQL の包み)── 線を縁から 2px 内へ。角丸は中の `pre` / 欄と同じ */
-  :is(.pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]), [data-pkc-field='sql-input-wrap']:not(:focus-within))[data-pkc-glow-near][data-pkc-glow-near][data-pkc-glow-near]::before {
+  :is(.pkc-md-block[data-pkc-md-block-kind='code']:not([data-pkc-render-lang], [data-pkc-log-card]), [data-pkc-field='sql-input-wrap']:not(:focus-within)):is([data-pkc-glow-near][data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out][data-pkc-glow-out])::before {
     margin: 1px;
     border-radius: var(--radius);
     z-index: 2;
   }
   /* 横スクロールの表: 器自身の背景(内側の地 → 光の放射)。枠(透明な 2px)だけが光る */
-  .pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card])[data-pkc-glow-near] {
+  .pkc-md-block.pkc-md-block.pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card]):is([data-pkc-glow-near], [data-pkc-glow-out]) {
     --neon-r: 160px;
-    background-image: linear-gradient(var(--surface), var(--surface)), radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), var(--neon-core), var(--neon) 34%, color-mix(in srgb, var(--neon) 70%, transparent) 66%, transparent);
+    background-image: linear-gradient(var(--surface), var(--surface)), radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), color-mix(in srgb, var(--neon-core) calc(100% * var(--neon-alpha)), transparent), color-mix(in srgb, var(--neon) calc(100% * var(--neon-alpha)), transparent) 34%, color-mix(in srgb, var(--neon) calc(70% * var(--neon-alpha)), transparent) 66%, transparent);
     background-clip: padding-box, border-box;
     background-origin: border-box;
     background-repeat: no-repeat;
   }
   /* 引用: 左の線(3px)だけ */
-  blockquote:not(.pkc-section-callout)[data-pkc-glow-near][data-pkc-glow-near]::before {
+  blockquote:not(.pkc-section-callout):is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out])::before {
     content: '';
     position: absolute;
     inset-block: 0;
@@ -17700,28 +17758,48 @@ h6:hover > .pkc-heading-anchor,
   }
   /* 追記欄の枠(`append-form`。地は `--surface`)── 入力欄と同じ背景 3 層。⚠ 疑似要素にしない(位置づけの `position: relative` が、境目の取っ手の押し所(#701)を覆う)。
    * フォーカスが枠の中にある間は出さない(`:focus-within` の全周の線が勝つ) */
-  [data-pkc-field='append-form'][data-pkc-glow-near][data-pkc-glow-near]:not(:focus-within) {
+  [data-pkc-field='append-form']:is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out]):not(:focus-within) {
     --neon-r: 160px;
     border-color: transparent;
     background-image:
       linear-gradient(var(--surface), var(--surface)),
-      radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), var(--neon-core), var(--neon) 34%, color-mix(in srgb, var(--neon) 70%, transparent) 66%, transparent),
+      radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), color-mix(in srgb, var(--neon-core) calc(100% * var(--neon-alpha)), transparent), color-mix(in srgb, var(--neon) calc(100% * var(--neon-alpha)), transparent) 34%, color-mix(in srgb, var(--neon) calc(70% * var(--neon-alpha)), transparent) 66%, transparent),
       linear-gradient(var(--border), var(--border));
     background-clip: padding-box, border-box, border-box;
     background-origin: border-box;
     background-repeat: no-repeat;
   }
   /* 入力欄: 1px の枠そのものが光る(薄く)。⚠ フォーカスのある欄は出さない(フォーカスの全周の線が勝つ) */
-  :is(input, textarea, select)[data-pkc-glow-near][data-pkc-glow-near]:not(:focus-visible) {
+  :is(input, textarea, select):is([data-pkc-glow-near][data-pkc-glow-near], [data-pkc-glow-out][data-pkc-glow-out]):not(:focus-visible) {
     --neon-r: 96px;
     border-color: transparent;
     background-image:
       linear-gradient(var(--surface), var(--surface)),
-      radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), color-mix(in srgb, var(--neon-core) 85%, transparent), color-mix(in srgb, var(--neon) 60%, transparent) 40%, transparent),
+      radial-gradient(circle var(--neon-r) at var(--gx, -500px) var(--gy, -500px), color-mix(in srgb, var(--neon-core) calc(85% * var(--neon-alpha)), transparent), color-mix(in srgb, var(--neon) calc(60% * var(--neon-alpha)), transparent) 40%, transparent),
       linear-gradient(var(--border), var(--border));
     background-clip: padding-box, border-box, border-box;
     background-origin: border-box;
     background-repeat: no-repeat;
+  }
+  /* 🔴 点き方・消え方(#2096)── 背景で描く物(ログの器・横スクロールの表・追記欄・入力欄)は、光の色の濃さ(`--neon-alpha`)を補間する。
+   * 時間は疑似要素の `opacity` と同じ(45ms 溜め → 220ms / 余韻 260ms。`ease-out`)。⚠ フォーカスのある物は外す(フォーカスの線が遅れずに勝つ) */
+  :is(
+      [data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card],
+      .pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card]),
+      [data-pkc-field='append-form']:not(:focus-within),
+      :is(input, textarea, select):not(:focus-visible)
+    )[data-pkc-glow-near] {
+    --neon-alpha: 1;
+    transition: --neon-alpha 220ms ease-out 45ms;
+  }
+  :is(
+      [data-pkc-log-days] > :is(.pkc-md-block, .pkc-details)[data-pkc-log-card],
+      .pkc-md-block:is([data-pkc-md-block-kind='table'], [data-pkc-render-lang='csv']):not([data-pkc-log-card]),
+      [data-pkc-field='append-form']:not(:focus-within),
+      :is(input, textarea, select):not(:focus-visible)
+    )[data-pkc-glow-out] {
+    --neon-alpha: 0;
+    transition: --neon-alpha 260ms ease-out 0ms;
   }
 }
 
