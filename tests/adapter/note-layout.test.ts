@@ -18,6 +18,7 @@ import {
   NOTE_FONT_ATTR,
   PAPER_FALLBACK_ATTR,
   paintPrintLayoutButton,
+  buildPrintLayoutSegment,
   PRINT_LAYOUT_ATTR,
   PRINT_LAYOUT_STORAGE_KEY,
   refreshNoteLayout,
@@ -211,6 +212,20 @@ describe('印刷レイアウト表示', () => {
     applyPrintLayout(document.documentElement, true);
     expect(b.getAttribute('aria-pressed')).toBe('true');
     expect(b.textContent).toBe('印刷レイアウト');
+  });
+
+  it('🔴 2 択(通常 | 印刷レイアウト)は自分の側が選ばれているときだけ押された状態になり、字は変わらない', () => {
+    const g = buildPrintLayoutSegment(document, 'x-seg');
+    document.body.append(g);
+    const [off, on] = [...g.querySelectorAll('button')] as HTMLButtonElement[];
+    expect([off!.textContent, on!.textContent]).toEqual(['通常', '印刷レイアウト']);
+    expect(g.getAttribute('role')).toBe('group');
+    applyPrintLayout(document.documentElement, false);
+    expect([off!.getAttribute('aria-pressed'), on!.getAttribute('aria-pressed')]).toEqual(['true', 'false']);
+    applyPrintLayout(document.documentElement, true);
+    expect([off!.getAttribute('aria-pressed'), on!.getAttribute('aria-pressed')]).toEqual(['false', 'true']);
+    expect([off!.textContent, on!.textContent]).toEqual(['通常', '印刷レイアウト']);
+    applyPrintLayout(document.documentElement, false);
   });
 });
 

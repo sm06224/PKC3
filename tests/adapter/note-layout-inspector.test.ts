@@ -60,11 +60,15 @@ describe('情報ペインの「ページ設定」', () => {
       const sel = select(root, f);
       expect(sel, f).not.toBeNull();
       expect(sel.options[0]!.value).toBe('');
-      expect(sel.options[0]!.textContent).toBe('アプリの設定に従う');
+      expect(sel.options[0]!.textContent).toBe('アプリ設定');
       expect(sel.getAttribute('data-pkc-action')).toBe('set-note-layout');
     }
     expect([...select(root, 'pageFormat').options].slice(1).map((o) => o.value)).toEqual(PAGE_FORMATS.map((f) => f.id));
-    expect(dd(root).querySelector('[data-pkc-action="toggle-print-layout"]')?.getAttribute('aria-pressed')).toBe('false');
+    // 2 択: 通常が押された状態、印刷レイアウトは押されていない
+    const seg = dd(root).querySelector('[data-pkc-field="inspector-print-layout"]')!;
+    expect(seg.querySelector('[data-pkc-print-layout-choice="off"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(seg.querySelector('[data-pkc-print-layout-choice="on"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect([...seg.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['通常', '印刷レイアウト']);
   });
 
   it('🔴 前書きの値を選択欄に映す。指定があるときだけ「すべてアプリの設定に戻す」を押せる', () => {

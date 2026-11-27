@@ -191,7 +191,7 @@ describe('「ページ設定 ▾」', () => {
     expect(p!.contains(document.activeElement), '焦点がポップオーバーへ入らない').toBe(true);
     for (const f of ['pageFormat', 'pageMargin', 'pageColumns', 'pageFont']) {
       expect(panelSelect(root, f).disabled, `${f} が編集中に押せない`).toBe(false);
-      expect(panelSelect(root, f).options[0]!.textContent).toBe('アプリの設定に従う');
+      expect(panelSelect(root, f).options[0]!.textContent).toBe('アプリ設定');
     }
     expect(p!.querySelector('[data-pkc-action="toggle-print-layout"]')).not.toBeNull();
     expect(p!.querySelector('[data-pkc-action="reset-note-layout"]')).not.toBeNull();
@@ -222,13 +222,20 @@ describe('「ページ設定 ▾」', () => {
   it('🔴 印刷レイアウト表示の切替は情報ペインのボタンとそろう(知らせの口が無くても切り替わる)', () => {
     const { root, bar } = editing();
     bar.querySelector<HTMLElement>('button[data-pkc-action="open-page-setup"]')!.click();
-    const toggle = panel(root)!.querySelector<HTMLElement>('[data-pkc-action="toggle-print-layout"]')!;
-    toggle.click();
+    const choice = (c: 'on' | 'off'): HTMLElement =>
+      panel(root)!.querySelector<HTMLElement>(`[data-pkc-action="toggle-print-layout"][data-pkc-print-layout-choice="${c}"]`)!;
+    // 対照群: 通常が押された状態
+    expect(choice('off').getAttribute('aria-pressed')).toBe('true');
+    choice('on').click();
     expect(document.documentElement.getAttribute('data-pkc-print-layout')).toBe('1');
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
-    const pane = root.querySelector<HTMLElement>('[data-pkc-field="inspector-print-layout"]')!;
-    expect(pane.getAttribute('aria-pressed')).toBe('true');
-    toggle.click();
+    expect(choice('on').getAttribute('aria-pressed')).toBe('true');
+    expect(choice('off').getAttribute('aria-pressed')).toBe('false');
+    // 既に入のときに「印刷レイアウト」を押しても切れない(2 択は押した側へそろえる)
+    choice('on').click();
+    expect(document.documentElement.getAttribute('data-pkc-print-layout')).toBe('1');
+    const pane = root.querySelector<HTMLElement>('[data-pkc-field="inspector-print-layout"]');
+    if (pane !== null) expect(pane.querySelector('[data-pkc-print-layout-choice="on"]')!.getAttribute('aria-pressed')).toBe('true');
+    choice('off').click();
     expect(document.documentElement.hasAttribute('data-pkc-print-layout')).toBe(false);
   });
 

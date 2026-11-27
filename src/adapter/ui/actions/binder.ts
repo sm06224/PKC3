@@ -270,7 +270,7 @@ import { chooseColumnRule } from '@adapter/ui/render/column-rule';
 import { chooseTagBadge } from '@adapter/ui/render/tag-badge';
 import { currentTagColor } from '@adapter/ui/render/tag-color';
 import { chooseReadColumns, cycleReadColumns } from '@adapter/ui/render/read-columns';
-import { choosePrintLayout, refreshNoteLayout, togglePrintLayout } from '@adapter/ui/render/note-layout';
+import { choosePrintLayout, isPrintLayoutOn, refreshNoteLayout, togglePrintLayout } from '@adapter/ui/render/note-layout';
 import { CLEAR_NOTE_LAYOUT, noteLayoutPatchFor, printLayoutToggledText } from '@features/page-layout';
 import { appendModeOf } from '@adapter/ui/render/append-box';
 import { bodyBelowFrontmatter, extractVars, frontmatterLineCount } from '@features/markdown/frontmatter';
@@ -18029,11 +18029,20 @@ const ACTIONS: Record<string, ActionHandler> = {
    * 🔴 **印刷レイアウト表示を切り替える**(v4.0 Phase 1 / PR-03。情報ペインの「ページ設定」のボタン)。
    * ⚠ ショートカットキー・操作を探すと**同じ関数**(`togglePrintLayout`)── 切替の規則を 2 か所に置かない。
    */
-  'toggle-print-layout': (_dispatcher, _target, services) => {
+  'toggle-print-layout': (_dispatcher, target, services) => {
     /**
      * 🔴 **切り替えは知らせの有無に関係なく走らせる**(PR-04 で判明)。⚠ `showStatus?.(…(togglePrintLayout(…)))` と書くと、
      *   知らせの口が無いとき `?.` が**引数ごと評価を飛ばし**、切り替えそのものが起きなかった(`.claude/rules/src-invariants.md` §3 の `?.` の罠)。
      */
+    // 🔴 2 択ボタン(`通常` | `印刷レイアウト`)は押した側へそろえる(既にその側なら何も変えず知らせない)。選択の印の無い口は従来どおり切り替える
+    const choice = target instanceof HTMLElement ? target.getAttribute('data-pkc-print-layout-choice') : null;
+    if (choice === 'on' || choice === 'off') {
+      const want = choice === 'on';
+      if (isPrintLayoutOn(document.documentElement) === want) return;
+      choosePrintLayout(document.documentElement, want);
+      services.showStatus?.(printLayoutToggledText(want));
+      return;
+    }
     const on = togglePrintLayout(document.documentElement);
     services.showStatus?.(printLayoutToggledText(on));
   },

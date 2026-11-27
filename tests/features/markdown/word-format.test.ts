@@ -370,7 +370,7 @@ describe('🔴 構造を壊す書き換えは断る(本文は 1 字も変えず�
     expect(applyFormat(at(whole, 5), 'align-center').text).toBe(':::format{align=center}\n```\na\n```\n:::');
   });
 
-  it('🔴 本文の先頭の情報(--- の間)には、揃え・改ページを入れない', () => {
+  it('🔴 前書き(frontmatter)には、揃え・改ページを入れない', () => {
     const text = '---\npage_format: a4-landscape\n---\n本文';
     const inFm = at(text, 6);
     expect(refusalOf(applyFormat(inFm, 'align-center'))).toBe(IN_FRONTMATTER_REFUSAL);

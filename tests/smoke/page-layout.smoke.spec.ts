@@ -101,10 +101,15 @@ test('🔴 ノートごとのページ設定 → 他のノートへ漏れない 
   // ③ 戻って、印刷レイアウト表示を入れる
   await selectNote(page, target);
   await expect(page.locator(PANE)).toHaveAttribute('data-pkc-page-format', 'a4-landscape');
-  const toggle = page.locator(`${LAYOUT} [data-pkc-action="toggle-print-layout"]`);
+  const toggle = page.locator(`${LAYOUT} [data-pkc-print-layout-choice="on"]`);
+  const normal = page.locator(`${LAYOUT} [data-pkc-print-layout-choice="off"]`);
+  // 2 択(通常 | 印刷レイアウト): 対照群は「通常」が押された状態
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-  await clickReal(page, `${LAYOUT} [data-pkc-action="toggle-print-layout"]`);
+  await expect(normal).toHaveAttribute('aria-pressed', 'true');
+  await expect(normal).toHaveText('通常');
+  await clickReal(page, `${LAYOUT} [data-pkc-print-layout-choice="on"]`);
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(normal).toHaveAttribute('aria-pressed', 'false');
   await expect(toggle).toHaveText('印刷レイアウト');
   expect(await page.evaluate(() => document.documentElement.getAttribute('data-pkc-print-layout'))).toBe('1');
   const sheet = await page.evaluate((paneSel) => {
@@ -123,7 +128,10 @@ test('🔴 ノートごとのページ設定 → 他のノートへ漏れない 
       paperH: mm(210),
       bg: cs.backgroundColor,
       paneBg: getComputedStyle(pane).backgroundColor,
-      hrStyle: hr === null ? null : getComputedStyle(hr).borderTopStyle,
+      hrHeight: hr === null ? 0 : hr.getBoundingClientRect().height,
+      hrBg: hr === null ? null : getComputedStyle(hr).backgroundColor,
+      hrLeft: hr === null ? 0 : hr.getBoundingClientRect().left,
+      bodyLeft: body.getBoundingClientRect().left,
       hrLabel: hr === null ? null : getComputedStyle(hr, '::after').content,
       paneOverflow: pane.scrollWidth - pane.clientWidth,
       docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -136,8 +144,11 @@ test('🔴 ノートごとのページ設定 → 他のノートへ漏れない 
   expect(sheet.width).toBeLessThanOrEqual(Math.min(sheet.paneWidth, sheet.paperW) + 1);
   expect(sheet.width, '紙のシートが細すぎる').toBeGreaterThan(Math.min(sheet.paneWidth, sheet.paperW) - 40);
   expect(sheet.bg, '紙の地と作業台の地が同じ').not.toBe(sheet.paneBg);
-  expect(sheet.hrStyle).toBe('dashed');
-  expect(sheet.hrLabel).toBe('"改ページ"');
+  // 紙が 2 枚に分かれて見える: 継ぎ目に高さがあり、紙の左端より外へ作業台の地色が広がり、「N ページ目」の字(CSS カウンタ。computed は式のまま返る)が出る
+  expect(sheet.hrHeight, '継ぎ目に高さが無い').toBeGreaterThan(8);
+  expect(sheet.hrBg, '継ぎ目が作業台の地色でない').toBe(sheet.paneBg);
+  expect(sheet.hrLeft, '継ぎ目が紙の左端より外へ出ていない').toBeLessThan(sheet.bodyLeft);
+  expect(sheet.hrLabel).toBe('counter(pkc-sheet) " ページ目"');
   expect(sheet.paneOverflow, '器が横に溢れている').toBeLessThanOrEqual(0);
   expect(sheet.docOverflow, 'ページが横に溢れている').toBeLessThanOrEqual(0);
   expect(sheet.columnsOn, '印刷レイアウト表示で横送りの段組みが掛かっている').toBe(false);
@@ -155,7 +166,7 @@ test('🔴 ノートごとのページ設定 → 他のノートへ漏れない 
   }, PANE);
   await page.emulateMedia({ media: 'screen' });
   expect(printed.shadow).toBe('none');
-  expect(printed.label === 'none' || printed.label === 'normal', `印刷に「改ページ」の字が出る(${printed.label})`).toBe(true);
+  expect(printed.label === 'none' || printed.label === 'normal', `印刷に「ページ目」の字が出る(${printed.label})`).toBe(true);
   expect(printed.breakAfter).toBe('page');
 
   // ④ すべてアプリの設定に戻す → 前書きから 4 つのキーが消える。印刷レイアウト表示も切れる(双方向)
@@ -163,13 +174,34 @@ test('🔴 ノートごとのページ設定 → 他のノートへ漏れない 
   await expect(page.locator(PANE)).not.toHaveAttribute('data-pkc-page-format', /.*/);
   await expect.poll(() => paperCss(page)).toBe('@page{size:A4 portrait}');
   await expect(page.locator(`${LAYOUT} [data-pkc-action="reset-note-layout"]`)).toBeDisabled();
-  await clickReal(page, `${LAYOUT} [data-pkc-action="toggle-print-layout"]`);
+  await clickReal(page, `${LAYOUT} [data-pkc-print-layout-choice="off"]`);
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(normal).toHaveAttribute('aria-pressed', 'true');
   expect(await page.evaluate(() => document.documentElement.hasAttribute('data-pkc-print-layout'))).toBe(false);
   const after = await sourceOf(page);
   expect(after).not.toMatch(/page_(format|margin|columns|font)/);
   expect(after.startsWith('---'), '空の前書きの囲みが残っている').toBe(false);
   expect(after).toBe('最初の段落。\n\n+++\n\n改ページの後の段落。\n');
+
+  // ⑤ 読む面のバーにも 2 択がある(1100px 以下で出て 1 クリックで切り替わる。広い幅では隠れる)
+  const BARSEG = '[data-pkc-region="detail"] [data-pkc-field="bar-print-layout"]';
+  await expect(page.locator(BARSEG), '1600px ではバーの 2 択は隠れる').toBeHidden();
+  for (const width of [1100, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const seg = page.locator(BARSEG);
+    await expect(seg, `${width}px でバーの 2 択が見えない`).toBeVisible();
+    const on = seg.locator('[data-pkc-print-layout-choice="on"]');
+    const off = seg.locator('[data-pkc-print-layout-choice="off"]');
+    await expect(off).toHaveAttribute('aria-pressed', 'true');
+    await clickReal(page, on);
+    await expect(on).toHaveAttribute('aria-pressed', 'true');
+    expect(await page.evaluate(() => document.documentElement.getAttribute('data-pkc-print-layout'))).toBe('1');
+    const box = (await on.boundingBox())!;
+    expect(box.x + box.width, `${width}px で 2 択が画面の右へはみ出している`).toBeLessThanOrEqual(width + 1);
+    await clickReal(page, off);
+    await expect(off).toHaveAttribute('aria-pressed', 'true');
+    expect(await page.evaluate(() => document.documentElement.hasAttribute('data-pkc-print-layout'))).toBe(false);
+  }
 
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
@@ -222,7 +254,7 @@ test('🔴 ノートの段組み(page_columns)は通常表示では段組みに�
   }, PANE);
   expect(cols.count).toBe('2');
   expect(cols.overflow, '紙の中で横に溢れている').toBeLessThanOrEqual(1);
-  await expect(page.locator(`${LAYOUT} [data-pkc-action="toggle-print-layout"]`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator(`${LAYOUT} [data-pkc-print-layout-choice="on"]`)).toHaveAttribute('aria-pressed', 'true');
 
   // 設定の画面で切る → 横送りの段組みに戻る(双方向)
   await clickReal(page, '[data-pkc-action="set-view"][data-pkc-view="settings"]');
