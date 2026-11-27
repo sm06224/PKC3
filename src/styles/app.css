@@ -17650,3 +17650,64 @@ h6:hover > .pkc-heading-anchor,
   max-width: none;
   object-fit: contain;
 }
+
+/* ── リッチ編集の改善(コードブロックの帯・上下の移動・ホバーの縁)────────────────
+ * 🔴 色は意味にだけ使う: 帯は地を塗らず、字は `--muted`。ホバーの縁は `outline` で描く(配置を動かさない)。 */
+[data-pkc-code-bar] {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-bottom: var(--s1, 4px);
+  font-size: var(--fs-xs, 11px);
+  color: var(--muted);
+}
+[data-pkc-code-bar] label {
+  flex: 0 0 auto;
+}
+[data-pkc-code-bar] select,
+[data-pkc-code-bar] button {
+  font: inherit;
+  font-size: var(--btn-fs-sm);
+  line-height: 1.6;
+  padding: 0 var(--s1, 4px);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--hairline, var(--border));
+  border-radius: var(--radius-sm, 3px);
+}
+[data-pkc-code-bar] button {
+  margin-left: auto;
+  cursor: pointer;
+}
+[data-pkc-code-bar] select:hover,
+[data-pkc-code-bar] button:hover,
+[data-pkc-code-bar] button:focus-visible {
+  color: var(--fg);
+}
+/* 上へ / 下へ移動(「原文」「+」と同じゴースト型) */
+[data-pkc-rich-move] {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--fs-xs, 11px);
+  line-height: 1.6;
+  padding: 0 var(--s1, 4px);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 3px);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.7;
+}
+[data-pkc-rich-move]:hover,
+[data-pkc-rich-move]:focus-visible {
+  opacity: 1;
+  color: var(--fg);
+  border-color: var(--hairline, var(--border));
+}
+/* リッチ編集のとき、開ける(押せる)ブロックにポインタを載せると薄く縁が出る。⚠ outline なので配置は動かない */
+[data-pkc-region='editor-live'][data-pkc-rich-mode] > :not([data-pkc-row-slot]):hover {
+  outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm, 3px);
+}

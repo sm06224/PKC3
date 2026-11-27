@@ -265,6 +265,36 @@ test('🔴 リッチ編集: 段落を記号なしで編集し、帯の書式が�
   expect(inserted.startsWith('# 題\n\n## 章\n\n```\nx = 1\n```\n\n**書き換える**')).toBe(true);
   expect(inserted.split('\n').slice(-7)).toEqual(DOC.split('\n').slice(4));
 
+  // 🔴 「+」は**実マウスの click**で開き、開いたまま残る(外を押したら閉じる処理が同じ click で閉じていた)。項目を押すと挿入される
+  await clickReal(page, live.locator('p', { hasText: '書き換える' }));
+  await expect(live.locator(CELL)).toBeVisible();
+  await clickReal(page, `${LIVE} [data-pkc-rich-insert-open]`);
+  const plusMenu = page.locator('[data-pkc-rich-insert-menu="button"]');
+  await expect(plusMenu, '「+」を押しても一覧が開かない').toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(plusMenu, '「+」で開いた一覧がすぐ閉じた').toBeVisible();
+  await clickReal(page, plusMenu.locator('button[role="menuitem"]', { hasText: '見出し 2' }));
+  await expect(live.locator(`h2${CELL}`), '「+」の項目から見出し 2 が挿入されない').toBeVisible();
+  await expect(plusMenu).toHaveCount(0);
+  // ↑ / ↓ ボタン(上へ移動 / 下へ移動)── 実マウスでブロックが動く
+  const moveUp = live.locator('[data-pkc-rich-move="up"]');
+  await expect(moveUp).toHaveAttribute('aria-label', '上へ移動');
+  await expect(live.locator('[data-pkc-rich-move="down"]')).toHaveAttribute('aria-label', '下へ移動');
+  await page.keyboard.press('Escape');
+  await expect(live.locator(CELL)).toHaveCount(0);
+
+  // 🔴 コードブロックの再編集: 「リッチ」ボタンは出ず、言語の選択と「下に段落を追加」が出る
+  await clickReal(page, live.locator('pre').first());
+  await expect(live.locator(ROW)).toBeVisible();
+  await expect(live.locator('[data-pkc-rich-back]'), 'コードブロックに「リッチ」ボタンが出ている').toHaveCount(0);
+  await expect(live.locator('[data-pkc-code-bar]')).toBeVisible();
+  await live.locator('[data-pkc-code-lang]').selectOption('ts');
+  await expect(live.locator(ROW), '言語を選んでも欄が閉じない・開きの行が変わる').toHaveValue('```ts\nx = 1\n```');
+  await clickReal(page, `${LIVE} [data-pkc-code-add-below]`);
+  await expect(live.locator(CELL), '下に空の段落が開かない').toBeVisible();
+  await expect(live.locator(CELL)).toHaveText('');
+  await page.keyboard.press('Escape');
+
   expect(errors, `console エラー: ${errors.join(' / ')}`).toEqual([]);
 });
 
