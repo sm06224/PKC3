@@ -36,6 +36,8 @@ import {
   widgetDownloadResponse,
   widgetDownloadRiskNotice,
   widgetFileResponse,
+  fillWidgetIoLabel,
+  WIDGET_IO_LABELS as L,
   WIDGET_DL_REQ_MSG_TYPE,
   WIDGET_FILE_REQ_MSG_TYPE,
   WIDGET_IO_PRESS_GUARD_MS,
@@ -207,7 +209,7 @@ function makeBar(frame: HTMLIFrameElement, kind: 'download' | 'file', text: stri
   bar.setAttribute('data-pkc-field', WIDGET_IO_BAR_FIELD);
   bar.setAttribute('data-pkc-io-kind', kind);
   bar.setAttribute('role', 'region');
-  bar.setAttribute('aria-label', kind === 'download' ? 'ウィジェットからの保存の確認' : 'ウィジェットからの読み込みの確認');
+  bar.setAttribute('aria-label', kind === 'download' ? L.downloadAria : L.fileAria);
   const t = doc.createElement('span');
   t.className = 'pkc-widget-io-text';
   t.setAttribute('data-pkc-field', 'widget-io-text');
@@ -278,7 +280,7 @@ function showDownloadBar(frame: HTMLIFrameElement, req: WidgetDownloadRequest, c
   const { bar, actions } = makeBar(
     frame,
     'download',
-    `ウィジェットがファイルの保存を求めています:「${req.name}」(${humanBytes(req.bytes.byteLength)})`,
+    fillWidgetIoLabel(L.downloadText, { name: req.name, size: humanBytes(req.bytes.byteLength) }),
   );
   const p: Pending = { frame, reqId: req.reqId, kind: 'download', bar, bytes: req.bytes, settled: false, busy: false, timer: null };
   register(p);
@@ -291,7 +293,7 @@ function showDownloadBar(frame: HTMLIFrameElement, req: WidgetDownloadRequest, c
     r.textContent = risk;
     bar.insertBefore(r, actions);
   }
-  const save = button(doc, 'PC へ保存', 'widget-io-save', null, 'このファイルをパソコンにダウンロードします');
+  const save = button(doc, L.save, 'widget-io-save', null, L.saveTitle);
   onPress(save, () => {
     const bytes = p.bytes;
     if (p.settled || bytes === null) return;
@@ -302,7 +304,7 @@ function showDownloadBar(frame: HTMLIFrameElement, req: WidgetDownloadRequest, c
   // 🔑 「このノートへ添付」は読む面のノートが分かり、添付の口が在るときだけ出す(書けない理由があれば押せずに理由を添える)
   const lid = ctx.lidOf(frame);
   if (lid !== null && ctx.host?.attachFile !== undefined) {
-    const attach = button(doc, 'このノートへ添付', 'widget-io-attach', 'ghost');
+    const attach = button(doc, L.attach, 'widget-io-attach', 'ghost');
     const blocked = attachBlockReason(ctx, lid);
     attach.disabled = blocked !== null;
     attach.title = blocked === null ? 'このファイルを、いま開いているノートに添付します' : `いまは添付できません。${blocked}`;
@@ -332,7 +334,7 @@ function showDownloadBar(frame: HTMLIFrameElement, req: WidgetDownloadRequest, c
     });
     actions.append(attach);
   }
-  const cancel = button(doc, 'やめる', 'widget-io-cancel', 'ghost');
+  const cancel = button(doc, L.cancel, 'widget-io-cancel', 'ghost');
   onPress(cancel, () => settle(p, widgetDownloadResponse(req.reqId, false, 'cancel')));
   actions.append(cancel);
   armAfterGuard(p, actions);
@@ -362,13 +364,13 @@ function showFileBar(frame: HTMLIFrameElement, req: WidgetFileRequest, ctx: Widg
   const { bar, actions } = makeBar(
     frame,
     'file',
-    `ウィジェットがファイルの読み込みを求めています${label === null ? '' : `(対象: ${label})`}`,
+    L.fileText + (label === null ? '' : fillWidgetIoLabel(L.fileTarget, { label })),
   );
   const p: Pending = { frame, reqId: req.reqId, kind: 'file', bar, bytes: null, settled: false, busy: false, timer: null };
   register(p);
   const fail = (reason: string): void => settle(p, widgetFileResponse(req.reqId, false, [], reason));
 
-  const pc = button(doc, 'PC から選ぶ', 'widget-io-pick-pc', null, 'パソコンのファイルを選んで、ウィジェットに渡します');
+  const pc = button(doc, L.pickPc, 'widget-io-pick-pc', null, L.pickPcTitle);
   onPress(pc, () => {
     if (p.settled) return;
     // 🔴 user が押した処理の中で開く(自動では開かない)
@@ -414,7 +416,7 @@ function showFileBar(frame: HTMLIFrameElement, req: WidgetFileRequest, ctx: Widg
   if (lid !== null && h !== null && h.listNoteAssets !== undefined && h.readAssetBlob !== undefined) {
     const list = h.listNoteAssets.bind(h);
     const read = h.readAssetBlob.bind(h);
-    const note = button(doc, 'このノートの添付から選ぶ', 'widget-io-pick-note', 'ghost', 'このノートに添付してあるファイルから選んで、ウィジェットに渡します');
+    const note = button(doc, L.pickNote, 'widget-io-pick-note', 'ghost', L.pickNoteTitle);
     note.hidden = true;
     void list(lid)
       .catch(() => [] as readonly WidgetNoteAsset[])
@@ -430,7 +432,7 @@ function showFileBar(frame: HTMLIFrameElement, req: WidgetFileRequest, ctx: Widg
       });
     actions.append(note);
   }
-  const cancel = button(doc, 'やめる', 'widget-io-cancel', 'ghost');
+  const cancel = button(doc, L.cancel, 'widget-io-cancel', 'ghost');
   onPress(cancel, () => fail(WIDGET_IO_REASONS.cancelled));
   actions.append(cancel);
   armAfterGuard(p, actions);
@@ -450,7 +452,7 @@ function showNotePicker(
   box.className = 'pkc-widget-io-list';
   box.setAttribute('data-pkc-field', 'widget-io-note-list');
   box.setAttribute('role', 'group');
-  box.setAttribute('aria-label', 'このノートの添付');
+  box.setAttribute('aria-label', L.noteListAria);
   const inputs: { input: HTMLInputElement; asset: WidgetNoteAsset }[] = [];
   pickerSeq += 1;
   const group = `pkc-widget-io-${String(pickerSeq)}`;
@@ -463,12 +465,12 @@ function showNotePicker(
     input.setAttribute('data-pkc-field', 'widget-io-note-asset');
     input.setAttribute('data-pkc-asset-key', a.key);
     const name = doc.createElement('span');
-    name.textContent = `${a.name}(${humanBytes(a.size)})`;
+    name.textContent = fillWidgetIoLabel(L.noteItem, { name: a.name, size: humanBytes(a.size) });
     row.append(input, name);
     box.append(row);
     inputs.push({ input, asset: a });
   }
-  const give = button(doc, '選んだ添付を渡す', 'widget-io-note-give', null);
+  const give = button(doc, L.give, 'widget-io-note-give', null);
   give.disabled = true;
   box.addEventListener('change', () => {
     give.disabled = !inputs.some((x) => x.input.checked);

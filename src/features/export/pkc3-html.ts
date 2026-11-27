@@ -64,6 +64,9 @@ import { DEFAULT_READ_COLUMNS } from '../read-columns';
 import type { ArchiveSource } from './pkc3-archive';
 import { insertPlacedNoteTitles } from './placed-note-title';
 import { MINUS_LIKE, PLAIN_DECIMAL } from '../markdown/table-sort-key';
+import { WIDGET_FRAME_ATTR } from '../markdown/html-sandbox';
+import { extractWidgetNoteContext } from '../markdown/widget-context';
+import { buildPortableWidgetBridgeScript, portableWidgetBridgeCss } from './portable-widget-bridge';
 
 export const HTML_FORMAT = 'pkc3-portable';
 export const HTML_VERSION = 1;
@@ -86,6 +89,11 @@ const NOTE_ID_KEY = 'lid';
  */
 const NOTE_CARD_ATTR = 'data-pkc-card-target';
 const NOTE_CARD_IN_HTML = /<span\b[^>]*\bdata-pkc-card-target="entry:([^"#]+)/g;
+/**
+ * 🔴 **描いた本文にウィジェットの箱が在るか**(#2097 / #2098)── 在るノートにだけ「同じノートのデータ」(`ctx`)を焼く。
+ * ⚠ 見るのは**本物のタグ**(`<iframe … data-pkc-widget-frame`)だけ ── 本文のコードに書いた字は `&lt;` になるので当たらない。
+ */
+const WIDGET_FRAME_IN_HTML = new RegExp(`<iframe\\b[^>]*\\s${WIDGET_FRAME_ATTR}=`);
 
 
 /**
@@ -446,6 +454,10 @@ ${proseAlignCss(proseAlign)}
      computed-value time で無効になり、**先行する規則へ fall back しない**ので
      「いま効いているものまで消える」= 何もしないより悪くなる(実測)。
    ⚠ **値を静的に解決しない** ── light で潰すと暗い環境で白箱に白文字になる。 */
+/* 🔴 ウィジェットの確認バー(#2097)。⚠ 紙には出さない(規則の中に @media print がある)。
+   ⚠ 焼いた本文の規則より**前**に置く(後ろに規則を足すと、そこだけ app.css に勝つ ── 下の検査が止める)。
+   確認バーは .pkc-md-rendered の規則ではないので、焼いた側とは重ならない。 */
+${portableWidgetBridgeCss()}
 ${BODY_CSS}
 /* ── 焼いた分より**後**に置くもの ── 書き出し側の DOM が アプリと違う 2 点だけ。
    ⚠ ここは「app.css を上書きしたい」ではなく「**この面には対応する要素が無い**」
@@ -558,35 +570,38 @@ try{
   // (CLAUDE.md「同じ判定が 2 か所に生えたら規則を 1 つに寄せる」)。
   // @param sink 作った object URL を積む配列(寿命の管理は呼び手が持つ)
   // @param idp  見出し id の接頭辞(全体印刷では entry ごとに変えて衝突を避ける)
-  /* 🔴 **html fence の高さを受ける**(2026-08-06。user 報告 2-5)。
-     ⚠ ここは VIEWER のテンプレート文字列の中 ── **バックティックを書けない**
-     (書いた瞬間にテンプレートが閉じて、意味不明な構文エラーになる。実際に踏んだ)。
-     囲いの中の文書は自分の高さを親へ postMessage するが、**配る HTML には
-     受ける側が居なかった** ── iframe は height:0 のまま = **完全に不可視**だった。
-     ⚠ 上限は画面側と同じ 5000px(暴走する中身に画面を占領させない)。
-     ⚠ 受け口は 1 回だけ張る(entry ごとに張ると listener が積む)。 */
-  window.addEventListener('message',function(ev){
-    var d=ev.data;
-    if(!d||typeof d!=='object')return;
-    if(d.type!=='pkc-html-render-resize')return;
-    if(typeof d.id!=='string'||typeof d.height!=='number')return;
-    /* 🔴 **宛先は「名乗った id」ではなく「実際の送り主」で決める**(2026-08-06)。
-       id は中身の hash なので**文書側から計算できる** ── 直す前は箱 A が箱 B の
-       id を名乗って **B の高さを 0px にできた**(= B の中身を隠せた)。
-       ⚠ ev.origin は条件に足さない ── sandbox の箱では "null" になり、
-       安全な箱と攻撃者の箱が同じ値になる(画面側 html-sandbox.ts の同名の節)。
-       ⚠ 名乗りと実体が食い違ったら**何もしない**(別の箱へ当てない)。 */
-    var fs=document.querySelectorAll('iframe[data-pkc-html-render-id]');
-    var f=null;
-    for(var fi=0;fi<fs.length;fi++){
-      if(fs[fi].contentWindow===ev.source){
-        f=fs[fi].getAttribute('data-pkc-html-render-id')===d.id?fs[fi]:null;
-        break;
-      }
-    }
-    if(!f)return;
-    f.style.height=Math.max(0,Math.min(5000,d.height))+'px';
-  });
+  /* 🔴 **埋め込み HTML / ウィジェットの箱の親**(#2097 / #2098)── 高さ追従・テーマ連動・同じノートの参照・
+     確認つきのファイルの入出力を 1 本の受け口で持つ(portable-widget-bridge.ts。本体と同じ契約)。
+     ⚠ ここは VIEWER のテンプレート文字列の中 ── バックティックを書かない。
+     ⚠ 受け口は 1 回だけ張る(entry ごとに張ると listener が積む)。
+     🔴 箱が読めるのは**その箱のノートだけ**(器の data-pkc-ei から引く。他のノートの添付・表へ越境しない)。 */
+  var sizes={};
+  d.assets.forEach(function(a){sizes[a.key]=typeof a.size==='number'?a.size:0});
+  function noteOfFrame(f){
+    var b=f&&f.closest?f.closest('[data-pkc-ei]'):null;
+    if(!b)return null;
+    return d.entries[Number(b.getAttribute('data-pkc-ei'))]||null;
+  }
+  function frameAssets(f){
+    var e=noteOfFrame(f),out=[],sn={};
+    if(!e)return out;
+    (e.attach||[]).concat(e.refs||[]).forEach(function(k){
+      if(sn[k]||!has(k))return;sn[k]=1;
+      out.push({key:k,name:names[k]||k,mime:mimes[k]||'application/octet-stream',size:sizes[k]||0});
+    });
+    return out;
+  }
+  function assetBytes(k){
+    if(!has(k))return Promise.resolve(null);
+    var b=atob(d.assetData[k]),u=new Uint8Array(b.length);
+    for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);
+    return Promise.resolve(u.buffer);
+  }
+  var bridge=${buildPortableWidgetBridgeScript({
+    hooks:
+      '{getFrameContext:function(f){var e=noteOfFrame(f);return e&&e.ctx?e.ctx:null},' +
+      'getFrameAssets:frameAssets,readAssetBytes:assetBytes}',
+  })};
   /* 🔴 表の並べ替え(#1163 依頼 223)。⚠ 規則は table-sort-key.ts の正規表現を埋めた物 ── 書き写さない */
   var SORT_NUM=new RegExp(${JSON.stringify(PLAIN_DECIMAL.source)});
   var SORT_MINUS=new RegExp(${JSON.stringify(MINUS_LIKE.source)},'g');
@@ -637,6 +652,8 @@ try{
     // 「単体で開いて読める」と案内している当のファイルが一番読みにくかった。
     // ⚠ 描くのは**アプリと同じ関数**(閲覧側に parser を持たせない ── 二重実装は必ずずれる)
     var seen={};
+    /* 🔴 どのノートの器か(#2097)── ウィジェットの親が、箱から「その箱のノート」だけを引くための印 */
+    box.setAttribute('data-pkc-ei',String(d.entries.indexOf(e)));
     box.innerHTML=e.html||'';
     /* 🔴 文書属性(書字方向など)を当てる ── 画面の applyDocumentGlobals と同じ
        見え方にする(user 報告 2-7)。書き出し側が attrs に載せてある。
@@ -916,6 +933,8 @@ try{
   });
 
   function show(e,btn,hid){
+    // 🔴 旧ノートの確認バーと預かった bytes を、本文を差し替える前に手放す(#2097)
+    bridge.reset();
     release();
     dropAll();  // 紙用に組んだ全件は、読みに戻った時点で捨てる(ObjectURL も)
     document.getElementById('pkc-title').textContent=e.title;
@@ -1263,6 +1282,11 @@ export async function writePortableHtml(
         ...(Object.keys(attrs).length > 0 ? { attrs } : {}),
         ...(refs.length > 0 ? { attach: refs.map((x) => x.key) } : {}),
         ...(inBody.length > 0 ? { refs: inBody } : {}),
+        /**
+         * 🔴 **ウィジェットが読む「同じノートのデータ」**(#2097)── 箱の在るノートにだけ焼く(無いノートには 1 バイトも足さない)。
+         * ⚠ 正本は本体と同じ `extractWidgetNoteContext`(前書きの値と表だけ。他のノートを混ぜない)。全文(前書き込み)から組む。
+         */
+        ...(WIDGET_FRAME_IN_HTML.test(html) ? { ctx: extractWidgetNoteContext(r.body) } : {}),
       };
       chunk += entryCount === 0 ? j(e) : `,${j(e)}`;
       entryCount++;

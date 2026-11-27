@@ -65,9 +65,12 @@ export class AssetGrants {
    *   (アプリが書き換えられる置き場なので、読み側で必ず絞る)。
    */
   list(): readonly string[] {
-    const raw = this.storage?.getItem(this.storageKey);
-    if (raw === null || raw === undefined) return [];
+    // 🔴 **読みも try の中**(#2097 / #2098)── `file://` などで置き場が在っても `getItem` が `SecurityError` を投げる
+    //   環境では、ここが外へ投げて権限の確認(`WidgetPermissionGate.get`)ごと落ちていた。読めなければ「憶えていない」。
+    if (this.storage === null) return [];
     try {
+      const raw = this.storage.getItem(this.storageKey);
+      if (raw === null || raw === undefined) return [];
       const parsed: unknown = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
       return parsed.filter((k): k is string => typeof k === 'string' && isContentKey(k));

@@ -1944,8 +1944,9 @@ describe('可搬 HTML — 画面と同じ材料で描く', () => {
     // 受け口が在る(無いと囲いの中の文書は高さ 0 のまま)
     expect(text, '高さを受ける口が無い').toContain('pkc-html-render-resize');
     expect(text).toContain('data-pkc-html-render-id');
-    // ⚠ 上限も画面側と同じ(暴走する中身に画面を占領させない)
-    expect(text).toContain('Math.min(5000');
+    // ⚠ 上限も画面側と同じ(暴走する中身に画面を占領させない)── 正本の定数を焼いた親(portable-widget-bridge.ts)が使う
+    expect(text).toContain('Math.min(C.maxH');
+    expect(text).toContain('"maxH":5000');
   });
 });
 
@@ -2241,5 +2242,154 @@ describe('囲みが指す添付を焼き込む(#444 段②)', () => {
     // 🔑 画像の bytes は**配るために**読まれる ── ここで見たいのは
     //    「**字にするための読み**が囲みの鍵だけか」なので、その 1 回目を見る
     expect(reads[0], '囲みが指していない添付を先に字にしている').toBe('ast-t');
+  });
+});
+
+/**
+ * 🔴 **閲覧用 HTML の中のウィジェット**(#2097 / #2098)── 本体と同じ契約の親(`portable-widget-bridge.ts`)を同梱し、
+ * 箱の在るノートにだけ「同じノートのデータ」(`ctx`)を焼く。
+ */
+describe('可搬 HTML — ウィジェット(テーマ・同じノートの参照・確認つきのファイルの入出力)', () => {
+  const TABLE = '---\nowner: 佐藤\n---\n\n| 品目 | 数 |\n| --- | --- |\n| りんご | 3 |\n';
+  const WIDGET = '```html\n<p>tool</p>\n```\n';
+  const ASSET_TOOL = '<p>tool</p><script>window.__n=localStorage.getItem("n")</script>';
+
+  async function entriesOf(blob: Blob): Promise<Array<Record<string, unknown>>> {
+    const html = await blob.text();
+    const json = /<script id="pkc-data" type="application\/json">([\s\S]*?)<\/script>/.exec(html)![1]!;
+    return (JSON.parse(json) as { entries: Array<Record<string, unknown>> }).entries;
+  }
+
+  it('🔴 箱の在るノートにだけ ctx を焼く(無いノートには 1 バイトも足さない)', async () => {
+    const out = await writePortableHtml(
+      source({
+        entries: [
+          { lid: 'w1', title: '道具', body: `${TABLE}\n${WIDGET}` },
+          { lid: 'p1', title: '素の表', body: TABLE },
+          // ⚠ 本文のコードに属性名を書いただけのノートは対象外(本物のタグだけを見る)
+          { lid: 'c1', title: 'コード', body: '```text\n<iframe data-pkc-widget-frame="">\n```\n' },
+        ],
+      }),
+      NOW,
+    );
+    const es = await entriesOf(out.blob);
+    const w1 = es.find((e) => e.lid === 'w1')!;
+    expect(w1.ctx).toEqual({
+      frontmatter: { owner: '佐藤' },
+      tables: [{ index: 0, kind: 'markdown', headers: ['品目', '数'], rows: [['りんご', '3']] }],
+    });
+    expect(es.find((e) => e.lid === 'p1')!).not.toHaveProperty('ctx');
+    expect(es.find((e) => e.lid === 'c1')!).not.toHaveProperty('ctx');
+  });
+
+  it('🔴 添付の HTML ウィジェット(asset: + id=)と状態ブロックが焼かれ、箱は allow-scripts のみ・CSP は外へ出られない', async () => {
+    const body = '```html asset:kt id="tool"\n```\n\n```json widget-state="tool"\n{"n":"7"}\n```\n';
+    const out = await writePortableHtml(
+      source({
+        entries: [{ lid: 'w1', body }],
+        assets: [{ key: 'kt', mime: 'text/html', bytes: enc.encode(ASSET_TOOL) }],
+      }),
+      NOW,
+    );
+    const [e] = await entriesOf(out.blob);
+    const box = document.createElement('div');
+    box.innerHTML = e!.html as string;
+    const f = box.querySelector('iframe')!;
+    expect(f, '添付の HTML が箱にならなかった').not.toBeNull();
+    expect(f.hasAttribute('data-pkc-widget-frame')).toBe(true);
+    expect(f.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(f.srcdoc).toContain('<p>tool</p>');
+    // 🔑 状態ブロックが箱の初期値になる(続きから動く)
+    expect(f.srcdoc).toContain('"n":"7"');
+    // 🔴 配った先では追加権限を黙って引き継がない(厳格な CSP のまま)
+    expect(f.srcdoc).toContain("connect-src 'none'");
+    expect(f.srcdoc).toMatch(/script-src 'unsafe-inline'(?! https?:)/);
+    expect(e!.ctx).toBeDefined();
+  });
+
+  it('生成した閲覧用 HTML の script は壊れていない(data は 1 個・viewer は構文エラー無し・本文の </script> で閉じない)', async () => {
+    const out = await writePortableHtml(
+      source({ entries: [{ lid: 'w1', title: '</script><!--<script>', body: `${WIDGET}\n\`ok\` </script>\n` }] }),
+      NOW,
+    );
+    const html = await out.blob.text();
+    expect(html.match(/<\/script>/g)).toHaveLength(2);
+    const viewer = /<script>\n([\s\S]*?)\n<\/script>$/.exec(html)![1]!;
+    expect(() => new Function(viewer)).not.toThrow();
+    expect(viewer).toContain('__pkcWidgetBridgeSweep');
+  });
+
+  it('🔴 閲覧側で動く ── その箱のノートの表だけを返し、確認バーは別のノートへ移ると消える', async () => {
+    const out = await writePortableHtml(
+      source({
+        entries: [
+          { lid: 'w1', title: '道具', body: `${TABLE}\n${WIDGET}\n![](asset:k1)\n` },
+          { lid: 'w2', title: '別', body: `---\nowner: 他人\n---\n\n${WIDGET}\n![](asset:k2)\n` },
+        ],
+        assets: [
+          { key: 'k1', mime: 'text/csv', bytes: enc.encode('a,b\n') },
+          { key: 'k2', mime: 'text/csv', bytes: enc.encode('secret\n') },
+        ],
+      }),
+      NOW,
+    );
+    const html = await out.blob.text();
+    const dataJson = /<script id="pkc-data" type="application\/json">([\s\S]*?)<\/script>/.exec(html)![1]!;
+    const viewer = /<script>\n([\s\S]*?)\n<\/script>$/.exec(html)![1]!;
+    const markup = /<\/script>([\s\S]*?)<script>/.exec(html.slice(html.indexOf('</script>')))![1]!;
+    const msgs: EventListener[] = [];
+    const realAdd = window.addEventListener.bind(window);
+    vi.spyOn(window, 'addEventListener').mockImplementation(((t: string, fn: EventListener, o?: unknown) => {
+      if (t === 'message') msgs.push(fn);
+      realAdd(t, fn, o as AddEventListenerOptions);
+    }) as typeof window.addEventListener);
+    try {
+      document.body.innerHTML = markup;
+      const data = document.createElement('script');
+      data.id = 'pkc-data';
+      data.type = 'application/json';
+      data.textContent = dataJson;
+      document.body.appendChild(data);
+      new Function(viewer)();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(msgs, '受け口は 1 本だけ').toHaveLength(1);
+      const f = document.querySelector<HTMLIFrameElement>('#pkc-body iframe[data-pkc-widget-frame]')!;
+      expect(f).not.toBeNull();
+      const posted: Array<Record<string, unknown>> = [];
+      const w = { postMessage: (m: Record<string, unknown>) => posted.push(m) };
+      Object.defineProperty(f, 'contentWindow', { value: w, configurable: true });
+      const id = f.getAttribute('data-pkc-html-render-id')!;
+      const send = (d: unknown, src: unknown = w): void => {
+        const ev = new MessageEvent('message', { data: d });
+        Object.defineProperty(ev, 'source', { value: src });
+        window.dispatchEvent(ev);
+      };
+      send({ type: 'pkc-widget-context-req', id, reqId: 1 });
+      expect(posted.at(-1)).toEqual({
+        type: 'pkc-widget-context-res',
+        reqId: 1,
+        context: { frontmatter: { owner: '佐藤' }, tables: [{ index: 0, kind: 'markdown', headers: ['品目', '数'], rows: [['りんご', '3']] }] },
+      });
+      // 「このノートの添付から選ぶ」── 同じノートの添付(k1)だけ
+      send({ type: 'pkc-widget-file-req', id, reqId: 2, accept: '.csv,text/csv' });
+      const bar = document.querySelector('[data-pkc-field="widget-io-bar"]')!;
+      expect(bar).not.toBeNull();
+      expect(document.querySelector('[data-pkc-field="widget-io-attach"]')).toBeNull();
+      // 🔴 出した直後は押せない(すり替え対策 ── 本体と同じ 400ms)
+      expect(document.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-pick-note"]')!.disabled).toBe(true);
+      await new Promise((r) => setTimeout(r, 450));
+      document.querySelector<HTMLButtonElement>('[data-pkc-field="widget-io-pick-note"]')!.click();
+      const keys = [...document.querySelectorAll('[data-pkc-field="widget-io-note-asset"]')].map((x) => x.getAttribute('data-pkc-asset-key'));
+      expect(keys).toEqual(['k1']);
+      // 別のノートへ移る → 確認バーは消え、箱へ「閉じられました」を返す
+      const btns = [...document.querySelectorAll<HTMLButtonElement>('#pkc-list button')];
+      btns.find((b) => b.textContent === '別')!.click();
+      expect(document.querySelector('[data-pkc-field="widget-io-bar"]')).toBeNull();
+      expect(posted.at(-1)).toMatchObject({ type: 'pkc-widget-file-res', reqId: 2, ok: false });
+      expect(document.getElementById('pkc-body')!.getAttribute('data-pkc-ei')).toBe('1');
+    } finally {
+      for (const fn of msgs) window.removeEventListener('message', fn);
+      (window as unknown as { __pkcWidgetBridgeSweep?: unknown }).__pkcWidgetBridgeSweep = undefined;
+    }
   });
 });
