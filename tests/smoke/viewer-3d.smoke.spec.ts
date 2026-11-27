@@ -76,6 +76,24 @@ const SCENE = [
   '',
 ].join('\n');
 
+/** 対照群の小さな静的グラフ(今までどおり PNG の <img>)。 */
+const STATIC_CHART = '```chart\n{"type":"bar","labels":["1月","2月"],"datasets":[{"label":"売上","data":[10,20]}]}\n```\n';
+
+/** 1 万点の対話グラフ(v4.1 PR-7)。 */
+const LIVE_CHART = [
+  '```chart live',
+  JSON.stringify({
+    type: 'line',
+    title: 'センサー',
+    height: 300,
+    datasets: [{ label: '温度', data: Array.from({ length: 10_000 }, (_, i) => Math.round(Math.sin(i / 300) * 1000 + (i % 97)) / 10) }],
+  }),
+  '```',
+].join('\n');
+
+/** 50 × 50 のヒートマップ。 */
+const HEATMAP = ['```chart', JSON.stringify({ type: 'heatmap', matrix: Array.from({ length: 50 }, (_, r) => Array.from({ length: 50 }, (_, c) => r * c)) }), '```'].join('\n');
+
 /**
  * 🔴 起動は 1 つ(`smoke-budget`)── 3D の無いノート → 外部 URL を書いた図 → 3D の図、の順に 1 本の道中で見る。
  * ⚠ 順番が要である: 前の 2 つでは Three.js を 1 度も取りに行っていないことを、**取りに行く前**に確かめる。
@@ -88,10 +106,14 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   const appOrigin = new URL(page.url()).origin;
 
   // ① 3D を含まないノート ── Three.js もローダーも取りに行かない
-  await writeNote(page, 'ふつうのメモ', '# メモ\n\n- 箇条書き\n\n```json\n{"objects":[]}\n```\n');
+  await writeNote(page, 'ふつうのメモ', '# メモ\n\n- 箇条書き\n\n```json\n{"objects":[]}\n```\n\n' + STATIC_CHART);
   await page.waitForTimeout(1000);
   expect(reqs.map((r) => r.url()).filter((u) => THREE_CHUNK.test(u)), '3D の無いノートで Three.js / ローダーを読んだ').toEqual([]);
   expect(await page.locator('[data-pkc-3d-viewer]').count()).toBe(0);
+  // 🔑 対照群(v4.1 PR-7): 小さな静的 ```chart は今までどおり PNG の <img>(GPU の器を作らず、Three.js も読まない)
+  await expect(page.locator('[data-pkc-field="detail-body"] [data-pkc-chart-src] img')).toHaveCount(1, { timeout: 15_000 });
+  expect(await page.locator('[data-pkc-field="detail-body"] [data-pkc-gpu-chart-src]').count()).toBe(0);
+  expect(reqs.map((r) => r.url()).filter((u) => THREE_CHUNK.test(u)), '静的なグラフで Three.js を読んだ').toEqual([]);
 
   // ② 外部 URL を書いた図 ── 要求を 1 件も出さずに理由を出す(Three.js も読まない)
   await writeNote(
@@ -222,6 +244,76 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   await expect.poll(async () => (await longStage.boundingBox())!.height).toBeGreaterThan(h0 + 150);
   await clickReal(page, longViewer.locator('[data-pkc-3d-op="expand"]'));
   await expect.poll(async () => Math.round((await longStage.boundingBox())!.height)).toBe(Math.round(h0));
+
+  // ⑥ 🔴 大量データの対話グラフ(v4.1 PR-7、#2095)── 1 万点の ```chart live とヒートマップを、長いノートの途中に置く。
+  //    描画面が空でない・拡大 / 縮小 / 全体表示 / PNG で保存が動く・ただのホイールはノートを送る・Ctrl + ホイールは図だけ
+  await writeNote(page, '大量データ', `${filler}\n\n${LIVE_CHART}\n\n${HEATMAP}\n\n${filler}\n`);
+  const gHosts = page.locator('[data-pkc-field="detail-body"] [data-pkc-gpu-chart-src]');
+  await expect(gHosts).toHaveCount(2);
+  const gHost = gHosts.first();
+  await gHost.scrollIntoViewIfNeeded();
+  await expect(gHost).toHaveAttribute('data-pkc-gpu-chart-state', 'ready', { timeout: 15_000 });
+  const chart = gHost.locator('[data-pkc-gpu-chart]');
+  await expect(chart).toHaveAttribute('data-pkc-gpu-chart-backend', /^(webgpu|webgl2|2d)$/, { timeout: 30_000 });
+  await expect(chart.locator('[data-pkc-gpu-chart-info="points"]')).toHaveText(/^10,000 点/);
+  const gStage = chart.locator('[data-pkc-gpu-chart-stage]');
+  await expect(gStage).toHaveCSS('height', '300px');
+  await page.waitForTimeout(500);
+  const gb = (await gStage.boundingBox())!;
+  const gClip = { x: gb.x + 2, y: gb.y + 2, width: gb.width - 4, height: gb.height - 4 };
+  const gPx = await pixels(page, gClip);
+  // 空でない: 地の色と違う画素が十分ある(線・軸・目盛り)
+  const bg = gPx.slice(0, 3);
+  const nonBg = gPx.reduce((n, _v, i) => (i % 3 === 0 && Math.abs(gPx[i]! - bg[0]!) + Math.abs(gPx[i + 1]! - bg[1]!) + Math.abs(gPx[i + 2]! - bg[2]!) >= 24 ? n + 1 : n), 0);
+  expect(nonBg, '対話グラフの描画面が空').toBeGreaterThan(400);
+  // 拡大で絵が変わり、全体表示で戻る
+  await clickReal(page, chart.locator('[data-pkc-gpu-chart-op="zoom-in"]'));
+  await expect.poll(async () => changed(gPx, await pixels(page, gClip)), { message: '拡大で絵が変わらない' }).toBeGreaterThan(200);
+  await clickReal(page, chart.locator('[data-pkc-gpu-chart-op="zoom-out"]'));
+  await clickReal(page, chart.locator('[data-pkc-gpu-chart-op="reset"]'));
+  // ドラッグで移動(拡大してから)
+  await clickReal(page, chart.locator('[data-pkc-gpu-chart-op="zoom-in"]'));
+  await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(gb.x + gb.width / 2 + 120, gb.y + gb.height / 2, { steps: 4 });
+  await page.mouse.up();
+  await clickReal(page, chart.locator('[data-pkc-gpu-chart-op="reset"]'));
+  // PNG で保存
+  const dl = page.waitForEvent('download');
+  await clickReal(page, chart.locator('[data-pkc-gpu-chart-op="save"]'));
+  // ⚠ ファイル名は観測点にしない ── この headless Chromium は非 ASCII の `<a download>` 名を丸ごと捨てる
+  //   (mermaid.smoke と同じ)。名前の規則は unit(`tests/adapter/gpu-chart.test.ts`)が見る。中身が PNG であることを見る
+  const png: Buffer[] = [];
+  for await (const c of await (await dl).createReadStream()) png.push(c as Buffer);
+  const pngBytes = Buffer.concat(png);
+  expect(pngBytes.subarray(1, 4).toString('latin1'), 'PNG ではない').toBe('PNG');
+  expect(pngBytes.length, 'PNG が小さすぎる(空の絵)').toBeGreaterThan(5_000);
+  // ホバーで値が出る
+  await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2);
+  await page.mouse.move(gb.x + gb.width / 2 + 3, gb.y + gb.height / 2);
+  // スクロールの取り合い 0: ただのホイールはノートを送る
+  const gt0 = await top();
+  await page.mouse.wheel(0, 300);
+  await expect.poll(top, { message: '対話グラフの上のホイールでノートが送られない' }).toBeGreaterThan(gt0);
+  // Ctrl + ホイールは図だけ(ノートは送られない)
+  await gStage.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  const gb2 = (await gStage.boundingBox())!;
+  const gClip2 = { x: gb2.x + 2, y: gb2.y + 2, width: gb2.width - 4, height: gb2.height - 4 };
+  await page.mouse.move(gb2.x + gb2.width / 2, gb2.y + gb2.height / 2);
+  const gBefore = await pixels(page, gClip2);
+  const gt1 = await top();
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -500);
+  await page.keyboard.up('Control');
+  await expect.poll(async () => changed(gBefore, await pixels(page, gClip2)), { message: 'Ctrl + ホイールでグラフが変わらない' }).toBeGreaterThan(200);
+  expect(Math.abs((await top()) - gt1), 'Ctrl + ホイールでノートが送られた').toBeLessThan(2);
+  // ヒートマップも描ける
+  const hHost = gHosts.nth(1);
+  await hHost.scrollIntoViewIfNeeded();
+  await expect(hHost).toHaveAttribute('data-pkc-gpu-chart-state', 'ready', { timeout: 15_000 });
+  await expect(hHost.locator('[data-pkc-gpu-chart]')).toHaveAttribute('data-pkc-gpu-chart-backend', /^(webgpu|webgl2|2d)$/, { timeout: 30_000 });
+  await expect(hHost.locator('[data-pkc-gpu-chart-info="points"]')).toHaveText('2,500 点');
 
   expect(errors, errors.join('\n')).toEqual([]);
 });

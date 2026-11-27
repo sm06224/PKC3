@@ -542,6 +542,7 @@ import { MERMAID_KIND, hydrateAllNow } from '@adapter/ui/render/mermaid-hydrate'
 import { preparePrintBody } from '@adapter/ui/render/print-prepare';
 import { PRINT_PALETTE, PRINT_THEME } from '@adapter/ui/render/diagram-print';
 import { CHART_KIND } from '@adapter/ui/render/chart-raster';
+import { PAPER_CHART_THEME, readChartTheme, renderGpuChartPng } from '@adapter/ui/render/gpu-chart';
 import { PLOTLY_KIND } from '@adapter/ui/render/plotly-raster';
 import { askSqlEmbed, connectEmbedViewStale, setEmbedViewRunner, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
 import { createEmbedViewRunner } from '@adapter/ui/render/embed-view-runner';
@@ -3550,7 +3551,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
          */
         // 🔴 `paper` = Word・PowerPoint 用(#1163 依頼 233)── 画面の配色によらず紙の(明るい)配色で描く。閲覧用 HTML は渡さない
         renderFigureVector: async (kind, source, paper) =>
-          kind === 'chart' || kind === 'plotly' ? null : renderToSvg(source, paper === true ? PRINT_PALETTE : readPalette()),
+          kind === 'chart' || kind === 'gpu-chart' || kind === 'plotly' ? null : renderToSvg(source, paper === true ? PRINT_PALETTE : readPalette()),
         // 🔴 本文のアイコン(`:home:`)を PNG に焼く(#853。Word に画像で埋める)
         renderIcon: (name) => rasterizeIcon(name),
         renderFigure: async (kind, source, paper) => {
@@ -3558,6 +3559,14 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           if (kind === 'svg') {
             const drawn = await rasterize(source, 720, 2);
             return { blob: drawn.png, cssWidth: drawn.cssWidth };
+          }
+          // 🔑 GPU で直接描くグラフ(v4.1 PR-7)── 画面の 2D の簡易表示と同じ座標・同じ描き方で PNG に焼く(Three.js は読まない)
+          if (kind === 'gpu-chart') {
+            return renderGpuChartPng(source, {
+              width: 720,
+              dpr: 2,
+              theme: paper === true ? PAPER_CHART_THEME : readChartTheme(document.documentElement),
+            });
           }
           const diagram = kind === 'chart' ? CHART_KIND : kind === 'plotly' ? PLOTLY_KIND : MERMAID_KIND;
           const raster = await diagram.render({

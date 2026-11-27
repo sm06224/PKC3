@@ -27,9 +27,15 @@ export interface FigureBakers {
   readonly raster: (kind: string, source: string) => Promise<{ blob: Blob; cssWidth: number } | null>;
 }
 
+/**
+ * 焼ける器の種類。🔑 `gpu-chart` は GPU で直接描くグラフ(v4.1 PR-7)── 書き出しでは同じ座標の 2D canvas で PNG に焼く
+ * (本文に直に書いたデータだけ。添付の CSV を参照する物は焼けず、器のまま = 原文の字で残り、件数の注意に数えられる)。
+ */
+type FigureKind = 'mermaid' | 'chart' | 'plotly' | 'gpu-chart';
+
 /** `markdown-render.ts` が出す器(mermaid / chart)。属性の値は HTML の escape 済み。 */
 const FIGURE_RE =
-  /<div class="pkc-(mermaid|chart|plotly)-placeholder" data-pkc-(?:mermaid|chart|plotly)-src="([^"]*)" data-pkc-md-block-kind="(?:mermaid|chart|plotly)"><pre[^>]*><code[^>]*>[\s\S]*?<\/code><\/pre><\/div>/g;
+  /<div class="pkc-(mermaid|chart|plotly|gpu-chart)-placeholder" data-pkc-(?:mermaid|chart|plotly|gpu-chart)-src="([^"]*)" data-pkc-md-block-kind="(?:mermaid|chart|plotly)"><pre[^>]*><code[^>]*>[\s\S]*?<\/code><\/pre><\/div>/g;
 
 function unescapeAttr(s: string): string {
   return s
@@ -53,7 +59,7 @@ function utf8Base64(text: string): string {
 }
 
 /** 描いた絵の `<img>`(原文は `alt` に入れない ── 長いので `data-pkc-figure-src` へ)。 */
-async function bakeOne(kind: 'mermaid' | 'chart' | 'plotly', source: string, bakers: FigureBakers): Promise<string | null> {
+async function bakeOne(kind: FigureKind, source: string, bakers: FigureBakers): Promise<string | null> {
   if (kind === 'mermaid') {
     const svg = await bakers.vector('mermaid', source).catch(() => null);
     if (svg !== null && svg.trim() !== '') {
@@ -65,7 +71,7 @@ async function bakeOne(kind: 'mermaid' | 'chart' | 'plotly', source: string, bak
   if (drawn === null) return null;
   const bytes = new Uint8Array(await drawn.blob.arrayBuffer());
   if (bytes.length === 0) return null;
-  const alt = kind === 'chart' || kind === 'plotly' ? 'グラフ' : '図';
+  const alt = kind === 'mermaid' ? '図' : 'グラフ';
   return `<img alt="${alt}" src="data:image/png;base64,${toBase64(bytes)}">`;
 }
 
@@ -82,7 +88,7 @@ export async function bakeFigures(
   const hits = [...html.matchAll(FIGURE_RE)];
   if (hits.length === 0) return html;
   for (const m of hits) {
-    const kind = m[1] as 'mermaid' | 'chart' | 'plotly';
+    const kind = m[1] as FigureKind;
     const source = unescapeAttr(m[2] ?? '');
     const key = `${kind}\n${source}`;
     if (cache.has(key)) continue;
@@ -91,6 +97,6 @@ export async function bakeFigures(
   return html.replace(FIGURE_RE, (whole, kind: string, escaped: string) => {
     const img = cache.get(`${kind}\n${unescapeAttr(escaped)}`);
     if (img === undefined || img === null) return whole;
-    return `<div class="pkc-${kind}-placeholder" data-pkc-figure-src="${escaped}" data-pkc-md-block-kind="${kind}" data-pkc-figure-baked="${kind}">${img}</div>`;
+    return `<div class="pkc-${kind}-placeholder" data-pkc-figure-src="${escaped}" data-pkc-md-block-kind="${kind === 'gpu-chart' ? 'chart' : kind}" data-pkc-figure-baked="${kind}">${img}</div>`;
   });
 }
