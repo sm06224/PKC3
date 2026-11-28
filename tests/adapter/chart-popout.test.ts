@@ -363,7 +363,12 @@ describe('🔴 連動(追従 ON / 固定中)', () => {
   it('🔴 別ウィンドウの前へ / 次へ → 親の本文がその見出しへ動く(双方向)・固定中でも押した時点を見せる', () => {
     const { scope, chart, heads } = note(BOUND_BODY);
     const scrolled: Element[] = [];
-    for (const h of heads) (h as HTMLElement).scrollIntoView = (() => scrolled.push(h)) as never;
+    const behaviors: unknown[] = [];
+    for (const h of heads)
+      (h as HTMLElement).scrollIntoView = ((o?: ScrollIntoViewOptions) => {
+        scrolled.push(h);
+        behaviors.push(o?.behavior);
+      }) as never;
     popoutBtn(chart).click();
     const p = popouts[0]!;
     const prev = q<HTMLButtonElement>(p, '[data-pkc-field="chart-popout-prev"]');
@@ -382,6 +387,8 @@ describe('🔴 連動(追従 ON / 固定中)', () => {
     // 連動の表示を押すと本文をその場所へ
     q<HTMLButtonElement>(p, '[data-pkc-field="chart-popout-bind"]').click();
     expect(scrolled).toEqual([heads[1], heads[2], heads[2]]);
+    // 🔑 別ウィンドウから動かすときは即時(裏の窓の滑らかなスクロールは間引かれて途中で止まりうる)
+    expect(behaviors).toEqual(['instant', 'instant', 'instant']);
     scope.dispose();
   });
 });

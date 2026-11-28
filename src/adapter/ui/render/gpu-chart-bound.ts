@@ -60,7 +60,7 @@ export interface ChartBindingHandle {
   framesMeta(): readonly { key: string; label: string }[];
   /** 番号の時点(別ウィンドウの「前へ / 次へ」への返事に使う)。 */
   frameAt(i: number): BoundChartFrame | null;
-  /** 本文をその時点の場所へ動かす(別ウィンドウからの `jump` ── 双方向)。 */
+  /** 本文をその時点の場所へ動かす(別ウィンドウからの `jump` ── 双方向。⚠ 即時に動かす)。 */
   jump(i: number): void;
   /**
    * 閲覧位置・データの変化を聞く(親の追従 ON / 固定中に関係なく)。返り値で抜ける。
@@ -219,12 +219,12 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
   };
 
   /** 本文の該当場所へ(上端に固定していればそのぶん下げる)。 */
-  const jumpTo = (i: number): void => {
+  const jumpTo = (i: number, instant = false): void => {
     const f = data.frames[i];
     if (f === undefined) return;
     const offset = sticky ? stickyEl.getBoundingClientRect().height : 0;
     const target = bind.mode === 'log-day' ? { key: f.key } : { index: i };
-    scrollToChartContext(bodyRoot, bind, target, { scrollRoot, offset });
+    scrollToChartContext(bodyRoot, bind, target, { scrollRoot, offset, instant });
   };
 
   const step = (dir: 1 | -1): void => {
@@ -300,7 +300,7 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
     frameAt: (i) => freshData().frames[i] ?? null,
     jump: (i) => {
       refreshData();
-      jumpTo(i);
+      jumpTo(i, true);
     },
     onReading: (fn) => {
       readers.add(fn);

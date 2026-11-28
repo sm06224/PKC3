@@ -439,15 +439,19 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   await expect(pStage).toHaveAttribute('aria-label', /返品/);
   // 別ウィンドウだけ固定中 → メインを読み戻しても別ウィンドウは Q3 のまま
   const pFollow = pop.locator('[data-pkc-field="chart-popout-follow"]');
+  // ⚠ 窓を行き来するときは前に出す(裏の窓は描画・見張りが間引かれる ── 実の利用でも読む窓が前にある)
+  await pop.bringToFront();
   await clickReal(pop, pFollow);
   await expect(pFollow).toHaveText('固定中');
   await expect(pFollow).toHaveAttribute('aria-pressed', 'true');
+  await page.bringToFront();
   await toTop();
   await expect(bLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 5_000 });
   await pop.waitForTimeout(600);
   await expect(pLabel).toHaveText('連動: Q3 (3 / 3)');
   await expect(pStage).toHaveAttribute('aria-label', /返品/);
   // 解除 → メインで今読んでいる節(Q1)へ追従
+  await pop.bringToFront();
   await clickReal(pop, pFollow);
   await expect(pFollow).toHaveText('追従 ON');
   await expect(pLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 5_000 });
@@ -455,6 +459,7 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   // 別ウィンドウの「次へ」→ メインの本文が Q2 へ動く(双方向)
   await clickReal(pop, pop.locator('[data-pkc-field="chart-popout-next"]'));
   await expect(pLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
+  await page.bringToFront();
   await expect(bLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
   // 閉じる ── メインウィンドウにエラーが出ない
   await pop.close({ runBeforeUnload: true });

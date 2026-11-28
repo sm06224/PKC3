@@ -5,6 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CHART_CONTEXT_BAND,
   CHART_CONTEXT_ROOT_MARGIN,
   collectChartAnchors,
   liveChartContextWatches,
@@ -154,6 +155,48 @@ describe('現在地の 1 通', () => {
     off();
   });
 
+  it('🔴 一気に戻る(交差の変わらない目印は報告が来ない)── 本文の順で古い「上」を正し、先頭の節を現在地にする', () => {
+    const hs = headingBody();
+    const got: string[] = [];
+    const off = subscribeChartContext({ root, scrollRoot: null, lid: 'n', bind: { mode: 'heading', level: 2 } }, (s) => got.push(s.key));
+    ios[0]!.report(hs, ['above', 'above', 'in']); // Q3 を読んでいる
+    // 先頭へ一気に戻る: 報告が来るのは交差が変わった Q1(上 → 帯の中)と Q3(帯の中 → 下)だけ。Q2 は「上で交差せず」→「下で交差せず」
+    ios[0]!.report([hs[0]!, hs[2]!], ['in', 'below']);
+    expect(got).toEqual(['2', '0']);
+    // 逆向き(先頭から一気に末尾へ): 報告は Q1(帯の中 → 上)と Q3(下 → 帯の中)だけ ── Q2 は古い「下」のまま残さない
+    ios[0]!.report([hs[0]!, hs[2]!], ['above', 'in']);
+    expect(got).toEqual(['2', '0', '2']);
+    // 末尾の目印より下へ過ぎた(全部上)→ 最後の目印。Q3 だけが報告され、Q1・Q2 は「上」のまま
+    ios[0]!.report([hs[2]!], ['above']);
+    expect(got).toEqual(['2', '0', '2']);
+    off();
+  });
+
+  it('🔴 実ブラウザの形(帯の下端が分かる): 報告の無かった目印は今の位置で読む ── Q3 から先頭へ一気に戻ると Q1', () => {
+    const hs = headingBody();
+    const got: string[] = [];
+    const off = subscribeChartContext({ root, scrollRoot: null, lid: 'n', bind: { mode: 'heading', level: 2 } }, (s) => got.push(s.key));
+    const band = { top: 45, bottom: 315 };
+    const at = (el: Element, y: number): void => {
+      (el as HTMLElement).getBoundingClientRect = () => ({ top: y, bottom: y + 20 }) as DOMRect;
+    };
+    const entry = (el: Element, y: number) => ({
+      target: el,
+      isIntersecting: y + 20 > band.top && y < band.bottom,
+      boundingClientRect: { top: y, bottom: y + 20 },
+      rootBounds: band,
+    });
+    // Q3 を読んでいる(Q1・Q2 は上)
+    hs.forEach((h, i) => at(h, [-900, -400, 100][i]!));
+    ios[0]!.cb([entry(hs[0]!, -900), entry(hs[1]!, -400), entry(hs[2]!, 100)] as never);
+    expect(got).toEqual(['2']);
+    // 先頭へ一気に戻る: Q1 は「上」→「帯の下」(交差せず → 交差せず)で報告が来ない。来るのは Q3 だけ
+    hs.forEach((h, i) => at(h, [330, 900, 1500][i]!));
+    ios[0]!.cb([entry(hs[2]!, 1500)] as never);
+    expect(got).toEqual(['2', '0']);
+    off();
+  });
+
   it('どの目印もまだ下にある(本文の先頭)ときは、1 つ目を現在地にする', () => {
     const hs = headingBody();
     const got: string[] = [];
@@ -253,5 +296,24 @@ describe('目印へ動かす(双方向)', () => {
     expect(scrollToChartContext(root, { mode: 'heading', level: 2 }, { index: 2 }, { scrollRoot: scroller, offset: 200 })).toBe(true);
     expect(calls).toEqual([{ top: 650 - 50 + 100 - 200 - 8, behavior: 'auto' }]);
     expect(scrollToChartContext(root, { mode: 'heading', level: 2 }, { index: 9 }, { scrollRoot: scroller })).toBe(false);
+  });
+
+  it('🔴 固定したグラフが「読んでいる所」の帯より高くても、見出しは帯の中へ置く(現在地が 1 つ前の節に残らない)・別ウィンドウからは即時', () => {
+    const hs = headingBody();
+    const scroller = document.createElement('div');
+    const calls: ScrollToOptions[] = [];
+    scroller.scrollTo = ((o: ScrollToOptions) => calls.push(o)) as typeof scroller.scrollTo;
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 100 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 600 });
+    scroller.getBoundingClientRect = () => ({ top: 50 }) as DOMRect;
+    hs[2]!.getBoundingClientRect = () => ({ top: 650 }) as DOMRect;
+    vi.stubGlobal('matchMedia', () => ({ matches: false }));
+    // 帯の下端 = 600 × 0.5 = 300 → 見出しは上から 300 − 24 = 276 に着く(グラフの高さ 340 + 8 ではなく)
+    scrollToChartContext(root, { mode: 'heading', level: 2 }, { index: 2 }, { scrollRoot: scroller, offset: 340 });
+    expect(calls[0]).toEqual({ top: 650 - 50 + 100 - (600 * CHART_CONTEXT_BAND.bottom - 24), behavior: 'smooth' });
+    // 帯に収まる高さなら、今までどおりグラフのすぐ下
+    scrollToChartContext(root, { mode: 'heading', level: 2 }, { index: 2 }, { scrollRoot: scroller, offset: 120, instant: true });
+    expect(calls[1]).toEqual({ top: 650 - 50 + 100 - 128, behavior: 'instant' });
+    expect(CHART_CONTEXT_ROOT_MARGIN).toBe(`-${CHART_CONTEXT_BAND.top * 100}% 0px -${(1 - CHART_CONTEXT_BAND.bottom) * 100}% 0px`);
   });
 });
