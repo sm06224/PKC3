@@ -405,7 +405,12 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   //    メインウィンドウを読み進めると別ウィンドウも切り替わる / 別ウィンドウだけ固定中 → 解除で最新へ / 別ウィンドウの次へで本文が動く
   //    ⚠ 起動の予算を増やさない: 窓はクリック起点で開く(`.goto(` ではない)
   test.setTimeout(150_000);
-  await readTo(0);
+  // ⚠ 直前の「前へ」の滑らかなスクロールが終わってから、本文の先頭へ戻す(途中で割り込むと行き先が取り合いになる)
+  await page.waitForTimeout(900);
+  const toTop = async (): Promise<void> => {
+    await scroller.evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior }));
+  };
+  await toTop();
   await expect(bLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 5_000 });
   const nextPage = page.context().waitForEvent('page');
   await clickReal(page, bChart.locator('[data-pkc-field="gpu-chart-popout"]'));
@@ -437,7 +442,7 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   await clickReal(pop, pFollow);
   await expect(pFollow).toHaveText('固定中');
   await expect(pFollow).toHaveAttribute('aria-pressed', 'true');
-  await readTo(0);
+  await toTop();
   await expect(bLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 5_000 });
   await pop.waitForTimeout(600);
   await expect(pLabel).toHaveText('連動: Q3 (3 / 3)');
