@@ -272,8 +272,8 @@ export function dedupeColumnNames(names: readonly string[]): string[] {
   });
 }
 
-/** 囲みの中身(引用の前置きを剥がした字)。⚠ 剥がせない行は**この囲みの中身ではない**。 */
-function fenceText(lines: readonly string[], span: FenceSpan): string {
+/** 囲みの中身(引用の前置きを剥がした字)。⚠ 剥がせない行は**この囲みの中身ではない**。🔑 ノート内データフロー(`features/dataflow/`)も同じ 1 本で読む。 */
+export function fenceText(lines: readonly string[], span: FenceSpan): string {
   const last = span.open ? span.end : span.end - 1;
   const out: string[] = [];
   for (let i = span.start + 1; i <= last; i += 1) {
