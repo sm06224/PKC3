@@ -37,6 +37,8 @@ import { hydrateFigures } from '../../src/adapter/ui/render/detail';
 import { noteTyping, resetTyping } from '../../src/adapter/ui/render/typing-gate';
 import { CHART_CONTEXT_ROOT_MARGIN, liveChartContextWatches } from '../../src/adapter/ui/render/chart-context-watch';
 import { hydrateAllNow } from '../../src/adapter/ui/render/mermaid-hydrate';
+import { ChartPopoutHost, setChartPopoutHostForTest } from '../../src/adapter/platform/chart-popout';
+import { resetChartPopoutLinksForTest } from '../../src/adapter/ui/render/gpu-chart-popout-link';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -1080,5 +1082,71 @@ describe('🔴 印刷の前の静止画(flush)', () => {
     expect(media).not.toBe('');
     expect(media).toMatch(/\.pkc-gpu-chart:has\(> \.pkc-gpu-chart-print-img\) > \.pkc-gpu-chart-stage\s*\{\s*display:\s*none;/);
     expect(media).toMatch(/\.pkc-gpu-chart-print-img\s*\{\s*display:\s*block;/);
+  });
+});
+
+describe('🔴 「別ウィンドウで開く」(v4.1 PR-9)', () => {
+  beforeEach(() => {
+    ctxIos = [];
+    vi.stubGlobal('IntersectionObserver', CtxIo);
+    setGpuChartTestHooks({ createSurface: fakeFactory, reducedMotion: () => true });
+  });
+  afterEach(() => {
+    setChartPopoutHostForTest(null);
+    resetChartPopoutLinksForTest();
+  });
+
+  /** 開いた窓を控える管理役(名乗らない ── 配線だけを見る)。 */
+  function recordingHost(): { opened: Array<{ url: string; features: string }>; channels: number } {
+    const rec = { opened: [] as Array<{ url: string; features: string }>, channels: 0 };
+    setChartPopoutHostForTest(
+      new ChartPopoutHost({
+        makeChannel: () => {
+          rec.channels += 1;
+          return { postMessage() {}, close() {}, onmessage: null };
+        },
+        openWindow: (url, features) => rec.opened.push({ url, features }),
+        baseUrl: () => 'https://pkc.test/',
+        watchTheme: () => () => undefined,
+        watchPageHide: () => () => undefined,
+        setTimer: () => 0,
+        clearTimer: () => undefined,
+      }),
+    );
+    return rec;
+  }
+
+  it('非連動のグラフ(chart live)の操作バーに 1 つ ── 押すと noopener の別ウィンドウを #pkc?chart= で開く', () => {
+    const rec = recordingHost();
+    const v = mountGpuChart(host, spec('{"type":"line","datasets":[{"data":[1,2,3]}]}'));
+    expect(v.element.querySelector('[data-pkc-field="gpu-chart-popout"]')).toBeNull(); // 器を埋める経路だけが付ける
+    v.dispose();
+    const root = document.createElement('div');
+    root.innerHTML = renderMarkdown('```chart live\n{"type":"line","datasets":[{"data":[1,3,2]}]}\n```\n');
+    host.append(root);
+    const scope = hydrateGpuChart(root);
+    const bar = root.querySelector('[data-pkc-field="gpu-chart-bar"]')!;
+    const btns = bar.querySelectorAll<HTMLButtonElement>('[data-pkc-field="gpu-chart-popout"]');
+    expect(btns).toHaveLength(1);
+    expect(btns[0]!.textContent).toBe('別ウィンドウで開く');
+    expect(btns[0]!.getAttribute('data-pkc-variant')).toBe('ghost');
+    expect(rec.channels).toBe(0); // 押すまで放送路 0 本
+    btns[0]!.click();
+    expect(rec.opened).toHaveLength(1);
+    expect(rec.opened[0]!.features).toBe('popup,noopener,width=900,height=640');
+    expect(rec.opened[0]!.url).toMatch(/^https:\/\/pkc\.test\/#pkc\?chart=[A-Za-z0-9_-]{8,64}$/);
+    scope.dispose();
+    expect(root.querySelector('[data-pkc-field="gpu-chart-popout"]')).toBeNull();
+  });
+
+  it('連動グラフ(bind)にも付く ── 連動の行とは別に、上の操作バーに', () => {
+    const rec = recordingHost();
+    const { scope, chart } = boundNote();
+    const btn = chart.querySelector<HTMLButtonElement>('[data-pkc-field="gpu-chart-bar"] [data-pkc-field="gpu-chart-popout"]');
+    expect(btn).not.toBeNull();
+    expect(chart.querySelector('[data-pkc-field="gpu-chart-bind"] [data-pkc-field="gpu-chart-popout"]')).toBeNull();
+    btn!.click();
+    expect(rec.opened).toHaveLength(1);
+    scope.dispose();
   });
 });

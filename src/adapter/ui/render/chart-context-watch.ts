@@ -62,15 +62,21 @@ interface IoEntryLike {
   readonly target: Element;
   readonly isIntersecting: boolean;
   readonly boundingClientRect: { readonly top: number; readonly bottom: number };
-  readonly rootBounds: { readonly top: number } | null;
+  readonly rootBounds: { readonly top: number; readonly bottom?: number } | null;
 }
 type IoCtor = new (
   cb: (entries: readonly IoEntryLike[]) => void,
   opts?: { root?: Element | null; rootMargin?: string; threshold?: number | number[] },
 ) => { observe(el: Element): void; unobserve(el: Element): void; disconnect(): void };
 
-/** 「いま読んでいる所」の帯(画面の上 5%〜35%)。 */
-export const CHART_CONTEXT_ROOT_MARGIN = '-5% 0px -65% 0px';
+/**
+ * 「いま読んでいる所」の帯(画面の上 5%〜50%)。
+ * 🔴 下端は 50%(v4.1 PR-9 の実ブラウザ smoke で 35% から広げた)── 上端に固定したグラフ(描画域は最大 32vh + 操作の行)が
+ *   35% までを覆うので、前へ / 次へで見出しを「グラフのすぐ下」へ動かすと帯の外に出て、現在地が 1 つ前の節のまま
+ *   (= グラフが元の節へ戻る)になっていた。固定したグラフのすぐ下を「読んでいる所」に含める。
+ */
+export const CHART_CONTEXT_BAND = { top: 0.05, bottom: 0.5 } as const;
+export const CHART_CONTEXT_ROOT_MARGIN = '-5% 0px -50% 0px';
 
 class ContextWatch {
   readonly listeners = new Set<ChartContextListener>();
@@ -134,6 +140,7 @@ class ContextWatch {
   }
 
   private onEntries(entries: readonly IoEntryLike[]): void {
+    const fresh = new Map<Element, AnchorState>();
     for (const e of entries) {
       let s: AnchorState;
       if (e.isIntersecting) s = 'in';
@@ -142,13 +149,53 @@ class ContextWatch {
         s = e.boundingClientRect.bottom <= top ? 'above' : 'below';
       }
       this.states.set(e.target, s);
+      fresh.set(e.target, s);
     }
+    const band = entries.find((e) => e.rootBounds !== null && typeof e.rootBounds.bottom === 'number')?.rootBounds;
+    if (band !== undefined && band !== null) this.settleByPosition(fresh, band.top, band.bottom!);
+    else this.settleByOrder(fresh);
     let cur = -1;
     this.anchors.forEach((a, i) => {
       const s = this.states.get(a.el);
       if (s === 'in' || s === 'above') cur = i;
     });
     this.emit(Math.max(0, cur));
+  }
+
+  /**
+   * 🔴 **報告の無かった目印の状態を、本文の順で正す**(v4.1 PR-9 の実ブラウザ smoke で判明)。
+   * ⚠ `IntersectionObserver` は**交差が変わった目印しか**報告しない ── Q3 を読んでいる所から先頭へ一気に戻る
+   *   (Home キー・スクロールバーを掴んで動かす・「先頭へ」)と、Q2 は「帯の上で交差せず」→「帯の下で交差せず」と
+   *   交差の有無が変わらないので報告が来ず、古い `above` のまま残る ── 現在地が Q1 ではなく Q2 になっていた。
+   * 🔑 実ブラウザ: 報告の無かった目印だけ今の位置を読む(`settleByPosition`)。帯の下端が分からない環境では、
+   *   本文の順で推す ── 「帯の中 / 下」と報告された目印より後ろは上に在りえず、「帯の中 / 上」より前は下に在りえない。
+   *   ⚠ どちらも見張りを増やさない(スクロールの口を張らない ── 読むのは報告が届いたときだけ)。
+   */
+  private settleByPosition(fresh: ReadonlyMap<Element, AnchorState>, top: number, bottom: number): void {
+    // 🔑 報告の無かった目印だけ、今の位置で読む(`IntersectionObserver` の報告はレイアウトの後に届く ── 読み直しを強いない)
+    for (const a of this.anchors) {
+      if (fresh.has(a.el)) continue;
+      const r = a.el.getBoundingClientRect();
+      this.states.set(a.el, r.bottom <= top ? 'above' : r.top >= bottom ? 'below' : 'in');
+    }
+  }
+
+  private settleByOrder(fresh: ReadonlyMap<Element, AnchorState>): void {
+    if (fresh.size === 0) return;
+    let firstNotAbove = Infinity;
+    let lastNotBelow = -1;
+    this.anchors.forEach((a, i) => {
+      const s = fresh.get(a.el);
+      if (s === undefined) return;
+      if (s !== 'above' && i < firstNotAbove) firstNotAbove = i;
+      if (s !== 'below') lastNotBelow = i;
+    });
+    this.anchors.forEach((a, i) => {
+      if (fresh.has(a.el)) return;
+      const s = this.states.get(a.el);
+      if (s === 'above' && i > firstNotAbove) this.states.set(a.el, 'below');
+      else if (s === 'below' && i < lastNotBelow) this.states.set(a.el, 'above');
+    });
   }
 
   private emit(index: number): void {
@@ -253,16 +300,21 @@ export function scrollToChartContext(
   root: Element,
   bind: Pick<ChartBindSpec, 'mode' | 'level'>,
   target: { readonly index: number } | { readonly key: string },
-  opts: { readonly scrollRoot?: Element | null; readonly offset?: number } = {},
+  opts: { readonly scrollRoot?: Element | null; readonly offset?: number; readonly instant?: boolean } = {},
 ): boolean {
   const anchors = collectChartAnchors(root, bind);
   const a = 'key' in target ? anchors.find((x) => x.key === target.key) : anchors[target.index];
   if (a === undefined) return false;
-  const behavior = preferredScrollBehavior();
+  // ⚠ 別ウィンドウから動かすときは即時(裏の窓の滑らかなスクロールは間引かれて途中で止まりうる ── 見ているのは別ウィンドウ)
+  const behavior: ScrollBehavior = opts.instant === true ? 'instant' : preferredScrollBehavior();
   const sr = opts.scrollRoot ?? null;
   const offset = opts.offset ?? 0;
   if (sr !== null && typeof (sr as HTMLElement).scrollTo === 'function') {
-    const top = a.el.getBoundingClientRect().top - sr.getBoundingClientRect().top + sr.scrollTop - offset - 8;
+    // 🔑 見出しは「読んでいる所」の帯の中へ置く(固定したグラフが帯より高くても、帯の下端より下へは送らない ──
+    //    送ると現在地が 1 つ前の節のままになり、グラフが元へ戻る)
+    const h = (sr as HTMLElement).clientHeight;
+    const land = h > 0 ? Math.min(offset + 8, Math.max(h * CHART_CONTEXT_BAND.top + 2, h * CHART_CONTEXT_BAND.bottom - 24)) : offset + 8;
+    const top = a.el.getBoundingClientRect().top - sr.getBoundingClientRect().top + sr.scrollTop - land;
     (sr as HTMLElement).scrollTo({ top: Math.max(0, top), behavior });
     return true;
   }

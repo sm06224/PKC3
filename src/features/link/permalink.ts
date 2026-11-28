@@ -748,3 +748,28 @@ function isScheduleDay(day: string): boolean {
   return isRealCalendarDate(day) && Number(day.slice(0, 4)) >= 1000;
 }
 
+
+// ─────────────────────────────────────────────────────────────────
+// Form 3c: GPU グラフの別ウィンドウ(`<base>#pkc?chart=<token>`。v4.1 PR-9、#2095 後半)
+// ─────────────────────────────────────────────────────────────────
+
+/** 別ウィンドウの合図の綴り(8〜64 字の `[A-Za-z0-9_-]`)。⚠ 外から来た字を判定に使わない ── 綴りが外れたら `null`。 */
+const CHART_POPOUT_TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
+/**
+ * 🔴 **GPU グラフの別ウィンドウを開くアドレス**(`<base>#pkc?chart=<token>`)。
+ * ⚠ クエリ(`?…`)は使わない ── 断片の `#pkc?` だけ(`tests/features/flags.test.ts` の「クエリを抜け穴にしない」)。
+ * ⚠ 中身(グラフのデータ)は 1 バイトも載せない ── 合図だけ。データは `BroadcastChannel` で渡す(`gpu-chart-sync.ts`)。
+ * @returns base に `#` が在る・合図の綴りが外れる → `null`
+ */
+export function formatChartPopoutLink(baseUrl: string, token: string): string | null {
+  if (typeof baseUrl !== 'string' || baseUrl === '' || baseUrl.includes('#')) return null;
+  if (typeof token !== 'string' || !CHART_POPOUT_TOKEN_RE.test(token)) return null;
+  return `${baseUrl}${PKC_FRAGMENT_PREFIX}chart=${token}`;
+}
+
+/** 断片から GPU グラフの別ウィンドウの合図を読む(`#pkc?chart=<token>`)。綴りが外れたら `null`。 */
+export function parseChartPopoutLink(raw: string): string | null {
+  const token = hashParams(raw)?.get('chart') ?? null;
+  return token !== null && CHART_POPOUT_TOKEN_RE.test(token) ? token : null;
+}

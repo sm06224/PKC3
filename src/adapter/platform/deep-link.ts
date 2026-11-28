@@ -75,6 +75,7 @@ import {
   SECTION_FRAGMENT_PREFIX,
   parseViewDeepLinkSchedule,
   parseViewWindowToken,
+  parseChartPopoutLink,
   setHashEntry,
 } from '../../features/link/permalink';
 import { announceViewWindow } from './view-window';
@@ -227,6 +228,17 @@ export function announceOpenedWindow(
   announce(token);
   target.dropToken();
   return true;
+}
+
+/**
+ * 🔴 **この窓は GPU グラフの別ウィンドウか**(`#pkc?chart=<token>`。v4.1 PR-9、#2095 後半)。
+ * ⚠ `main.ts` が起動のいちばん最初(storage・worker より前)に聞く ── 真なら通常の起動をせず、グラフ表示だけの軽い起動へ分ける。
+ * 🔑 アドレスを読むのはこの file、断片を解くのは `permalink.ts`(`parseChartPopoutLink`)── 自前で key を取り出さない。
+ * ⚠ 合図はアドレスに残す(F5 で読み直しても同じ窓として名乗り直せる)。
+ * @returns 合図(綴りが外れる・無ければ `null`)
+ */
+export function readChartPopoutToken(target: Pick<DeepLinkTarget, 'hash'> = windowDeepLinkTarget()): string | null {
+  return parseChartPopoutLink(target.hash);
 }
 
 /**

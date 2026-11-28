@@ -64,6 +64,7 @@ import { typingQuietIn } from './typing-gate';
 import { registerLiveScope, type MermaidScope } from './mermaid-hydrate';
 import { attachChartBinding, type ChartBindingHandle } from './gpu-chart-bound';
 import { extractBoundChartFrames } from '@features/chart/gpu-chart-bind';
+import { attachChartPopout, hasDetachedPopout, registerWaitingMount, type ChartPopoutLink } from './gpu-chart-popout-link';
 import type { GetAssetBlob } from './viewer-3d';
 
 type Three = typeof ThreeModule;
@@ -482,6 +483,8 @@ export interface GpuChartView {
   resetView(): void;
   /** 今の表示を PNG で保存する。 */
   savePng(): Promise<void>;
+  /** 今のデータ(切り替えの補間の途中なら行き先)── 別ウィンドウへ渡す中身(PR-9)。 */
+  currentSpec(): GpuChartSpec;
   dispose(): void;
 }
 
@@ -772,6 +775,10 @@ class ChartView implements GpuChartView {
 
   get animating(): boolean {
     return this.tween !== null;
+  }
+
+  currentSpec(): GpuChartSpec {
+    return this.tween?.to ?? this.spec;
   }
 
   private stopTween(): void {
@@ -1323,6 +1330,8 @@ export interface HydrateGpuChartOptions {
   readonly noteLid?: string | null;
   /** 本文のスクロールの器(`null` / 無しなら画面)。 */
   readonly scrollRoot?: Element | null;
+  /** 表示中のノートの題名(別ウィンドウの題名に使う ── PR-9)。 */
+  readonly getNoteTitle?: () => string | null;
 }
 
 /** 本文の根(読む面の `detail-body`)。 */
@@ -1371,6 +1380,34 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
 
   const views = new Map<HTMLElement, GpuChartView>();
   const bindings = new Map<HTMLElement, ChartBindingHandle>();
+  /** 「別ウィンドウで開く」の配線(PR-9)。 */
+  const links = new Map<HTMLElement, ChartPopoutLink>();
+  /** 見えるまで待っている器の「今すぐ置く口」の登録を外す口。 */
+  const waiting = new Map<HTMLElement, () => void>();
+  /**
+   * 🔑 **引き継ぎの鍵**(`<lid>#<本文の中のグラフの順番>`)── 読む面だけ。保存・差分の描き直しで器が作り直されても、
+   * 同じノートの同じ順番のグラフなら開いている別ウィンドウを引き継ぐ。
+   */
+  const popoutKeyOf = (host: HTMLElement): string | null => {
+    const lid = opts.noteLid ?? null;
+    const bodyRoot = host.closest<HTMLElement>(BODY_ROOT_SELECTOR);
+    if (lid === null || bodyRoot === null || opts.getNoteBody === undefined) return null;
+    const i = [...bodyRoot.querySelectorAll(`[${GPU_CHART_SRC_ATTR}]`)].indexOf(host);
+    return i < 0 ? null : `${lid}#${i}`;
+  };
+  /** 器を置いたら「別ウィンドウで開く」を付ける(連動グラフなら連動の口も渡す)。 */
+  const addPopout = (host: HTMLElement, view: GpuChartView): void => {
+    links.get(host)?.dispose();
+    links.set(
+      host,
+      attachChartPopout({
+        view,
+        binding: bindings.get(host) ?? null,
+        noteTitle: () => opts.getNoteTitle?.() ?? '',
+        reattachKey: popoutKeyOf(host),
+      }),
+    );
+  };
   let afterPrintOff: (() => void) | null = null;
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let disposed = false;
@@ -1389,8 +1426,10 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
     if (body === null || lid === null || bodyRoot === null) {
       // 連動できない面 ── 本文に書いたデータがあればそれを静的に、無ければ理由を出す
       if (spec.series.length > 0) {
-        views.set(host, mountGpuChart(host, spec));
+        const v = mountGpuChart(host, spec);
+        views.set(host, v);
         host.setAttribute(STATE_ATTR, 'ready');
+        addPopout(host, v);
       } else failHost(host, 'スクロール連動のグラフは、ノートを読む画面で表示します');
       return;
     }
@@ -1417,14 +1456,22 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
         initial: { body, data },
       }),
     );
+    addPopout(host, view);
   };
   const dropBinding = (host: HTMLElement): void => {
+    // ⚠ 別ウィンドウの配線を先に畳む(引き継ぎ待ちへ回す ── 連動の口を抜く前に)
+    links.get(host)?.dispose();
+    links.delete(host);
+    waiting.get(host)?.();
+    waiting.delete(host);
     bindings.get(host)?.dispose();
     bindings.delete(host);
     host.removeAttribute('data-pkc-gpu-chart-bind');
   };
   const mount = (host: HTMLElement): void => {
     if (disposed || !host.isConnected || views.has(host)) return;
+    waiting.get(host)?.();
+    waiting.delete(host);
     const wait = typingQuietIn();
     if (wait > 0) {
       const t = setTimeout(() => {
@@ -1445,8 +1492,10 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
       return;
     }
     if (parsed.spec.source === null) {
-      views.set(host, mountGpuChart(host, parsed.spec));
+      const v = mountGpuChart(host, parsed.spec);
+      views.set(host, v);
       host.setAttribute(STATE_ATTR, 'ready');
+      addPopout(host, v);
       return;
     }
     void resolveGpuChartSource(parsed.spec, opts.getAssetBlob).then((spec) => {
@@ -1455,8 +1504,10 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
         failHost(host, spec);
         return;
       }
-      views.set(host, mountGpuChart(host, spec));
+      const v = mountGpuChart(host, spec);
+      views.set(host, v);
       host.setAttribute(STATE_ATTR, 'ready');
+      addPopout(host, v);
     });
   };
 
@@ -1478,8 +1529,20 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
     // ⚠ 同じ器に 2 枚目を置かない(差分反映で同じ器が 2 度渡ってきても)
     if (host.hasAttribute(STATE_ATTR)) continue;
     host.setAttribute(STATE_ATTR, 'loading');
-    if (io === null) mount(host);
-    else io.observe(host);
+    // 🔑 別ウィンドウが引き継ぎを待っている器は、見えるまで待たずに置く(保存の描き直しで画面の外にあっても切らない)
+    const pk = popoutKeyOf(host);
+    if (io === null || hasDetachedPopout(pk)) mount(host);
+    else {
+      io.observe(host);
+      if (pk !== null)
+        waiting.set(
+          host,
+          registerWaitingMount(pk, () => {
+            io.unobserve(host);
+            mount(host);
+          }),
+        );
+    }
   }
   /**
    * 🔴 **印刷の前に静止画へ焼く**(PR-7 の残り)── 紙では WebGL の canvas が白く抜けうるので、画面の図ごとに 2D の PNG
@@ -1522,7 +1585,7 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
       afterPrintOff?.();
       for (const t of timers) clearTimeout(t);
       timers.clear();
-      for (const h of [...bindings.keys()]) dropBinding(h);
+      for (const h of new Set([...bindings.keys(), ...links.keys(), ...waiting.keys()])) dropBinding(h);
       for (const v of views.values()) v.dispose();
       views.clear();
       // 🔑 器の印を外す ── 同じ器を次の塊が埋め直せる(印が残ると「済み」と見て空のまま飛ばす)
@@ -1532,6 +1595,11 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
       }
     },
     prune: () => {
+      for (const [host, off] of waiting) {
+        if (host.isConnected) continue;
+        off();
+        waiting.delete(host);
+      }
       for (const [host, v] of views) {
         if (!host.isConnected) {
           dropBinding(host);

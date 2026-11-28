@@ -4455,6 +4455,8 @@ export class DetailRenderer {
       ...this.figureOpts(),
       noteLid: lid,
       scrollRoot: this.scroller,
+      // 🔑 別ウィンドウの題名(PR-9)── 今出している題名の字を読む(題名の正本は描いた見出し)
+      getNoteTitle: () => this.titleEl?.textContent ?? null,
       getNoteBody: () => {
         const r = this.readingBody;
         if (r !== null && r.lid === lid) return r.body;
