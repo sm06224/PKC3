@@ -148,6 +148,24 @@ afterEach(() => {
   setReactRuntimeLoader(null);
 });
 
+describe('🔴 縦横の固定(` ```html id= width= height= `。v4.2 PR-1)', () => {
+  it('器の属性から箱の style と固定の印を付ける・無指定は今までの字のまま', () => {
+    const sized = mount('L1', '```html id="a" width=480 height=320\n<p>x</p>\n```\n');
+    const f = frameOf(sized.body);
+    expect(f.style.width).toBe('480px');
+    expect(f.style.maxWidth).toBe('100%');
+    expect(f.style.height).toBe('320px');
+    expect(f.getAttribute('data-pkc-fixed-height')).toBe('320');
+    sized.scope.dispose();
+    document.body.innerHTML = '';
+    const plain = mount('L1', '```html id="b"\n<p>x</p>\n```\n');
+    const pf = frameOf(plain.body);
+    expect(pf.getAttribute('style')).toBe('width: 100%; border: 0px; height: 0px; display: block;');
+    expect(pf.hasAttribute('data-pkc-fixed-height')).toBe(false);
+    plain.scope.dispose();
+  });
+});
+
 describe('🔴 セキュリティ', () => {
   it('置いた箱は allow-scripts のみ・CSP は外へ出られない(状態を持つ箱も持たない箱も)', () => {
     const { body, scope } = mount('L1', '```html id="a"\n<p>x</p>\n```\n');

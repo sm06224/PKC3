@@ -255,6 +255,9 @@ const STYLED_ELSEWHERE: Readonly<Record<string, string>> = {
   'pkc-gpu-chart-stage': 'src/adapter/ui/render/gpu-chart.ts',
   'pkc-gpu-chart-title': 'src/adapter/ui/render/gpu-chart.ts',
   'pkc-gpu-chart-bind': 'src/adapter/ui/render/gpu-chart-bound.ts',
+  // 🔴 縮小 ⇄ 実サイズ(v4.2 PR-1)── 連動グラフの縮小の枠と「クリックで実サイズ表示」の字
+  'pkc-gpu-chart-viewport': 'src/adapter/ui/render/gpu-chart-bound.ts',
+  'pkc-gpu-chart-compact-hint': 'src/adapter/ui/render/gpu-chart-bound.ts',
   'pkc-gpu-chart-bind-label': 'src/adapter/ui/render/gpu-chart-bound.ts',
   'pkc-gpu-chart-sticky': 'src/adapter/ui/render/gpu-chart-bound.ts',
   'pkc-gpu-chart-empty': 'src/adapter/ui/render/gpu-chart.ts',

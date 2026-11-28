@@ -16,11 +16,14 @@ import {
   type ChartContextSignal,
 } from '@features/chart/gpu-chart-bind';
 import type { ChartBindSpec, GpuChartSpec } from '@features/chart/gpu-chart-spec';
+import { compactLayoutOf, type CompactLayout } from '@features/chart/gpu-chart-floating';
 import { scrollToChartContext, subscribeChartContext } from './chart-context-watch';
 import type { GpuChartView } from './gpu-chart';
 
 /** 上端に固定したときに付ける印(`app.css`)。 */
 export const GPU_CHART_STICKY_CLASS = 'pkc-gpu-chart-sticky';
+/** 🔴 縮小表示の印(グラフの枠 `.pkc-gpu-chart` に `"true"` / `"false"`。v4.2 PR-1)。 */
+export const GPU_CHART_COMPACT_ATTR = 'data-pkc-gpu-chart-compact';
 
 /**
  * 🔑 **固定するのは本文の根の直下の塊**(器そのものではない)。
@@ -48,6 +51,12 @@ export interface ChartReadingPoint {
 export interface ChartBindingHandle {
   readonly following: boolean;
   readonly sticky: boolean;
+  /** 🔴 上端に固定したまま実描画の大きさへ広げているか(v4.2 PR-1)。固定していないときは常に `false`。 */
+  readonly expanded: boolean;
+  /** 縮小表示の今の倍率と見た目の大きさ(縮小していなければ `null`)。 */
+  readonly compact: CompactLayout | null;
+  /** 実描画の大きさへ広げる(`true`)/ 縮小に戻す(`false`)。⚠ 固定していないときは何もしない。 */
+  setExpanded(on: boolean): void;
   /** いま見せている時点の番号。 */
   readonly index: number;
   setFollowing(on: boolean): void;
@@ -128,6 +137,9 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
   let index = -1;
   let following = true;
   let sticky = bind.sticky;
+  /** 🔴 上端に固定したまま実描画の大きさへ広げているか(v4.2 PR-1)。固定し直すたびに縮小から始める。 */
+  let expanded = false;
+  let compact: CompactLayout | null = null;
   let lastSignal: ChartContextSignal | null = null;
   let disposed = false;
 
@@ -168,12 +180,62 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
   follow.setAttribute('data-pkc-field', 'gpu-chart-follow');
   const stick = mkBtn('bind-sticky', '', '');
   stick.setAttribute('data-pkc-field', 'gpu-chart-sticky');
+  // 🔴 縮小 ⇄ 実サイズ(v4.2 PR-1)── 上端に固定しているときだけ出す
+  const expand = mkBtn('bind-expand', '', '');
+  expand.setAttribute('data-pkc-field', 'gpu-chart-expand');
   const spacer = doc.createElement('span');
   spacer.className = 'pkc-gpu-chart-spacer';
-  bar.append(label, spacer, prev, next, follow, stick);
+  bar.append(label, spacer, prev, next, follow, expand, stick);
   const firstBar = view.element.querySelector('[data-pkc-field="gpu-chart-bar"]');
   if (firstBar !== null) firstBar.after(bar);
   else view.element.prepend(bar);
+
+  /**
+   * 🔴 **縮小の枠**(v4.2 PR-1)── 描画面(`.pkc-gpu-chart-stage`)を包む。縮小中は枠の高さを見た目の高さにして
+   *   `overflow: hidden`、中の描画面は実描画の大きさのまま `transform: scale()` で縮めて見せる。
+   *   ⚠ 描画面の `clientWidth` / `clientHeight`(描く論理解像度)は transform の影響を受けない ── 縮めても描き直さない。
+   */
+  const stage = view.element.querySelector<HTMLElement>('[data-pkc-gpu-chart-stage]');
+  const viewport = doc.createElement('div');
+  viewport.className = 'pkc-gpu-chart-viewport';
+  viewport.setAttribute('data-pkc-field', 'gpu-chart-viewport');
+  const hint = doc.createElement('span');
+  hint.className = 'pkc-gpu-chart-compact-hint';
+  hint.setAttribute('data-pkc-field', 'gpu-chart-compact-hint');
+  hint.setAttribute('aria-hidden', 'true');
+  hint.textContent = 'クリックで実サイズ表示';
+  if (stage !== null) {
+    stage.before(viewport);
+    viewport.append(stage, hint);
+  }
+
+  /** 縮小の見た目を当てる / 外す(DOM だけ。状態は `sticky && !expanded`)。 */
+  const applyCompact = (): void => {
+    const on = sticky && !expanded && stage !== null;
+    if (on) {
+      // 🔑 実描画の大きさは描画面の箱(transform の影響を受けない)から読む。高さは指定どおり(`spec.height`)
+      const renderW = stage.clientWidth || stage.offsetWidth || 1;
+      const renderH = stage.clientHeight || view.currentSpec().height;
+      compact = compactLayoutOf(renderW, renderH, bind);
+      viewport.style.height = `${compact.visualH}px`;
+      stage.style.transform = `scale(${compact.scale})`;
+      stage.style.transformOrigin = 'top left';
+      viewport.setAttribute('role', 'button');
+      viewport.tabIndex = 0;
+      viewport.setAttribute('aria-label', 'グラフを縮小して表示しています。押すと実サイズで表示します');
+    } else {
+      compact = null;
+      viewport.style.removeProperty('height');
+      stage?.style.removeProperty('transform');
+      stage?.style.removeProperty('transform-origin');
+      viewport.removeAttribute('role');
+      viewport.removeAttribute('tabindex');
+      viewport.removeAttribute('aria-label');
+    }
+    view.element.setAttribute(GPU_CHART_COMPACT_ATTR, on ? 'true' : 'false');
+    viewport.setAttribute('aria-expanded', on ? 'false' : 'true');
+    hint.hidden = !on;
+  };
 
   const syncButtons = (): void => {
     follow.setAttribute('aria-pressed', following ? 'false' : 'true');
@@ -187,6 +249,13 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
       ? 'グラフを画面の上端に固定しています。押すと本文と一緒に流れる配置に戻ります'
       : 'スクロールしてもグラフが画面の上端に残るようにします';
     stickyEl.classList.toggle(GPU_CHART_STICKY_CLASS, sticky);
+    expand.hidden = !sticky;
+    expand.setAttribute('aria-expanded', sticky && !expanded ? 'false' : 'true');
+    expand.textContent = expanded ? '縮小に戻す' : '実サイズで表示';
+    expand.title = expanded
+      ? 'グラフを縮小した表示に戻します(Esc キーでも)'
+      : 'グラフを実際の大きさで表示します(縮小したグラフを押しても広がります)';
+    applyCompact();
     view.element.setAttribute('data-pkc-gpu-chart-following', following ? 'true' : 'false');
     const total = data.frames.length;
     prev.disabled = index <= 0;
@@ -243,6 +312,13 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
   };
   const setSticky = (on: boolean): void => {
     sticky = on;
+    // 🔑 固定し直したら縮小から始める / 解除したら(広げていても)本文の中の実描画の大きさへ戻る
+    expanded = false;
+    syncButtons();
+  };
+  const setExpanded = (on: boolean): void => {
+    if (!sticky || expanded === on) return;
+    expanded = on;
     syncButtons();
   };
 
@@ -251,6 +327,51 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
   const onFollow = (): void => setFollowing(!following);
   const onStick = (): void => setSticky(!sticky);
   const onJump = (): void => jumpTo(index);
+  const onExpand = (): void => setExpanded(!expanded);
+  /**
+   * 🔴 **縮小中の押す・触るは「実サイズで表示」に専念させる**(v4.2 PR-1)── 先に枠で受けて描画面へ渡さない
+   *   (ドラッグでの移動・ホバーの詳細・ホイールの拡大が縮小した絵の上で誤って動かない)。
+   */
+  const blockWhileCompact = (e: Event): void => {
+    if (compact === null) return;
+    e.stopPropagation();
+  };
+  const onViewportPointerDown = (e: Event): void => {
+    if (compact === null) return;
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  /** 広げたら焦点を描画面へ(キーボードの操作と `Esc` がそのまま効く)。⚠ 見えている位置を動かさない。 */
+  const expandByUser = (): void => {
+    setExpanded(true);
+    stage?.focus({ preventScroll: true });
+  };
+  const onViewportClick = (e: Event): void => {
+    if (compact === null) return;
+    e.stopPropagation();
+    expandByUser();
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (compact !== null && e.target === viewport && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      e.stopPropagation();
+      expandByUser();
+      return;
+    }
+    if (sticky && expanded && e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      setExpanded(false);
+      viewport.focus({ preventScroll: true });
+    }
+  };
+  expand.addEventListener('click', onExpand);
+  viewport.addEventListener('pointerdown', onViewportPointerDown, true);
+  viewport.addEventListener('pointermove', blockWhileCompact, true);
+  viewport.addEventListener('wheel', blockWhileCompact, true);
+  viewport.addEventListener('dblclick', blockWhileCompact, true);
+  viewport.addEventListener('click', onViewportClick, true);
+  view.element.addEventListener('keydown', onKey, true);
   prev.addEventListener('click', onPrev);
   next.addEventListener('click', onNext);
   follow.addEventListener('click', onFollow);
@@ -289,6 +410,13 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
     get sticky() {
       return sticky;
     },
+    get expanded() {
+      return expanded;
+    },
+    get compact() {
+      return compact;
+    },
+    setExpanded,
     get index() {
       return index;
     },
@@ -316,8 +444,20 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
       follow.removeEventListener('click', onFollow);
       stick.removeEventListener('click', onStick);
       label.removeEventListener('click', onJump);
+      expand.removeEventListener('click', onExpand);
+      viewport.removeEventListener('pointerdown', onViewportPointerDown, true);
+      viewport.removeEventListener('pointermove', blockWhileCompact, true);
+      viewport.removeEventListener('wheel', blockWhileCompact, true);
+      viewport.removeEventListener('dblclick', blockWhileCompact, true);
+      viewport.removeEventListener('click', onViewportClick, true);
+      view.element.removeEventListener('keydown', onKey, true);
       bar.remove();
       stickyEl.classList.remove(GPU_CHART_STICKY_CLASS);
+      // 🔑 縮小の枠を外して、描画面を元の場所へ戻す(器が使い回されても縮小の見た目を残さない)
+      sticky = false;
+      applyCompact();
+      if (stage !== null && viewport.parentElement !== null) viewport.replaceWith(stage);
+      view.element.removeAttribute(GPU_CHART_COMPACT_ATTR);
     },
   };
 }

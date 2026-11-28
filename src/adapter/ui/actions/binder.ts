@@ -13606,7 +13606,7 @@ const ACTIONS: Record<string, ActionHandler> = {
     const at = { start: opened.selectionStart, end: opened.selectionEnd };
     void pickWidgetTemplateInApp(
       root,
-      WIDGET_TEMPLATES.map((t) => ({ id: t.baseId, label: `${t.label}(${t.hint})` })),
+      WIDGET_TEMPLATES.map((t) => ({ id: t.baseId, label: t.label, hint: t.hint })),
     ).then((id) => {
       if (id === null) return;
       const tpl = WIDGET_TEMPLATES.find((t) => t.baseId === id);

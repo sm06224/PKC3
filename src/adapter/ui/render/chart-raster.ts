@@ -13,6 +13,7 @@
  */
 import { WorkerLease } from '@adapter/platform/worker-lease';
 import { MAX_DATASETS, chartAltText, parseChartFence, type ChartSpec } from '@features/markdown/chart-fence';
+import { FENCE_WIDTH_PX_MIN, type FenceSize } from '@features/markdown/fence-size';
 import { renderCachedPng, type DiagramPalette, type Raster, type RasterKey } from './mermaid-raster';
 import { hydrateDiagrams, type DiagramKind, type HydrateOptions, type MermaidScope } from './mermaid-hydrate';
 
@@ -20,6 +21,34 @@ import { hydrateDiagrams, type DiagramKind, type HydrateOptions, type MermaidSco
 export function chartHeightFor(width: number): number {
   // 16:9 に近い比。⚠ 上下限を置く(細長い / 画面を覆う、をどちらも避ける)
   return Math.max(160, Math.min(520, Math.round(width * 0.56)));
+}
+
+/**
+ * 🔴 **縦横の固定から焼く大きさを解く**(v4.2 PR-1)。`%` は `base`(器の幅・書き出しの基準 720)に対する割合。
+ * 無指定なら `{ width: base }`(今までどおり。高さは `chartHeightFor` が幅から決める)。
+ */
+export function rasterSizeOf(size: FenceSize, base: number): { width: number; height?: number } {
+  const width =
+    size.width === undefined
+      ? base
+      : size.width.unit === 'px'
+        ? size.width.value
+        : Math.max(FENCE_WIDTH_PX_MIN, Math.round((base * size.width.value) / 100 / 16) * 16);
+  return size.height === undefined ? { width } : { width, height: size.height };
+}
+
+/**
+ * 🔴 **グラフの大きさを決める 1 か所**(v4.2 PR-1)── 優先は **JSON の明示(`"width"` / `"height"`)> 囲みの属性 > 既定**。
+ * 画面の焼き(`CHART_KIND.rasterSize`)と書き出し(`main.ts` の `renderFigure`)の両方がここを通す。
+ */
+export function chartRasterSize(source: string, fence: FenceSize, base: number): { width: number; height?: number } {
+  const { spec } = parseChartFence(source);
+  const width = spec?.width ?? fence.width;
+  const height = spec?.height ?? fence.height;
+  return rasterSizeOf(
+    { ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }) },
+    base,
+  );
 }
 
 /**
@@ -112,7 +141,8 @@ export async function renderChartToPng(
   //    版上げ・描画の変更は `RASTER_BAKE_VERSION` を上げて古い PNG を捨てる
   const full: RasterKey = { ...key, source, kind: 'chart', engine: key.engine ?? CHART_ENGINE };
   return renderCachedPng(full, async () => {
-    const height = chartHeightFor(key.width);
+    // 🔴 固定の高さ(v4.2 PR-1)があればそれ、無ければ今までどおり幅から決める
+    const height = key.height ?? chartHeightFor(key.width);
     const res = await leaseOf().run<{ png: ArrayBuffer; cssWidth: number }>({
       spec,
       width: key.width,
@@ -151,6 +181,7 @@ export const CHART_KIND: DiagramKind = {
     if (!spec) throw new Error(`グラフを描けません: ${error ?? '読めませんでした'}`);
     return renderChartToPng(key.source, spec, key);
   },
+  rasterSize: chartRasterSize,
   note: (source) => {
     const { notes } = parseChartFence(source);
     return notes.length === 0 ? null : notes.join('。');

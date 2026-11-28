@@ -47,6 +47,7 @@ import { cellEditButtonHtml, detectCsvLang, renderCsvFence, shapeButtonHtml } fr
 import { embedViewSource, isEmbedViewInfo, isSqlEmbedInfo, sqlEmbedHostHtml } from './sql-embed';
 import { formHtml, isFormInfo } from './form-def';
 import { buildHtmlSandboxIframe } from './html-sandbox';
+import { fenceSizeAttrs, parseFenceSize } from './fence-size';
 import { parseWidgetId, widgetPlaceholderHtml, WIDGET_ID_ATTR, WIDGET_LIVE_ATTR, WIDGET_SEED_ATTR } from './widget-bridge';
 import { allWidgetStateBlocks } from './widget-state-block';
 import {
@@ -470,8 +471,10 @@ function buildRenderableSlotHtml(
       const widgetId = fence.lang === 'html' ? parseWidgetId(fence.rest) : null;
       // 🔑 添付の HTML(`asset:鍵`)は `id=` が無くても器にする(#2090)── 箱の CSP・sandbox は直書きと同じ 1 本
       const widgetAsset = fence.lang === 'html' ? assetKey : null;
+      // 🔴 囲みに書いた縦横の固定(` ```html width=480 height=320 `。v4.2 PR-1)── 無指定なら `{}`(出力は不変)
+      const frameSize = parseFenceSize(fence.rest);
       if (liveWidgets && (widgetId !== null || widgetAsset !== null))
-        return widgetPlaceholderHtml(content, widgetId, allowExternalImages, widgetAsset);
+        return widgetPlaceholderHtml(content, widgetId, allowExternalImages, widgetAsset, frameSize);
       // reform-2026-05 PR-2M:iframe sandbox 経由で HTML を直接 render。
       // sandbox="allow-scripts" のみ(allow-same-origin 無し)で cross-origin 隔離。
       // 🔑 器を出さない面の `id=` は、箱の中だけの `localStorage`(保存しない)を入れて描く(書き出しでも動く)
@@ -483,6 +486,7 @@ function buildRenderableSlotHtml(
         allowExternalImages,
         widgetId,
         widgetId === null ? {} : (widgetStates.get(widgetId) ?? {}),
+        frameSize,
       );
     }
     case 'mermaid': {
@@ -508,10 +512,16 @@ function buildRenderableSlotHtml(
        * `gpu-chart.ts` の器へ振り分ける(判定は `shouldUseGpuChart` の 1 か所)。⚠ それ以外の ` ```chart ` は
        * 今までどおりの器(Chart.js → PNG)のまま 1 バイトも変えない。⚠ 原文は属性に持つ(3d と同じ作法)。
        */
+      /**
+       * 🔴 **縦横の固定**(` ```chart width=640 height=300 `。v4.2 PR-1)── 器に添え、描く adapter が読む(JSON の明示が優先)。
+       * ⚠ 無指定なら空文字 ── 今までの器の HTML は 1 バイトも変わらない。⚠ 属性は `data-pkc-md-block-kind` の**後ろ**
+       *   (書き出しの焼き `figure-bake.ts` の器の形と揃える)。
+       */
+      const chartSizeAttrs = fenceSizeAttrs(parseFenceSize(fence.rest));
       if (shouldUseGpuChart(fence.rest, content)) {
-        return `<div class="pkc-gpu-chart-placeholder" data-pkc-gpu-chart-src="${escapedChart}" data-pkc-md-block-kind="chart"><pre class="pkc-chart-source"><code class="language-chart">${escapedChart}</code></pre></div>`;
+        return `<div class="pkc-gpu-chart-placeholder" data-pkc-gpu-chart-src="${escapedChart}" data-pkc-md-block-kind="chart"${chartSizeAttrs}><pre class="pkc-chart-source"><code class="language-chart">${escapedChart}</code></pre></div>`;
       }
-      return `<div class="pkc-chart-placeholder" data-pkc-chart-src="${escapedChart}" data-pkc-md-block-kind="chart"><pre class="pkc-chart-source"><code class="language-chart">${escapedChart}</code></pre></div>`;
+      return `<div class="pkc-chart-placeholder" data-pkc-chart-src="${escapedChart}" data-pkc-md-block-kind="chart"${chartSizeAttrs}><pre class="pkc-chart-source"><code class="language-chart">${escapedChart}</code></pre></div>`;
     }
     case 'plotly': {
       /**
@@ -553,7 +563,9 @@ function buildRenderableSlotHtml(
           ? ''
           : ` ${WIDGET_ID_ATTR}="${md.utils.escapeHtml(reactWidgetId)}"${liveWidgets ? ` ${WIDGET_LIVE_ATTR}="1"` : ''}` +
             (reactSeed === undefined ? '' : ` ${WIDGET_SEED_ATTR}="${md.utils.escapeHtml(JSON.stringify(reactSeed))}"`);
-      return `<div class="pkc-react-placeholder" data-pkc-react-src="${escapedReact}"${reactWidgetAttr} data-pkc-md-block-kind="react"><pre class="pkc-react-source"><code class="language-jsx">${escapedReact}</code></pre></div>`;
+      // 🔴 縦横の固定(v4.2 PR-1)── 器に添え、箱を組む adapter(`react-sandbox.ts`)が読む。無指定なら空文字
+      const reactSizeAttrs = fenceSizeAttrs(parseFenceSize(fence.rest));
+      return `<div class="pkc-react-placeholder" data-pkc-react-src="${escapedReact}"${reactWidgetAttr}${reactSizeAttrs} data-pkc-md-block-kind="react"><pre class="pkc-react-source"><code class="language-jsx">${escapedReact}</code></pre></div>`;
     }
     default: {
       // csv / tsv / psv:suffix を剥がした info を渡す(`noheader` 等の

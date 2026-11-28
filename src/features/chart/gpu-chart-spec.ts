@@ -17,6 +17,8 @@
  * ⚠ ここは features 層 ── DOM も Three.js も持たない。数は TypedArray(`Float64Array`)で持ち、欠測は `NaN`。
  */
 import { MAX_DATASETS, MAX_LABEL_CHARS, MAX_POINTS } from '@features/markdown/chart-fence';
+import { parseCompactHeight, parseCompactScale } from './gpu-chart-floating';
+import { parseFenceWidth, type FenceSize, type FenceWidth } from '@features/markdown/fence-size';
 
 /** GPU で描ける形。⚠ 一覧はここに 1 つだけ(adapter 側に 2 つ目を作らない)。 */
 export const GPU_CHART_TYPES = ['line', 'scatter', 'bar', 'heatmap'] as const;
@@ -32,6 +34,12 @@ export const GPU_CHART_MAX_HEATMAP_CELLS = 250_000;
 export const GPU_CHART_DEFAULT_HEIGHT = 320;
 export const GPU_CHART_MIN_HEIGHT = 160;
 export const GPU_CHART_MAX_HEIGHT = 900;
+/**
+ * 🔴 **囲みの情報行で縦幅を固定したとき**(` ```chart live height=120 `。v4.2 PR-1)の範囲。
+ * ⚠ JSON の `"height"` は今までどおり {@link GPU_CHART_MIN_HEIGHT}〜{@link GPU_CHART_MAX_HEIGHT}(既存の見え方を変えない)。
+ */
+export const GPU_CHART_FIXED_MIN_HEIGHT = 80;
+export const GPU_CHART_FIXED_MAX_HEIGHT = 2000;
 
 export interface GpuChartSeries {
   readonly label: string;
@@ -67,6 +75,11 @@ export interface GpuChartSpec {
   readonly title?: string;
   /** 描画面の高さ(CSS px)。 */
   readonly height: number;
+  /**
+   * 🔴 **横幅の固定**(JSON の `"width"` か囲みの `width=`。v4.2 PR-1)── 指定時は `.pkc-gpu-chart` を
+   *   `width: <値>; max-width: 100%` にする。⚠ 無指定では項目ごと持たない(今までの仕様の形を変えない)。
+   */
+  readonly width?: FenceWidth;
   /** x を区分(0, 1, 2 …)で持つときの見出し(`labels`)。空なら数の目盛り。 */
   readonly labels: readonly string[];
   /** x が区分の番号か(棒・`labels` のある折れ線)。目盛りを整数に揃える。 */
@@ -102,6 +115,13 @@ export interface ChartBindSpec {
   readonly sticky: boolean;
   /** `mode === 'log-day'` で表示する日付の幅(日数、1〜90、既定 7)。 */
   readonly windowDays: number;
+  /**
+   * 🔴 **上端に固定したときの縮小の見た目の高さ**(px、80〜280、既定 140。v4.2 PR-1)── `gpu-chart-floating.ts`。
+   * ⚠ 書いたときだけ持つ(今までの仕様の形を変えない)。
+   */
+  readonly compactHeight?: number;
+  /** 🔴 縮小の倍率(0.25〜0.85)。在れば `compactHeight` より優先。書いたときだけ持つ。 */
+  readonly compactScale?: number;
 }
 
 /** 明示データ(`"frames"`)── 辞書(鍵 → 設定)か配列(添字 → 設定)。中身は知っている key だけを写した素の設定。 */
@@ -186,6 +206,23 @@ function isType(v: unknown): v is GpuChartType {
   return typeof v === 'string' && (GPU_CHART_TYPES as readonly string[]).includes(v);
 }
 
+/**
+ * 🔴 **縦横を決める 1 か所**(v4.2 PR-1)── 優先は JSON の明示 > 囲みの属性(`width=` / `height=`)> 既定。
+ * - 高さ: JSON の数(`160〜900`)。無ければ囲みの `height=`(`80〜2000`)。どちらも無ければ既定 320
+ * - 横幅: JSON の `"width"`(数 = px、`"480px"` / `"60%"`。範囲は囲みと同じ門 `parseFenceWidth`)。無ければ囲みの `width=`
+ */
+export function gpuChartSizeOf(o: Record<string, unknown>, fence: FenceSize = {}): { height: number; width?: FenceWidth } {
+  const jsonH = toNum(o.height);
+  let height: number;
+  if (!Number.isNaN(jsonH)) height = clampHeight(jsonH);
+  else if (fence.height !== undefined)
+    height = Math.round(Math.max(GPU_CHART_FIXED_MIN_HEIGHT, Math.min(GPU_CHART_FIXED_MAX_HEIGHT, fence.height)));
+  else height = GPU_CHART_DEFAULT_HEIGHT;
+  const jsonW = typeof o.width === 'number' || typeof o.width === 'string' ? parseFenceWidth(o.width) : undefined;
+  const width = jsonW ?? fence.width;
+  return width === undefined ? { height } : { height, width };
+}
+
 function clampHeight(v: unknown): number {
   const n = toNum(v);
   if (Number.isNaN(n)) return GPU_CHART_DEFAULT_HEIGHT;
@@ -243,7 +280,14 @@ function columnRef(v: unknown): string | number | undefined {
  *   "datasets": [{ "label": "温度", "data": [21.5, 21.7, null, 22.0] }] }
  * ```
  */
-export function parseGpuChartSpec(source: string): GpuChartParseResult {
+export function parseGpuChartSpec(
+  source: string,
+  /**
+   * 🔴 **囲みの情報行に書いた縦横**(`width=` / `height=`。v4.2 PR-1)。優先は **JSON の明示 > 囲みの属性 > 既定**。
+   * ⚠ 無指定(`{}`)なら今までと 1 つも変わらない。
+   */
+  fence: FenceSize = {},
+): GpuChartParseResult {
   const fail = (error: string): GpuChartParseResult => ({ ok: false, error: `グラフを描けません: ${error}` });
   const text = source.trim();
   if (text === '') return fail('中身が空です');
@@ -257,7 +301,7 @@ export function parseGpuChartSpec(source: string): GpuChartParseResult {
   const o = raw as Record<string, unknown>;
   if (o.bind === undefined) {
     if (o.frames !== undefined) return fail('frames は bind(スクロール連動)と一緒に書いてください');
-    return parseGpuChartObject(o);
+    return parseGpuChartObject(o, fence);
   }
   // 🔑 スクロール連動(PR-8)── 種類の指定を検め、データは無くてもよい(本文の表・明示データから作る)
   const bind = parseChartBind(o.bind);
@@ -267,7 +311,7 @@ export function parseGpuChartSpec(source: string): GpuChartParseResult {
   const frameDefs = parseFrameDefs(o.frames);
   if (typeof frameDefs === 'string') return fail(frameDefs);
   const hasData = Array.isArray(o.datasets) && o.datasets.length > 0;
-  const r = hasData ? parseGpuChartObject(o) : parseGpuChartObject({ ...o, datasets: [{ data: [0] }] });
+  const r = hasData ? parseGpuChartObject(o, fence) : parseGpuChartObject({ ...o, datasets: [{ data: [0] }] }, fence);
   if (!r.ok) return r;
   const spec: GpuChartSpec = {
     ...r.spec,
@@ -295,7 +339,16 @@ export function parseChartBind(v: unknown): ChartBindSpec | string {
   const windowDays = Number.isNaN(wd)
     ? CHART_BIND_DEFAULT_WINDOW_DAYS
     : Math.max(1, Math.min(CHART_BIND_MAX_WINDOW_DAYS, Math.round(wd)));
-  return { mode: b.mode, level, sticky: b.sticky !== false, windowDays };
+  const compactHeight = parseCompactHeight(b.compactHeight);
+  const compactScale = parseCompactScale(b.compactScale);
+  return {
+    mode: b.mode,
+    level,
+    sticky: b.sticky !== false,
+    windowDays,
+    ...(compactHeight === undefined ? {} : { compactHeight }),
+    ...(compactScale === undefined ? {} : { compactScale }),
+  };
 }
 
 /** 明示データ 1 件で写す key(⚠ `type` / `bind` / `frames` / `source` は写さない ── 種類は全体の指定に揃える)。 */
@@ -329,13 +382,13 @@ export function parseFrameDefs(v: unknown): ChartFrameDefs | null | string {
  * 設定の中身(JSON を読んだ後の素の値)を検める ── 本文の表・明示データから作るフレーム(`gpu-chart-bind.ts`)も同じ 1 本を通す。
  * ⚠ `bind` / `frames` は見ない(連動の指定は `parseGpuChartSpec` が検める)。
  */
-export function parseGpuChartObject(o: Record<string, unknown>): GpuChartParseResult {
+export function parseGpuChartObject(o: Record<string, unknown>, fence: FenceSize = {}): GpuChartParseResult {
   const fail = (error: string): GpuChartParseResult => ({ ok: false, error: `グラフを描けません: ${error}` });
   if (!isType(o.type)) return fail(`type は ${GPU_CHART_TYPES.join(' / ')} のどれかにしてください`);
   const type = o.type;
   const notes: string[] = [];
   const title = o.title === undefined ? undefined : clampText(o.title);
-  const height = clampHeight(o.height);
+  const { height, width } = gpuChartSizeOf(o, fence);
 
   // 添付の CSV(大量データ)── 読むのは adapter(`parseGpuChartCsv`)
   let assetSource: GpuChartAssetSource | null = null;
@@ -356,7 +409,7 @@ export function parseGpuChartObject(o: Record<string, unknown>): GpuChartParseRe
     };
   }
 
-  const base = { type, ...(title === undefined ? {} : { title }), height };
+  const base = { type, ...(title === undefined ? {} : { title }), height, ...(width === undefined ? {} : { width }) };
 
   if (type === 'heatmap') {
     if (assetSource !== null) {

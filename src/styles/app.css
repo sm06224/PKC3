@@ -5070,7 +5070,7 @@ dd[data-pkc-field='inspector-toc'] {
   color: var(--accent);
   font-weight: 600;
 }
-/* 上端に固定 ── 本文のスクロールの器の上端に留まる(⚠ 高さを抑えて中央の本文を奪わない) */
+/* 上端に固定 ── 本文のスクロールの器の上端に留まる(⚠ 縮小した絵で見せて中央の本文を奪わない ── 下の「縮小 ⇄ 実サイズ」) */
 /* ⚠ 囲みの塊は輪郭の光(`@media screen` の `.pkc-md-block[data-pkc-render-lang]:not(…)`)で `position: relative` を持つ ──
  *   その詳細度(0,3,0)に勝つ形を並べる(sticky も光の疑似要素の基準になるので、光はそのまま描ける) */
 .pkc-md-rendered .pkc-gpu-chart-sticky,
@@ -5084,8 +5084,45 @@ dd[data-pkc-field='inspector-toc'] {
 .pkc-gpu-chart-sticky > .pkc-gpu-chart {
   box-shadow: var(--shadow);
 }
-.pkc-gpu-chart-sticky .pkc-gpu-chart-stage {
-  max-height: 32vh;
+/* 🔴 縮小 ⇄ 実サイズ(v4.2 PR-1)── 上端に固定した連動グラフは縮小した絵で見せ、押すと実描画の大きさへ広げる。
+ * ⚠ 描画面の縦だけを押し潰さない(かつての `max-height: 32vh` は縦横比が崩れた)── 枠の高さを見た目の高さにし、
+ *   中の描画面は実描画の大きさのまま `transform: scale()` で縮める(倍率と高さは `gpu-chart-bound.ts` が当てる)。 */
+.pkc-gpu-chart-viewport {
+  position: relative;
+  transition: height 0.18s ease;
+}
+.pkc-gpu-chart-viewport > .pkc-gpu-chart-stage {
+  transition: transform 0.18s ease;
+}
+.pkc-gpu-chart[data-pkc-gpu-chart-compact='true'] .pkc-gpu-chart-viewport {
+  overflow: hidden;
+  cursor: zoom-in;
+}
+/* 縮小中は押すと「実サイズで表示」だけ ── 描画面のドラッグ・ホバーを受けない(枠が受ける) */
+.pkc-gpu-chart[data-pkc-gpu-chart-compact='true'] .pkc-gpu-chart-stage {
+  pointer-events: none;
+}
+.pkc-gpu-chart[data-pkc-gpu-chart-compact='true'] .pkc-gpu-chart-viewport:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* 縮小中の操作は最小限(連動の行だけ)── 上の行(題名・拡大縮小・保存)と点数の行は隠して本文の閲覧域を広げる */
+.pkc-gpu-chart[data-pkc-gpu-chart-compact='true'] > .pkc-gpu-chart-bar,
+.pkc-gpu-chart[data-pkc-gpu-chart-compact='true'] > .pkc-gpu-chart-info,
+.pkc-gpu-chart[data-pkc-gpu-chart-compact='true'] > .pkc-gpu-chart-note {
+  display: none;
+}
+.pkc-gpu-chart-compact-hint {
+  position: absolute;
+  top: 50%;
+  right: var(--s2);
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+.pkc-gpu-chart-compact-hint[hidden] {
+  display: none;
 }
 /* データが無い時点 ── 古い絵を隠して理由を出す(嘘の絵を見せない) */
 .pkc-gpu-chart[data-pkc-gpu-chart-empty] .pkc-gpu-chart-stage > canvas,
@@ -12902,6 +12939,12 @@ h3[data-pkc-section] {
 /* 🔴 **zip の中を選ぶ一覧**(その場の器。#826)。⚠ 直す前は `aria-pressed` を付けていたのに**規則が無く**、
  * 選んだ行が見分けられなかった。選んだ行は `--accent` の地(別ウィンドウの一覧と同じ配色)。
  * 0 件のフォルダ(`aria-disabled`)は共通の灰色(`button[aria-disabled='true']`)に任せる。 */
+/* 🔴 **一覧の行の補足**(v4.2 PR-1)── 名前の右に控えめな字で 1 句。色は意味に使わない(`--muted`)。 */
+[data-pkc-field='pick-row-hint'] {
+  margin-inline-start: var(--s2);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
 [data-pkc-field='pick-archive-list'] {
   max-height: 50vh;
   overflow: auto;
@@ -14259,8 +14302,24 @@ h3[data-pkc-section] {
   .pkc-gpu-chart-sticky {
     position: static;
   }
-  .pkc-gpu-chart:has(> .pkc-gpu-chart-print-img) > .pkc-gpu-chart-stage {
+  .pkc-gpu-chart:has(.pkc-gpu-chart-print-img) .pkc-gpu-chart-stage {
     display: none;
+  }
+  /* 🔴 縮小表示(v4.2 PR-1)は紙では解く ── 実サイズの静止画を刷る(縮小の高さ・倍率は画面だけ) */
+  .pkc-gpu-chart-viewport {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .pkc-gpu-chart-stage {
+    transform: none !important;
+  }
+  .pkc-gpu-chart-compact-hint {
+    display: none !important;
+  }
+  .pkc-gpu-chart[data-pkc-gpu-chart-compact='true'] > .pkc-gpu-chart-bar,
+  .pkc-gpu-chart[data-pkc-gpu-chart-compact='true'] > .pkc-gpu-chart-info {
+    display: flex;
   }
   .pkc-gpu-chart-print-img {
     display: block;
@@ -16159,6 +16218,11 @@ h6:hover > .pkc-heading-anchor,
 
 /* OS の「視差効果を減らす」を出している人には、動きをほぼ即時にする */
 @media (prefers-reduced-motion: reduce) {
+  /* 🔴 連動グラフの縮小 ⇄ 実サイズ(v4.2 PR-1)は動かさずに切り替える */
+  .pkc-gpu-chart-viewport,
+  .pkc-gpu-chart-viewport > .pkc-gpu-chart-stage {
+    transition: none;
+  }
   /* 🔴 無限キャンバスの点の格子は出さない(PR-09)── 動かすたびに流れる模様を抑える */
   [data-pkc-field='canvas-viewport'] {
     background-image: none;

@@ -84,6 +84,11 @@ export interface RasterKey {
   palette: DiagramPalette;
   /** 表示幅(CSS px)。⚠ 端数で鍵が散らないよう呼び側が丸める。 */
   width: number;
+  /**
+   * 🔴 **固定の高さ**(CSS px。グラフの `"height"` / 囲みの `height=`。v4.2 PR-1)。
+   * ⚠ 省略時は鍵に入らない(既存の鍵と互換)── 産出器が幅から決める。
+   */
+  height?: number;
   /** 画素密度(Retina で焼き直す)。 */
   dpr: number;
   /**
@@ -246,6 +251,8 @@ export function cacheKey(k: RasterKey): string {
     k.theme,
     colors,
     k.width,
+    // 🔑 固定の高さは指定したときだけ鍵に入れる(無指定の鍵は今までと同じ字)
+    ...(k.height === undefined ? [] : [`h${String(k.height)}`]),
     k.dpr,
     k.source,
   ].join(SEP);

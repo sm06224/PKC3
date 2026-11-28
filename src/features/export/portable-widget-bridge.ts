@@ -7,7 +7,7 @@
  *
  * ## 受け持つ 4 つ
  *
- * 1. 高さ追従(`pkc-html-render-resize`)── 上限は `HTML_SANDBOX_MAX_HEIGHT`
+ * 1. 高さ追従(`pkc-html-render-resize`)── 上限は `HTML_SANDBOX_MAX_HEIGHT`。縦幅を固定した箱(`data-pkc-fixed-height`。v4.2 PR-1)は上書きしない
  * 2. テーマ連動(`pkc-widget-ready` → `pkc-widget-theme`)── OS の明暗の切り替え・親の `<html>` の属性の変化でも配り直す
  * 3. 同じノートの参照(`pkc-widget-context-req` → `pkc-widget-context-res`)── 答えはホストの `getFrameContext(iframe)` だけ
  * 4. 安全なファイルの入出力(`pkc-widget-dl-req` / `pkc-widget-file-req`)── 本体の確認バーと同じ契約
@@ -34,6 +34,7 @@
  * - 受け口は `message` 1 本。箱が外れたかの見張り(`MutationObserver`)は確認バーが出ている間だけ。
  * - テーマの見張りは `matchMedia` の `change` と `<html>` の属性だけ(箱が 0 個なら配る先も 0)。
  */
+import { FIXED_HEIGHT_ATTR } from '../markdown/fence-size';
 import { inlineJson } from '@features/launcher/app-storage-shim';
 import {
   HTML_SANDBOX_MAX_HEIGHT,
@@ -100,6 +101,7 @@ function bridgeConstants(guardMs: number): Record<string, unknown> {
   return {
     resize: HTML_SANDBOX_RESIZE_MSG_TYPE,
     maxH: HTML_SANDBOX_MAX_HEIGHT,
+    fixedH: FIXED_HEIGHT_ATTR,
     frameAttr: WIDGET_FRAME_ATTR,
     theme: WIDGET_THEME_MSG_TYPE,
     ready: WIDGET_READY_MSG_TYPE,
@@ -414,6 +416,7 @@ function onMessage(ev){
   if(t===C.resize){
     if(typeof d.height!=='number')return;
     var rf=senderOf(ev.source,d.id);if(!rf)return;
+    if(rf.hasAttribute(C.fixedH))return;
     rf.style.height=Math.max(0,Math.min(C.maxH,d.height))+'px';return;
   }
   if(t!==C.ready&&t!==C.creq&&t!==C.dlReq&&t!==C.fReq)return;

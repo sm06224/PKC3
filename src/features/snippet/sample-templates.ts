@@ -420,7 +420,7 @@ export const SAMPLE_TEMPLATES: readonly SampleTemplate[] = [
   { id: 'a4-report', kind: 'note', title: 'A4 報告書(印刷レイアウト)', summary: 'A4 縦・改ページ入りの業務報告書', body: A4_REPORT_BODY },
   { id: 'two-column-handout', kind: 'note', title: '2 段組み配布資料', summary: 'A4 横・2 段組みの案内資料', body: TWO_COLUMN_BODY },
   { id: 'idea-canvas-board', kind: 'note', title: 'アイデア整理ボード(無限キャンバス)', summary: '付箋と接続線ですぐ始められるボード', body: IDEA_BOARD_BODY },
-  { id: 'table-widget-note', kind: 'note', title: '表＋集計 HTML ツールノート', summary: 'Markdown の表をツールで自動集計', body: TABLE_WIDGET_BODY },
+  { id: 'table-widget-note', kind: 'note', title: '表＋集計ツール', summary: 'Markdown の表をツールで自動集計', body: TABLE_WIDGET_BODY },
   { id: 'scene-3d-layout', kind: 'note', title: '3D 配置メモ(3D の図)', summary: '立体で配置や構成をメモする', body: SCENE_3D_BODY },
 ];
 

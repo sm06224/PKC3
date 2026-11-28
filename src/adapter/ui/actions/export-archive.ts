@@ -8,6 +8,7 @@
  * ⚠ 書出しは **asset gate の内側**(取込 / 整理と排他)。書出し中に添付が
  * 掃除されると「meta はあるが bytes が無い」を掴んで欠けたアーカイブができる。
  */
+import type { FenceSize } from '@features/markdown/fence-size';
 import { errorText } from '@features/error-text';
 import type { Dispatcher } from '@adapter/state/dispatcher';
 import { exportBlockedNote } from '@adapter/state/app-state';
@@ -146,6 +147,8 @@ export interface ExportDeps {
      *   明るい線と字の図が白地に載って読みにくい。
      */
     paper?: boolean,
+    /** 🔴 囲みに書いた縦横(` ```chart width=640 height=300 `。v4.2 PR-1)。省略 = 今までどおり。 */
+    size?: FenceSize,
   ): Promise<{ blob: Blob; cssWidth: number } | null>;
   /**
    * 🔴 **図をベクタ(SVG)で起こす**(#238。user 指示 2026-08-17

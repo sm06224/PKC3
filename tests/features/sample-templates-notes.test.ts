@@ -151,7 +151,7 @@ describe('アイデア整理ボード', () => {
   });
 });
 
-describe('表＋集計 HTML ツールノート', () => {
+describe('表＋集計ツール', () => {
   const made = madeOf('table-widget-note');
   const html = fences(made).find((f) => f.info.startsWith('html'))!;
 

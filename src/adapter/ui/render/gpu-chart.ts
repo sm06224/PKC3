@@ -58,6 +58,7 @@ import { buildChartFrame, heatColor, parseCssRgb, rgbCss, type ChartFrame, type 
 import { wheelDeltaPx } from '@features/viewer3d/orbit-math';
 import { easeOutCubic, interpolateChartSpec } from '@features/chart/gpu-chart-bind';
 import { seriesColors } from './chart-raster';
+import { fenceSizeFromAttrs, fenceWidthCss, type FenceSize } from '@features/markdown/fence-size';
 import { readPalette, type DiagramPalette } from './mermaid-raster';
 import { cssColorToHex } from './css-color';
 import { typingQuietIn } from './typing-gate';
@@ -435,13 +436,17 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob | null> {
  */
 export async function renderGpuChartPng(
   source: string,
-  opts: { width?: number; dpr?: number; theme?: ChartTheme; doc?: Document } = {},
+  opts: { width?: number; dpr?: number; theme?: ChartTheme; doc?: Document; size?: FenceSize } = {},
 ): Promise<{ blob: Blob; cssWidth: number }> {
-  const parsed = parseGpuChartSpec(source);
+  // 🔴 囲みに書いた縦横(v4.2 PR-1)も同じ門(`parseGpuChartSpec`)で JSON と合わせる
+  const parsed = parseGpuChartSpec(source, opts.size ?? {});
   if (!parsed.ok) throw new Error(parsed.error);
   const spec = parsed.spec;
   if (spec.source !== null) throw new Error('添付の CSV を参照するグラフは、書き出すファイルに画像で入れられません');
-  const width = opts.width ?? 720;
+  const base = opts.width ?? 720;
+  // 🔑 横幅の固定: px はその幅、% は基準の幅に対する割合で焼く
+  const width =
+    spec.width === undefined ? base : spec.width.unit === 'px' ? spec.width.value : Math.max(160, Math.round((base * spec.width.value) / 100));
   const doc = opts.doc ?? document;
   const canvas = doc.createElement('canvas');
   const drawn = paintChart2d(canvas, spec, homeRangeOf(spec), width, spec.height, opts.dpr ?? 2, opts.theme ?? PAPER_CHART_THEME);
@@ -531,6 +536,15 @@ class ChartView implements GpuChartView {
     this.element.className = 'pkc-gpu-chart';
     this.element.setAttribute('data-pkc-gpu-chart', '');
     this.element.setAttribute('data-pkc-gpu-chart-state', 'loading');
+    /**
+     * 🔴 **横幅の固定**(JSON の `"width"` か囲みの `width=`。v4.2 PR-1)── 本文の幅を超えない(`max-width: 100%`)。
+     *   ステージは枠の幅に従うので、描く論理解像度もこの幅になる。⚠ 無指定では style に触らない(見え方を変えない)。
+     */
+    if (spec.width !== undefined) {
+      this.element.style.width = fenceWidthCss(spec.width);
+      this.element.style.maxWidth = '100%';
+      this.element.setAttribute('data-pkc-gpu-chart-fixed-width', fenceWidthCss(spec.width));
+    }
 
     const bar = doc.createElement('div');
     bar.className = 'pkc-gpu-chart-bar';
@@ -1434,11 +1448,13 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
       return;
     }
     const data = extractBoundChartFrames(body, spec);
-    const first = data.frames.find((f) => f.spec !== null)?.spec ?? (spec.series.length > 0 ? spec : null);
-    if (first === null) {
+    const firstData = data.frames.find((f) => f.spec !== null)?.spec ?? (spec.series.length > 0 ? spec : null);
+    if (firstData === null) {
       failHost(host, `スクロール連動のグラフを描けません: 本文に連動するデータがありません(${BIND_DATA_HINT[spec.bind.mode]})`);
       return;
     }
+    // 🔑 器の大きさ(縦横の固定)は全体の指定から取る ── 連動のデータ(見出しごと)は大きさを持たない(v4.2 PR-1)
+    const first: GpuChartSpec = { ...firstData, height: spec.height, ...(spec.width === undefined ? {} : { width: spec.width }) };
     const view = mountGpuChart(host, first);
     views.set(host, view);
     host.setAttribute(STATE_ATTR, 'ready');
@@ -1481,7 +1497,11 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
       timers.add(t);
       return;
     }
-    const parsed = parseGpuChartSpec(host.getAttribute(GPU_CHART_SRC_ATTR) ?? '');
+    // 🔴 囲みに書いた縦横(器の `data-pkc-fixed-width` / `-height`。v4.2 PR-1)── 優先は JSON > 囲み > 既定
+    const parsed = parseGpuChartSpec(
+      host.getAttribute(GPU_CHART_SRC_ATTR) ?? '',
+      fenceSizeFromAttrs((name) => host.getAttribute(name)),
+    );
     if (!parsed.ok) {
       failHost(host, parsed.error);
       return;

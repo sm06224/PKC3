@@ -541,7 +541,7 @@ import { renderToSvg, readPalette, svgWithIntrinsicSize, rasterize } from '@adap
 import { MERMAID_KIND, hydrateAllNow } from '@adapter/ui/render/mermaid-hydrate';
 import { preparePrintBody } from '@adapter/ui/render/print-prepare';
 import { PRINT_PALETTE, PRINT_THEME } from '@adapter/ui/render/diagram-print';
-import { CHART_KIND } from '@adapter/ui/render/chart-raster';
+import { CHART_KIND, chartRasterSize } from '@adapter/ui/render/chart-raster';
 import { PAPER_CHART_THEME, readChartTheme, renderGpuChartPng } from '@adapter/ui/render/gpu-chart';
 import { PLOTLY_KIND } from '@adapter/ui/render/plotly-raster';
 import { askSqlEmbed, connectEmbedViewStale, setEmbedViewRunner, setSqlEmbedRunner } from '@adapter/ui/render/sql-embed-hydrate';
@@ -3555,7 +3555,7 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
           kind === 'chart' || kind === 'gpu-chart' || kind === 'plotly' ? null : renderToSvg(source, paper === true ? PRINT_PALETTE : readPalette()),
         // 🔴 本文のアイコン(`:home:`)を PNG に焼く(#853。Word に画像で埋める)
         renderIcon: (name) => rasterizeIcon(name),
-        renderFigure: async (kind, source, paper) => {
+        renderFigure: async (kind, source, paper, size) => {
           // 🔴 ` ```svg ` の囲み(#1163 依頼 235)── 原文が SVG そのもの。EMF にできなかった回の PNG(描く器は図と同じ `rasterize`)
           if (kind === 'svg') {
             const drawn = await rasterize(source, 720, 2);
@@ -3567,16 +3567,20 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
               width: 720,
               dpr: 2,
               theme: paper === true ? PAPER_CHART_THEME : readChartTheme(document.documentElement),
+              // 🔴 囲みに書いた縦横(v4.2 PR-1)── JSON の明示が優先(`parseGpuChartSpec`)
+              ...(size === undefined ? {} : { size }),
             });
           }
           const diagram = kind === 'chart' ? CHART_KIND : kind === 'plotly' ? PLOTLY_KIND : MERMAID_KIND;
+          // 🔴 グラフの縦横の固定(v4.2 PR-1)── JSON > 囲み。幅は 720 を基準に解き、高さは鍵に添える(無指定は今までどおり)
+          const fixed = kind === 'chart' ? chartRasterSize(source, size ?? {}, 720) : { width: 720 };
           const raster = await diagram.render({
             source,
             kind,
             theme:
               paper === true ? PRINT_THEME : (document.documentElement.getAttribute('data-pkc-theme') ?? 'light'),
             palette: paper === true ? PRINT_PALETTE : readPalette(),
-            width: 720,
+            ...fixed,
             // ⚠ 紙に載るので **2 倍**で焼く(画面の dpr に合わせない ── 同じ文書が
             //    端末ごとに違う解像度になる)
             dpr: 2,

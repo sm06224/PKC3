@@ -282,3 +282,43 @@ describe('箱の中の計測 script(#529 の取り残し)', () => {
     expect(run([120, 316])).toEqual([120, 316]);
   });
 });
+
+describe('🔴 縦横の固定(` ```html width= height= `。v4.2 PR-1)', () => {
+  it('固定した箱は申告で高さを変えず、憶えもしない・対照群は追従する', () => {
+    const off = installHtmlSandboxResizer();
+    const fixed = iframeWithId('pkc-html-render-fixed');
+    fixed.setAttribute('data-pkc-fixed-height', '320');
+    fixed.style.height = '320px';
+    post({ type: HTML_SANDBOX_RESIZE_MSG_TYPE, id: 'pkc-html-render-fixed', height: 1200 }, fixed.fakeWindow);
+    expect(fixed.style.height).toBe('320px');
+    const free = iframeWithId('pkc-html-render-free');
+    post({ type: HTML_SANDBOX_RESIZE_MSG_TYPE, id: 'pkc-html-render-free', height: 1200 }, free.fakeWindow);
+    expect(free.style.height).toBe('1200px');
+    off();
+    fixed.remove();
+    free.remove();
+  });
+
+  it('前の申告の高さを、固定した箱には当てない(restoreSandboxHeights)', () => {
+    rememberSandboxHeight('pkc-html-render-restore', 640);
+    const f = document.createElement('iframe');
+    f.setAttribute('data-pkc-html-render-id', 'pkc-html-render-restore');
+    f.setAttribute('data-pkc-fixed-height', '120');
+    f.style.height = '0px';
+    restoreSandboxHeights([f]);
+    expect(f.style.height).toBe('0px');
+    f.removeAttribute('data-pkc-fixed-height');
+    restoreSandboxHeights([f]);
+    expect(f.style.height).toBe('640px');
+  });
+
+  it('箱の style と属性: 無指定は今までの字そのもの・指定は width / max-width / height', () => {
+    const plain = buildHtmlSandboxIframe('<p>x</p>');
+    expect(plain).toContain('style="width:100%;border:0;height:0;display:block;"');
+    expect(plain).not.toContain('data-pkc-fixed-');
+    const sized = buildHtmlSandboxIframe('<p>x</p>', '', 0, false, null, {}, { width: { value: 480, unit: 'px' }, height: 320 });
+    expect(sized).toContain('style="width:480px;max-width:100%;border:0;height:320px;display:block;"');
+    expect(sized).toContain('data-pkc-fixed-width="480px"');
+    expect(sized).toContain('data-pkc-fixed-height="320"');
+  });
+});

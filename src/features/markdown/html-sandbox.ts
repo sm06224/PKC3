@@ -46,6 +46,7 @@
 import {
   HTML_SANDBOX_BLOCKED_MSG_TYPE,
 } from './external-images';
+import { FIXED_HEIGHT_ATTR, fenceFrameStyle, fenceSizeAttrs, type FenceSize } from './fence-size';
 import { WIDGET_BASE_STYLE, widgetPrelude, widgetThemePreludeScript } from './widget-bridge';
 import { buildSandboxCsp, DEFAULT_WIDGET_PERMISSIONS, type WidgetPermissionSet } from './widget-permissions';
 
@@ -151,6 +152,11 @@ export function buildHtmlSandboxIframe(
   widgetId: string | null = null,
   /** 箱の中だけの `localStorage` の初期値(本文の状態ブロック。PR-08)。⚠ 保存はしない。 */
   widgetSeed: Readonly<Record<string, string>> = {},
+  /**
+   * 🔴 **囲みに書いた縦横の固定**(` ```html width=480 height=320 `。v4.2 PR-1)。
+   * ⚠ 無指定(`{}`)なら今までどおりの字(`DEFAULT_FRAME_STYLE`)── 出力は 1 バイトも変わらない。
+   */
+  size: FenceSize = {},
 ): string {
   // iframe ID:DOM 内 unique(postMessage で iframe を特定)。
   // 🔴 **中身から決める**(乱数にしない ── P8 段⑩ で判明)。かつて
@@ -181,8 +187,8 @@ export function buildHtmlSandboxIframe(
     `sandbox="allow-scripts" ` +
     `referrerpolicy="no-referrer" ` +
     `loading="lazy" ` +
-    `${WIDGET_FRAME_ATTR}="" ` +
-    `style="width:100%;border:0;height:0;display:block;" ` +
+    `${WIDGET_FRAME_ATTR}=""${fenceSizeAttrs(size)} ` +
+    `style="${fenceFrameStyle(size)}" ` +
     `title="HTML sandbox render"${sourceLineAttrs} ` +
     `srcdoc="${srcdoc}"></iframe>`
   );
@@ -301,6 +307,8 @@ export function restoreSandboxHeights(inserted: readonly Element[]): void {
       ? [el as HTMLElement]
       : [...el.querySelectorAll<HTMLElement>('iframe[data-pkc-html-render-id]')];
     for (const f of frames) {
+      // 🔑 縦幅を固定した箱は当てない(v4.2 PR-1)
+      if (f.hasAttribute(FIXED_HEIGHT_ATTR)) continue;
       const h = sandboxHeights.get(f.getAttribute('data-pkc-html-render-id') ?? '');
       // 畳まれた(`height:0`)箱だけ ── 申告済みの高さを上書きしない
       if (h !== undefined && h > 0 && parseFloat(f.style.height) === 0) f.style.height = `${h}px`;
@@ -341,6 +349,11 @@ export function installHtmlSandboxResizer(targetWindow: Window = window): () => 
     if (typeof data.height !== 'number') return;
     const iframe = resolveSandboxSender(targetWindow.document, event.source, data.id);
     if (!iframe) return;
+    /**
+     * 🔴 **縦幅を固定した箱は、中からの申告で高さを変えない**(` ```html height=320 `。v4.2 PR-1)。
+     *   溢れた分は箱の中でスクロールして読む。⚠ 憶えもしない(`restoreSandboxHeights` が固定を上書きしない)。
+     */
+    if (iframe.hasAttribute(FIXED_HEIGHT_ATTR)) return;
     const height = clampSandboxHeight(data.height);
     iframe.style.height = `${height}px`;
     rememberSandboxHeight(iframe.getAttribute('data-pkc-html-render-id') ?? '', height);

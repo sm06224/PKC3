@@ -22,6 +22,7 @@
  * ⚠ `id=` の無い囲みは**何も保存しない**(既存の挙動のまま。テーマ連動だけ効く)。
  */
 import { buildStorageShim, inlineJson } from '@features/launcher/app-storage-shim';
+import { fenceSizeAttrs, type FenceSize } from './fence-size';
 import {
   WIDGET_DL_REQ_MSG_TYPE,
   WIDGET_DL_RES_MSG_TYPE,
@@ -377,12 +378,14 @@ export function widgetPlaceholderHtml(
   allowExternalImages: boolean,
   /** 添付から読み込んだ HTML の鍵(#2090)。 */
   assetKey: string | null = null,
+  /** 🔴 囲みに書いた縦横の固定(v4.2 PR-1)。無指定(`{}`)なら属性を足さない(出力は不変)。 */
+  size: FenceSize = {},
 ): string {
   const src = escapeAttr(content);
   const idAttrs = widgetId === null ? '' : ` ${WIDGET_ID_ATTR}="${escapeAttr(widgetId)}" ${WIDGET_LIVE_ATTR}="1"`;
   const assetAttr = assetKey === null ? '' : ` ${WIDGET_ASSET_ATTR}="${escapeAttr(assetKey)}"`;
   return (
-    `<div class="pkc-widget-placeholder" ${WIDGET_SRC_ATTR}="${src}"${idAttrs}${assetAttr}` +
+    `<div class="pkc-widget-placeholder" ${WIDGET_SRC_ATTR}="${src}"${idAttrs}${assetAttr}${fenceSizeAttrs(size)}` +
     ` ${WIDGET_KIND_ATTR}="html"${allowExternalImages ? ' data-pkc-widget-ext="1"' : ''} data-pkc-md-block-kind="html">` +
     `<pre class="pkc-widget-source"><code class="language-html">${src}</code></pre></div>`
   );

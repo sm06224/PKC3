@@ -29,6 +29,7 @@
  * - 配色の見張り(`MutationObserver`)は**箱が 1 つでも `ready` を送ってきたとき**に初めて付ける ──
  *   箱の無いノートだけを読んでいる間は何も見張らない。
  */
+import { fenceFrameStyle, fenceSizeAttrPairs, fenceSizeFromAttrs } from '@features/markdown/fence-size';
 import {
   buildHtmlSandboxDoc,
   resolveSandboxSender,
@@ -924,7 +925,10 @@ export function hydrateWidgets(root: ParentNode | readonly ParentNode[]): Mermai
     f.setAttribute('referrerpolicy', 'no-referrer');
     f.setAttribute(WIDGET_FRAME_ATTR, '');
     f.title = 'ウィジェット';
-    f.style.cssText = 'width:100%;border:0;height:0;display:block;';
+    // 🔴 器に書いた縦横の固定(v4.2 PR-1)── 無指定なら今までどおりの字
+    const size = fenceSizeFromAttrs((name) => host.getAttribute(name));
+    f.style.cssText = fenceFrameStyle(size);
+    for (const [name, value] of fenceSizeAttrPairs(size)) f.setAttribute(name, value);
     const ext = host.getAttribute('data-pkc-widget-ext') === '1';
     const assetKey = host.getAttribute(WIDGET_ASSET_ATTR);
     /**

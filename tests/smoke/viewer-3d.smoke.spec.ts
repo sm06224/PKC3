@@ -79,6 +79,9 @@ const SCENE = [
 /** 対照群の小さな静的グラフ(今までどおり PNG の <img>)。 */
 const STATIC_CHART = '```chart\n{"type":"bar","labels":["1月","2月"],"datasets":[{"label":"売上","data":[10,20]}]}\n```\n';
 
+/** 🔴 縦横を固定した静的グラフ(v4.2 PR-1)。 */
+const SIZED_CHART = '```chart width=320 height=180\n{"type":"line","labels":["1月","2月"],"datasets":[{"label":"件数","data":[3,5]}]}\n```\n';
+
 /** 1 万点の対話グラフ(v4.1 PR-7)。 */
 const LIVE_CHART = [
   '```chart live',
@@ -106,12 +109,20 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   const appOrigin = new URL(page.url()).origin;
 
   // ① 3D を含まないノート ── Three.js もローダーも取りに行かない
-  await writeNote(page, 'ふつうのメモ', '# メモ\n\n- 箇条書き\n\n```json\n{"objects":[]}\n```\n\n' + STATIC_CHART);
+  // 🔴 v4.2 PR-1: 縦横を固定した静的グラフも同じノートに置く(起動を増やさない)
+  await writeNote(page, 'ふつうのメモ', '# メモ\n\n- 箇条書き\n\n```json\n{"objects":[]}\n```\n\n' + STATIC_CHART + '\n' + SIZED_CHART);
   await page.waitForTimeout(1000);
   expect(reqs.map((r) => r.url()).filter((u) => THREE_CHUNK.test(u)), '3D の無いノートで Three.js / ローダーを読んだ').toEqual([]);
   expect(await page.locator('[data-pkc-3d-viewer]').count()).toBe(0);
   // 🔑 対照群(v4.1 PR-7): 小さな静的 ```chart は今までどおり PNG の <img>(GPU の器を作らず、Three.js も読まない)
-  await expect(page.locator('[data-pkc-field="detail-body"] [data-pkc-chart-src] img')).toHaveCount(1, { timeout: 15_000 });
+  await expect(page.locator('[data-pkc-field="detail-body"] [data-pkc-chart-src] img')).toHaveCount(2, { timeout: 15_000 });
+  // 🔴 縦横の固定(v4.2 PR-1)── ```chart width=320 height=180 は 320 × 180 で描く(対照群は本文の幅に合わせた既定の大きさ)
+  const sizedImg = page.locator('[data-pkc-field="detail-body"] [data-pkc-chart-src][data-pkc-fixed-width] img');
+  await expect(sizedImg).toHaveCount(1);
+  await expect.poll(async () => Math.round((await sizedImg.boundingBox())?.width ?? 0)).toBe(320);
+  await expect.poll(async () => Math.round((await sizedImg.boundingBox())?.height ?? 0)).toBe(180);
+  const plainImg = page.locator('[data-pkc-field="detail-body"] [data-pkc-chart-src]:not([data-pkc-fixed-width]) img');
+  expect(Math.round((await plainImg.boundingBox())!.width), '対照群まで 320px になった').not.toBe(320);
   expect(await page.locator('[data-pkc-field="detail-body"] [data-pkc-gpu-chart-src]').count()).toBe(0);
   expect(reqs.map((r) => r.url()).filter((u) => THREE_CHUNK.test(u)), '静的なグラフで Three.js を読んだ').toEqual([]);
 
@@ -346,6 +357,28 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   await expect(stuck).toHaveCount(1);
   await expect(stuck.locator('[data-pkc-gpu-chart-src]')).toHaveCount(1);
   await expect(stuck).toHaveCSS('position', 'sticky');
+  /**
+   * 🔴 縮小 ⇄ 実サイズ(v4.2 PR-1)── 上端に固定した連動グラフは縮小した絵(見た目 140px)で見せ、実描画(220px)は縮めない。
+   *   押すと実サイズ → Esc で縮小に戻す。⚠ 修正を外すと(縦を押し潰す `max-height: 32vh` に戻すと)ここが落ちる。
+   */
+  const bViewport = bChart.locator('[data-pkc-field="gpu-chart-viewport"]');
+  await expect(bChart).toHaveAttribute('data-pkc-gpu-chart-compact', 'true');
+  await expect.poll(async () => Math.round((await bViewport.boundingBox())?.height ?? 0)).toBe(140);
+  expect(await bStage.evaluate((el) => el.clientHeight), '実描画の高さが縮んだ').toBe(220);
+  const cBox = (await bStage.boundingBox())!;
+  const cWid = await bStage.evaluate((el) => el.clientWidth);
+  expect(Math.abs(cBox.height - 140), '縮小した見た目の高さ').toBeLessThan(3);
+  expect(Math.abs(cBox.width - (cWid * 140) / 220), '縦横比が崩れた').toBeLessThan(4);
+  await expect(bChart.locator('[data-pkc-field="gpu-chart-compact-hint"]')).toBeVisible();
+  await expect(bChart.locator('[data-pkc-field="gpu-chart-bar"]')).toBeHidden();
+  await clickReal(page, bViewport);
+  await expect(bChart).toHaveAttribute('data-pkc-gpu-chart-compact', 'false');
+  await expect.poll(async () => Math.round((await bStage.boundingBox())?.height ?? 0)).toBe(220);
+  await expect(bViewport).toHaveAttribute('aria-expanded', 'true');
+  await expect(bChart.locator('[data-pkc-field="gpu-chart-expand"]')).toHaveText('縮小に戻す');
+  await page.keyboard.press('Escape');
+  await expect(bChart).toHaveAttribute('data-pkc-gpu-chart-compact', 'true');
+  await expect.poll(async () => Math.round((await bViewport.boundingBox())?.height ?? 0)).toBe(140);
   const heads = page.locator('[data-pkc-field="detail-body"] h2');
   await expect(heads).toHaveCount(3);
   const readTo = async (i: number): Promise<void> => {
@@ -400,6 +433,23 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   await expect(bLabel).toHaveText('連動: Q3 (3 / 3)', { timeout: 5_000 });
   await clickReal(page, bChart.locator('[data-pkc-gpu-chart-op="bind-prev"]'));
   await expect(bLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
+  // 🔴 縮小中の移動先(v4.2 PR-1)── 見出しは縮小した固定の塊のすぐ下に来る(実描画の高さぶん下へずれない)
+  await expect(bChart).toHaveAttribute('data-pkc-gpu-chart-compact', 'true');
+  await expect
+    .poll(
+      async () => {
+        const h = (await heads.nth(1).boundingBox())!;
+        const st = (await stuck.boundingBox())!;
+        return Math.round(h.y - (st.y + st.height));
+      },
+      { message: '見出しが縮小した固定の塊のすぐ下に来ない', timeout: 5_000 },
+    )
+    .toBeGreaterThanOrEqual(-2);
+  {
+    const h = (await heads.nth(1).boundingBox())!;
+    const st = (await stuck.boundingBox())!;
+    expect(h.y - (st.y + st.height), '見出しが固定の塊から離れすぎ').toBeLessThan(40);
+  }
 
   // ⑧ 🔴 別ウィンドウ(v4.1 PR-9、#2095 後半)── 「別ウィンドウで開く」で noopener の窓が開き、グラフだけの軽い起動で描く。
   //    メインウィンドウを読み進めると別ウィンドウも切り替わる / 別ウィンドウだけ固定中 → 解除で最新へ / 別ウィンドウの次へで本文が動く
@@ -412,6 +462,9 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   };
   await toTop();
   await expect(bLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 5_000 });
+  // 🔑 縮小中は上の行(別ウィンドウで開く を含む)を隠している ── 実サイズで表示してから押す(v4.2 PR-1)
+  await clickReal(page, bChart.locator('[data-pkc-field="gpu-chart-expand"]'));
+  await expect(bChart).toHaveAttribute('data-pkc-gpu-chart-compact', 'false');
   const nextPage = page.context().waitForEvent('page');
   await clickReal(page, bChart.locator('[data-pkc-field="gpu-chart-popout"]'));
   const pop = await nextPage;

@@ -165,7 +165,8 @@ export function serializeGpuChartSpec(spec: GpuChartSpec): SerializedGpuChartSpe
     v: 1,
     type: spec.type,
     ...(spec.title === undefined ? {} : { title: spec.title }),
-    height: spec.height,
+    // ⚠ 囲みで固定した高さ(80〜2000)は、受け手の検め(160〜900)に合わせて丸める ── 別ウィンドウは自分の大きさで描く(v4.2 PR-1)
+    height: Math.max(GPU_CHART_MIN_HEIGHT, Math.min(GPU_CHART_MAX_HEIGHT, spec.height)),
     labels: [...spec.labels],
     xIsIndex: spec.xIsIndex,
     series: spec.series.map((s) => ({ label: s.label, xs: s.xs, ys: s.ys, ...(s.color === undefined ? {} : { color: s.color }) })),

@@ -245,6 +245,19 @@ describe('高さ追従・テーマ・同じノートの参照', () => {
     expect(b.f.style.height).toBe('');
   });
 
+  it('🔴 縦幅を固定した箱(`data-pkc-fixed-height`。v4.2 PR-1)は、中からの申告で高さを変えない', () => {
+    bridge = install();
+    const a = frame(boxA, 'fa');
+    a.f.setAttribute('data-pkc-fixed-height', '320');
+    a.f.style.height = '320px';
+    post({ type: HTML_SANDBOX_RESIZE_MSG_TYPE, id: 'fa', height: 900 }, a.w);
+    expect(a.f.style.height).toBe('320px');
+    // 対照群: 固定していない箱は今までどおり追従する
+    const b = frame(boxB, 'fb');
+    post({ type: HTML_SANDBOX_RESIZE_MSG_TYPE, id: 'fb', height: 900 }, b.w);
+    expect(b.f.style.height).toBe('900px');
+  });
+
   it('準備の合図にテーマで答え、OS の明暗の切り替えと親の属性の変化で配り直す', async () => {
     let dark = false;
     let onChange: (() => void) | null = null;
