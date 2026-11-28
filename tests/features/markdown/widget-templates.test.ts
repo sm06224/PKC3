@@ -23,13 +23,24 @@ describe('WIDGET_TEMPLATES', () => {
       'pomodoro',
     ]);
     expect(WIDGET_TEMPLATES.map((t) => t.label)).toEqual([
-      'カウンター・進捗トラッカー',
-      'チェック集計リスト',
-      '簡易計算・試算ツール',
-      'ノート内テーブル集計',
-      '表の検索・絞り込み',
+      '進捗カウンター',
+      'チェックリスト',
+      '簡易電卓',
+      '表の集計',
+      '表の絞り込み',
       '作業タイマー',
     ]);
+  });
+
+  it('🔴 名前と補足は短い(v4.2 PR-1 ── 一覧の行が長くて読めない、の再発止め)', () => {
+    for (const t of WIDGET_TEMPLATES) {
+      expect([...t.label].length, t.baseId).toBeLessThanOrEqual(12);
+      expect([...t.hint].length, t.baseId).toBeGreaterThan(0);
+      expect([...t.hint].length, t.baseId).toBeLessThanOrEqual(22);
+      // 補足は 1 句(文の終わり・括弧の連結を持たない)
+      expect(t.hint, t.baseId).not.toMatch(/[。()（）]/);
+      expect(t.label, t.baseId).not.toMatch(/[()（）]/);
+    }
   });
 
   for (const t of WIDGET_TEMPLATES) {
@@ -75,7 +86,7 @@ describe('WIDGET_TEMPLATES', () => {
     const t = WIDGET_TEMPLATES.find((x) => x.baseId === 'pomodoro')!;
     expect(t.html).toContain('clearInterval(timer)');
     expect(t.html).toContain("S.setItem('sets'");
-    expect(t.hint).toBe('25 分作業 / 5 分休憩を計り回数を記録');
+    expect(t.hint).toBe('25 分作業 / 5 分休憩の計測');
   });
 
   it('ノート内テーブル集計は readTables で同じノートの表を読む', () => {

@@ -20,11 +20,22 @@
  *   この 3 つの属性を持つ器の中身を原文に戻すので、残すと絵が消える。原文は `data-pkc-figure-src` に残す。
  */
 
+import { fenceSizeFromAttrs, fenceWidthCss, isFenceSizeEmpty, type FenceSize } from '../markdown/fence-size';
+
 export interface FigureBakers {
   /** 図(mermaid)を SVG の字にする。`null` = 描けない。 */
   readonly vector: (kind: string, source: string) => Promise<string | null>;
-  /** グラフ等を PNG にする。`null` = 描けない。 */
-  readonly raster: (kind: string, source: string) => Promise<{ blob: Blob; cssWidth: number } | null>;
+  /**
+   * グラフ等を PNG にする。`null` = 描けない。
+   * 🔴 `size` = 囲みに書いた縦横(` ```chart width=640 height=300 `。v4.2 PR-1)。無指定なら `undefined`(今までどおり)。
+   * ⚠ 3 つ目は紙の配色(`paper`)── 閲覧用 HTML は渡さない(`undefined`)。
+   */
+  readonly raster: (
+    kind: string,
+    source: string,
+    paper?: boolean,
+    size?: FenceSize,
+  ) => Promise<{ blob: Blob; cssWidth: number } | null>;
 }
 
 /**
@@ -33,9 +44,23 @@ export interface FigureBakers {
  */
 type FigureKind = 'mermaid' | 'chart' | 'plotly' | 'gpu-chart';
 
-/** `markdown-render.ts` が出す器(mermaid / chart)。属性の値は HTML の escape 済み。 */
+/**
+ * `markdown-render.ts` が出す器(mermaid / chart)。属性の値は HTML の escape 済み。
+ * 🔴 3 つ目の組 = 縦横の固定の属性(`data-pkc-fixed-width` / `-height`。v4.2 PR-1)── 無ければ空。
+ */
 const FIGURE_RE =
-  /<div class="pkc-(mermaid|chart|plotly|gpu-chart)-placeholder" data-pkc-(?:mermaid|chart|plotly|gpu-chart)-src="([^"]*)" data-pkc-md-block-kind="(?:mermaid|chart|plotly)"><pre[^>]*><code[^>]*>[\s\S]*?<\/code><\/pre><\/div>/g;
+  /<div class="pkc-(mermaid|chart|plotly|gpu-chart)-placeholder" data-pkc-(?:mermaid|chart|plotly|gpu-chart)-src="([^"]*)" data-pkc-md-block-kind="(?:mermaid|chart|plotly)"((?: data-pkc-fixed-(?:width|height)="[^"]*")*)><pre[^>]*><code[^>]*>[\s\S]*?<\/code><\/pre><\/div>/g;
+
+/** 器の縦横の属性(正規表現の 3 つ目の組)を読み直す ── 同じ門(`fenceSizeFromAttrs`)を通す。 */
+function sizeOfAttrs(attrs: string): FenceSize {
+  const pick = (name: string): string | null => new RegExp(` ${name}="([^"]*)"`).exec(attrs)?.[1] ?? null;
+  return fenceSizeFromAttrs(pick);
+}
+
+/** 縦横を鍵に添える(同じ原文でも大きさが違えば別の絵)。無指定なら空。 */
+function sizeKey(size: FenceSize): string {
+  return isFenceSizeEmpty(size) ? '' : `\n${size.width === undefined ? '' : fenceWidthCss(size.width)}x${String(size.height ?? '')}`;
+}
 
 function unescapeAttr(s: string): string {
   return s
@@ -59,7 +84,7 @@ function utf8Base64(text: string): string {
 }
 
 /** 描いた絵の `<img>`(原文は `alt` に入れない ── 長いので `data-pkc-figure-src` へ)。 */
-async function bakeOne(kind: FigureKind, source: string, bakers: FigureBakers): Promise<string | null> {
+async function bakeOne(kind: FigureKind, source: string, bakers: FigureBakers, size: FenceSize = {}): Promise<string | null> {
   if (kind === 'mermaid') {
     const svg = await bakers.vector('mermaid', source).catch(() => null);
     if (svg !== null && svg.trim() !== '') {
@@ -67,12 +92,15 @@ async function bakeOne(kind: FigureKind, source: string, bakers: FigureBakers): 
     }
   }
   // グラフ(chart.js は canvas に描くのでベクタ源が無い)と、SVG にできなかった図は PNG で
-  const drawn = await bakers.raster(kind, source).catch(() => null);
+  const fixed = !isFenceSizeEmpty(size);
+  const drawn = await (fixed ? bakers.raster(kind, source, undefined, size) : bakers.raster(kind, source)).catch(() => null);
   if (drawn === null) return null;
   const bytes = new Uint8Array(await drawn.blob.arrayBuffer());
   if (bytes.length === 0) return null;
   const alt = kind === 'mermaid' ? '図' : 'グラフ';
-  return `<img alt="${alt}" src="data:image/png;base64,${toBase64(bytes)}">`;
+  // 🔴 縦横を固定したグラフは、焼いた幅で見せ、本文の幅を超えない(v4.2 PR-1)。⚠ 無指定は今までの字のまま
+  const style = fixed ? ` style="width:${String(Math.round(drawn.cssWidth))}px;max-width:100%;height:auto"` : '';
+  return `<img alt="${alt}"${style} src="data:image/png;base64,${toBase64(bytes)}">`;
 }
 
 /**
@@ -90,12 +118,13 @@ export async function bakeFigures(
   for (const m of hits) {
     const kind = m[1] as FigureKind;
     const source = unescapeAttr(m[2] ?? '');
-    const key = `${kind}\n${source}`;
+    const size = sizeOfAttrs(m[3] ?? '');
+    const key = `${kind}\n${source}${sizeKey(size)}`;
     if (cache.has(key)) continue;
-    cache.set(key, await bakeOne(kind, source, bakers));
+    cache.set(key, await bakeOne(kind, source, bakers, size));
   }
-  return html.replace(FIGURE_RE, (whole, kind: string, escaped: string) => {
-    const img = cache.get(`${kind}\n${unescapeAttr(escaped)}`);
+  return html.replace(FIGURE_RE, (whole, kind: string, escaped: string, attrs: string) => {
+    const img = cache.get(`${kind}\n${unescapeAttr(escaped)}${sizeKey(sizeOfAttrs(attrs))}`);
     if (img === undefined || img === null) return whole;
     return `<div class="pkc-${kind}-placeholder" data-pkc-figure-src="${escaped}" data-pkc-md-block-kind="${kind === 'gpu-chart' ? 'chart' : kind}" data-pkc-figure-baked="${kind}">${img}</div>`;
   });

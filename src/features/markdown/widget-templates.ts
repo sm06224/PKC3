@@ -17,9 +17,9 @@ export type WidgetTemplateBaseId = 'tracker' | 'checklist' | 'calculator' | 'tab
 
 export interface WidgetTemplate {
   readonly baseId: WidgetTemplateBaseId;
-  /** 一覧の字。 */
+  /** 一覧の字(短い名前。12 字以内)。 */
   readonly label: string;
-  /** 一覧の説明(何ができるか)。 */
+  /** 一覧の補足(何ができるかを 1 句で。22 字以内)。行の右に控えめに出す。 */
   readonly hint: string;
   /** 囲みの中身(HTML)。 */
   readonly html: string;
@@ -409,38 +409,38 @@ ${BASE_CSS}
 export const WIDGET_TEMPLATES: readonly WidgetTemplate[] = [
   {
     baseId: 'tracker',
-    label: 'カウンター・進捗トラッカー',
-    hint: '数を増減して、目標に対する進み具合をバーで表示します',
+    label: '進捗カウンター',
+    hint: '増減と目標達成バー',
     html: TRACKER_HTML,
   },
   {
     baseId: 'checklist',
-    label: 'チェック集計リスト',
-    hint: '項目を追加してチェックを付け、完了の割合を表示します',
+    label: 'チェックリスト',
+    hint: '項目の追加と完了率',
     html: CHECKLIST_HTML,
   },
   {
     baseId: 'calculator',
-    label: '簡易計算・試算ツール',
-    hint: '単価・数量・税率・人数から、合計と 1 人あたりの金額をその場で計算します',
+    label: '簡易電卓',
+    hint: '単価・数量・税率・人数計算',
     html: CALCULATOR_HTML,
   },
   {
     baseId: 'table-summary',
-    label: 'ノート内テーブル集計',
-    hint: 'このノートの表を読み取り、行数と数値の列の合計・平均を表示します',
+    label: '表の集計',
+    hint: 'ノートの表の行数・合計・平均',
     html: TABLE_SUMMARY_HTML,
   },
   {
     baseId: 'table-filter',
-    label: '表の検索・絞り込み',
-    hint: 'このノートの表をキーワードで絞り込む',
+    label: '表の絞り込み',
+    hint: 'ノートの表をキーワード検索',
     html: TABLE_FILTER_HTML,
   },
   {
     baseId: 'pomodoro',
     label: '作業タイマー',
-    hint: '25 分作業 / 5 分休憩を計り回数を記録',
+    hint: '25 分作業 / 5 分休憩の計測',
     html: POMODORO_HTML,
   },
 ];

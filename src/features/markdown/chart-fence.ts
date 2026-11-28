@@ -18,6 +18,8 @@
  * ⚠ 上限を数で持つ(散文の規律にしない)── 事故った本文が画面と worker を潰さない。
  */
 
+import { parseFenceHeight, parseFenceWidth, type FenceWidth } from './fence-size';
+
 /** 描ける形。⚠ **一覧をここに 1 つだけ持つ**(adapter 側に 2 つ目を作らない)。 */
 export const CHART_TYPES = ['bar', 'line', 'pie', 'doughnut', 'radar', 'scatter'] as const;
 export type ChartType = (typeof CHART_TYPES)[number];
@@ -52,6 +54,13 @@ export interface ChartSpec {
   readonly title?: string;
   readonly stacked?: boolean;
   readonly legend?: boolean;
+  /**
+   * 🔴 **横幅の固定**(`"width": 480` / `"480px"` / `"60%"`。v4.2 PR-1)── 範囲は囲みの `width=` と同じ門(`parseFenceWidth`)。
+   * ⚠ 無指定では項目ごと持たない(今までの仕様の形を変えない)。
+   */
+  readonly width?: FenceWidth;
+  /** 🔴 **縦幅の固定**(`"height": 300`、px。v4.2 PR-1)── 範囲は囲みの `height=` と同じ門(`parseFenceHeight`)。 */
+  readonly height?: number;
 }
 
 export interface ChartParseResult {
@@ -187,6 +196,10 @@ export function parseChartFence(source: string): ChartParseResult {
   if (pointsCut) notes.push(`点は 1 系列 ${MAX_POINTS} までです(超えた分は描いていません)`);
 
   const title = o.title === undefined ? undefined : text120(o.title);
+  // 🔴 縦横の固定(v4.2 PR-1)── 数(px)か "480px" / "60%"。読めない値は無指定(既定の大きさ)
+  const sizeVal = (v: unknown): string | number | undefined => (typeof v === 'number' || typeof v === 'string' ? v : undefined);
+  const width = parseFenceWidth(sizeVal(o.width));
+  const height = parseFenceHeight(sizeVal(o.height));
   if (clamped) notes.push(`題名・凡例・ラベル・色は ${MAX_LABEL_CHARS} 字までです(超えた分は切りました)`);
 
   return {
@@ -197,6 +210,8 @@ export function parseChartFence(source: string): ChartParseResult {
       ...(title === undefined ? {} : { title }),
       ...(typeof o.stacked === 'boolean' ? { stacked: o.stacked } : {}),
       ...(typeof o.legend === 'boolean' ? { legend: o.legend } : {}),
+      ...(width === undefined ? {} : { width }),
+      ...(height === undefined ? {} : { height }),
     },
     error: null,
     notes,

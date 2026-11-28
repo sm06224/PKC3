@@ -150,7 +150,7 @@ const TOOL_SPECS: readonly ToolSpec[] = [
   {
     action: 'insert-widget-template',
     label: 'HTML ツール',
-    hint: 'HTML ツールのテンプレート(カウンター・進捗トラッカー / チェック集計リスト / 簡易計算・試算ツール / ノート内テーブル集計)を選んで、カーソルの位置に入れます',
+    hint: 'HTML ツール(進捗カウンター / チェックリスト / 簡易電卓 / 表の集計 / 表の絞り込み / 作業タイマー)を選んで、カーソルの位置に入れます',
   },
   {
     action: 'insert-callout',

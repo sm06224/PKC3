@@ -167,6 +167,23 @@ describe('箱を置く(hydrate)', () => {
     expect(document.querySelector('iframe'), 'dispose で箱が残っている').toBeNull();
   });
 
+  it('🔴 器の縦横の固定(v4.2 PR-1)を箱に当てる', async () => {
+    setReactRuntimeLoader(() => Promise.resolve({ runtime: 'R', tailwind: 'T' }));
+    IO().all.length = 0;
+    const h = host(JSX_SRC);
+    h.setAttribute('data-pkc-fixed-width', '60%');
+    h.setAttribute('data-pkc-fixed-height', '240');
+    const scope = hydrateReact([h]);
+    see(h);
+    await settle();
+    const f = h.querySelector('iframe')!;
+    expect(f.style.width).toBe('60%');
+    expect(f.style.maxWidth).toBe('100%');
+    expect(f.style.height).toBe('240px');
+    expect(f.getAttribute('data-pkc-fixed-height')).toBe('240');
+    scope.dispose();
+  });
+
   it('🔴 同じ原文を 2 つ書いても箱の id は別(高さの申告の宛先を取り違えない)/ 同じ入力なら id は同じ(作り直さない)', async () => {
     setReactRuntimeLoader(() => Promise.resolve({ runtime: 'R', tailwind: 'T' }));
     const ids = async (): Promise<string[]> => {

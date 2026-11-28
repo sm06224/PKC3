@@ -11,6 +11,7 @@
  *   `iframe[data-pkc-html-render-id]` なので、止めた要求の申告・高さの引き継ぎも同じ道に乗る。
  * ⚠ 失敗(ランタイムを読めない)は器に理由を残し、原文は器に残す(黙って空にしない)。
  */
+import { fenceFrameStyle, fenceSizeAttrPairs, fenceSizeFromAttrs } from '@features/markdown/fence-size';
 import { restoreSandboxHeights, WIDGET_FRAME_ATTR } from '@features/markdown/html-sandbox';
 import { errorMessageJa } from '@features/error-text';
 import { reactFrameDoc } from '@adapter/platform/render/react-frame-doc';
@@ -115,7 +116,10 @@ export function hydrateReact(root: ParentNode | readonly ParentNode[]): MermaidS
       f.setAttribute('sandbox', 'allow-scripts');
       f.setAttribute('referrerpolicy', 'no-referrer');
       f.title = 'React の表示';
-      f.style.cssText = 'width:100%;border:0;height:0;display:block;';
+      // 🔴 器に書いた縦横の固定(v4.2 PR-1)── 無指定なら今までどおりの字
+      const size = fenceSizeFromAttrs((name) => host.getAttribute(name));
+      f.style.cssText = fenceFrameStyle(size);
+      for (const [name, value] of fenceSizeAttrPairs(size)) f.setAttribute(name, value);
       // 🔑 テーマを受け取る箱(PR-07)。`id=` の在る器は保存の shim も焼く(前回の値を seed に)
       f.setAttribute(WIDGET_FRAME_ATTR, '');
       const parts = widgetMountParts(host, id);

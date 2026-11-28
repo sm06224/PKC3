@@ -1002,14 +1002,14 @@ export function pickDiagramInApp(
  */
 export function pickWidgetTemplateInApp(
   host: HTMLElement,
-  choices: readonly { readonly id: string; readonly label: string }[],
+  choices: readonly { readonly id: string; readonly label: string; readonly hint?: string }[],
 ): Promise<string | null> {
   return pickRowInApp(host, {
     title: 'HTML ツール',
     field: 'pick-widget-template',
     indexAttr: 'data-pkc-widget-template-index',
     note: '選んだツールをカーソルの位置に入れます。ツールの状態は「ノートへ保存」でノートに書き残せます',
-    rows: choices.map((c) => ({ label: c.label, value: c.id })),
+    rows: choices.map((c) => ({ label: c.label, value: c.id, ...(c.hint !== undefined ? { hint: c.hint } : {}) })),
   });
 }
 
@@ -1688,6 +1688,11 @@ interface PickRowsSpec<T> {
     readonly label: string;
     readonly value: T;
     /**
+     * 🔴 **行の補足(短い 1 句)**(v4.2 PR-1)── 名前の右に控えめな字で出し、`title` にも載せる。
+     *   省略 = 名前だけ(既存の一覧の見え方は変えない)。
+     */
+    readonly hint?: string;
+    /**
      * 🔴 **この行の前に区切りを 1 本引く**(#708 裁定②)。既定は引かない。
      * ⚠ この器は**雛形 / 図 / 表の 3 つで使い回す**ので、既定で引くと
      *   区切りの要らない一覧にも線が出る。
@@ -1746,6 +1751,14 @@ function pickRowInApp<T>(host: HTMLElement, spec: PickRowsSpec<T>): Promise<T | 
       btn.setAttribute('data-pkc-field', spec.field);
       btn.setAttribute(spec.indexAttr, String(index));
       btn.textContent = row.label;
+      if (row.hint !== undefined && row.hint !== '') {
+        // 🔑 名前と補足を括弧で 1 行に連結しない(長くて読めない)── 補足は別の span で控えめに出す
+        const sub = document.createElement('span');
+        sub.setAttribute('data-pkc-field', 'pick-row-hint');
+        sub.textContent = row.hint;
+        btn.append(sub);
+        btn.title = `${row.label}: ${row.hint}`;
+      }
       btn.addEventListener('click', () => {
         chosen = row.value;
         // ⚠ 隠してあっても `click()` は届く(閉じ口を 1 本に保つための呼び方)

@@ -134,6 +134,18 @@ describe('chart の器を埋める(adapter 層)', () => {
     expect(jobs.length, 'ワーカーへ投げていない(主スレッドで描いている)').toBe(1);
   });
 
+  it('🔴 縦横の固定(v4.2 PR-1)── JSON の width / height でワーカーへ渡す大きさが変わる(無指定は幅から決める)', async () => {
+    const fixed = await mount('{"type":"bar","width":320,"height":180,"labels":["a"],"datasets":[{"label":"x","data":[1,2]}]}');
+    const job = (fixed.jobs[0] as { payload: { width: number; height: number } }).payload;
+    expect(job.width).toBe(320);
+    expect(job.height).toBe(180);
+    scope?.dispose();
+    document.body.innerHTML = '';
+    const plain = await mount('{"type":"bar","labels":["b"],"datasets":[{"label":"y","data":[3,4]}]}');
+    const pj = (plain.jobs[0] as { payload: { width: number; height: number } }).payload;
+    expect(pj.height).toBe(Math.max(160, Math.min(520, Math.round(pj.width * 0.56))));
+  });
+
   it('🔴 読み上げ用の文が入る(絵しか無い面で唯一の情報)', async () => {
     const { host } = await mount(
       '{"type":"line","title":"月別","labels":["a"],"datasets":[{"label":"売上","data":[1,5]}]}',

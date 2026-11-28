@@ -860,6 +860,105 @@ describe('🔴 スクロール連動(見出しの節)', () => {
     expect(block.classList.contains('pkc-gpu-chart-sticky')).toBe(false);
   });
 
+  /** 🔴 縮小 ⇄ 実サイズ(v4.2 PR-1)の観測点。 */
+  const compactOf = (chart: HTMLElement) => {
+    const view = chart.querySelector<HTMLElement>('[data-pkc-gpu-chart]')!;
+    const viewport = view.querySelector<HTMLElement>('[data-pkc-field="gpu-chart-viewport"]')!;
+    const stage = view.querySelector<HTMLElement>('[data-pkc-gpu-chart-stage]')!;
+    const expand = view.querySelector<HTMLButtonElement>('[data-pkc-field="gpu-chart-expand"]')!;
+    const hint = view.querySelector<HTMLElement>('[data-pkc-field="gpu-chart-compact-hint"]')!;
+    return { view, viewport, stage, expand, hint };
+  };
+
+  it('🔴 上端に固定すると縮小した絵で見せる(実描画は縮めない)→ 押すと実サイズ → 縮小に戻す / Esc → 固定解除で通常', () => {
+    const { scope, chart } = boundNote();
+    const { view, viewport, stage, expand, hint } = compactOf(chart);
+    // 描画面は縮小の枠の中(枠は描画面の親)
+    expect(stage.parentElement).toBe(viewport);
+    // 既定は固定 = 縮小: 枠は見た目の高さ(140px)、描画面は実描画の高さ(320px)のまま transform で縮める
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('true');
+    expect(viewport.style.height).toBe('140px');
+    expect(stage.style.height).toBe('320px');
+    expect(stage.style.transform).toBe('scale(0.438)');
+    expect(stage.style.transformOrigin).toBe('top left');
+    expect(viewport.getAttribute('aria-expanded')).toBe('false');
+    expect(viewport.getAttribute('role')).toBe('button');
+    expect(hint.hidden).toBe(false);
+    expect(expand.hidden).toBe(false);
+    expect(expand.textContent).toBe('実サイズで表示');
+    // 縮小中の押下は描画面へ届かない(ドラッグでの移動を始めない)
+    const reached: string[] = [];
+    stage.addEventListener('pointerdown', () => reached.push('down'));
+    viewport.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    stage.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    expect(reached).toEqual([]);
+    // 押すと実サイズ(scale = 1)
+    viewport.click();
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('false');
+    expect(viewport.style.height).toBe('');
+    expect(stage.style.transform).toBe('');
+    expect(viewport.getAttribute('aria-expanded')).toBe('true');
+    expect(hint.hidden).toBe(true);
+    expect(expand.textContent).toBe('縮小に戻す');
+    expect(expand.getAttribute('aria-expanded')).toBe('true');
+    // 実サイズの間は描画面へ届く
+    stage.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    expect(reached).toEqual(['down']);
+    // Esc で縮小に戻す
+    stage.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('true');
+    expect(stage.style.transform).toBe('scale(0.438)');
+    // Enter(枠に焦点)で実サイズ、「縮小に戻す」で戻す(双方向)
+    viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('false');
+    expand.click();
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('true');
+    expand.click();
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('false');
+    // 固定を解除すると(広げていても)本文の中の実描画の大きさ・ボタンは隠れる
+    click(chart, '[data-pkc-field="gpu-chart-sticky"]');
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('false');
+    expect(stage.style.transform).toBe('');
+    expect(expand.hidden).toBe(true);
+    // 固定し直すと縮小から始める
+    click(chart, '[data-pkc-field="gpu-chart-sticky"]');
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('true');
+    // dispose で枠を外し、描画面を元の場所へ戻す
+    scope.dispose();
+    expect(view.querySelector('[data-pkc-field="gpu-chart-viewport"]')).toBeNull();
+    expect(stage.style.transform).toBe('');
+  });
+
+  it('"bind" の compactHeight / compactScale で縮小の大きさを変えられる', () => {
+    const a = boundNote(BOUND_BODY.replace('"bind":"heading"', '"bind":{"mode":"heading","compactHeight":200}'));
+    expect(compactOf(a.chart).viewport.style.height).toBe('200px');
+    a.scope.dispose();
+    const b = boundNote(BOUND_BODY.replace('"bind":"heading"', '"bind":{"mode":"heading","compactScale":0.5}'));
+    expect(compactOf(b.chart).viewport.style.height).toBe('160px');
+    expect(compactOf(b.chart).stage.style.transform).toBe('scale(0.5)');
+    b.scope.dispose();
+  });
+
+  it('"sticky": false の連動グラフは縮小しない(本文の中の実描画の大きさ)', () => {
+    const { scope, chart } = boundNote(BOUND_BODY.replace('"bind":"heading"', '"bind":{"mode":"heading","sticky":false}'));
+    const { view, stage, expand } = compactOf(chart);
+    expect(view.getAttribute('data-pkc-gpu-chart-compact')).toBe('false');
+    expect(stage.style.transform).toBe('');
+    expect(expand.hidden).toBe(true);
+    scope.dispose();
+  });
+
+  it('🔴 縦を押し潰す古い規則(max-height: 32vh)は無く、縮小の規則・印刷での解除・動きを減らす設定が在る', () => {
+    const css = readFileSync(resolve(__dirname, '../../src/styles/app.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(css).not.toMatch(/\.pkc-gpu-chart-sticky \.pkc-gpu-chart-stage\s*\{[^}]*max-height/);
+    expect(css).toMatch(/\.pkc-gpu-chart\[data-pkc-gpu-chart-compact='true'\] \.pkc-gpu-chart-viewport\s*\{[^}]*overflow:\s*hidden;[^}]*cursor:\s*zoom-in;/);
+    const reduced = css.split('@media (prefers-reduced-motion: reduce)').slice(1).find((b) => b.includes('.pkc-gpu-chart-viewport')) ?? '';
+    expect(reduced).toMatch(/\.pkc-gpu-chart-viewport > \.pkc-gpu-chart-stage\s*\{\s*transition:\s*none;/);
+    const print = css.split('@media print').slice(1).find((b) => b.includes('.pkc-gpu-chart-viewport')) ?? '';
+    expect(print).toMatch(/\.pkc-gpu-chart-stage\s*\{\s*transform:\s*none !important;/);
+    expect(print).toMatch(/\.pkc-gpu-chart-viewport\s*\{\s*height:\s*auto !important;/);
+  });
+
   it('包む塊が何段あっても、本文の根の直下の塊に付ける', () => {
     const root = document.createElement('div');
     root.setAttribute('data-pkc-field', 'detail-body');
@@ -1080,8 +1179,46 @@ describe('🔴 印刷の前の静止画(flush)', () => {
     const blocks = css.split('@media print').slice(1);
     const media = blocks.find((b) => b.includes('.pkc-gpu-chart-print-img')) ?? '';
     expect(media).not.toBe('');
-    expect(media).toMatch(/\.pkc-gpu-chart:has\(> \.pkc-gpu-chart-print-img\) > \.pkc-gpu-chart-stage\s*\{\s*display:\s*none;/);
+    // 🔑 v4.2 PR-1: 連動グラフは描画面を縮小の枠で包む(静止画は枠の中に入る)── 子孫で引く
+    expect(media).toMatch(/\.pkc-gpu-chart:has\(\.pkc-gpu-chart-print-img\) \.pkc-gpu-chart-stage\s*\{\s*display:\s*none;/);
     expect(media).toMatch(/\.pkc-gpu-chart-print-img\s*\{\s*display:\s*block;/);
+  });
+});
+
+describe('🔴 縦横の固定(v4.2 PR-1)', () => {
+  const LINE = '{"type":"line","datasets":[{"data":[1,2,3]}]}';
+  const place = (info: string, src: string): HTMLElement => {
+    const root = document.createElement('div');
+    root.className = 'pkc-md-rendered';
+    root.innerHTML = renderMarkdown(`\`\`\`chart ${info}\n${src}\n\`\`\``);
+    host.append(root);
+    hydrateGpuChart(root);
+    return root.querySelector<HTMLElement>('[data-pkc-gpu-chart]')!;
+  };
+
+  it('囲みの width= / height= で枠の幅と描画面の高さを固定する(無指定は style に触らない)', () => {
+    const plain = place('live', LINE);
+    expect(plain.style.width).toBe('');
+    expect(plain.querySelector<HTMLElement>('[data-pkc-gpu-chart-stage]')!.style.height).toBe('320px');
+    const sized = place('live width=480 height=120', LINE);
+    expect(sized.style.width).toBe('480px');
+    expect(sized.style.maxWidth).toBe('100%');
+    expect(sized.querySelector<HTMLElement>('[data-pkc-gpu-chart-stage]')!.style.height).toBe('120px');
+  });
+
+  it('🔴 JSON の明示が囲みの属性より優先', () => {
+    const v = place('live width=480 height=120', '{"type":"line","width":"60%","height":400,"datasets":[{"data":[1,2]}]}');
+    expect(v.style.width).toBe('60%');
+    expect(v.querySelector<HTMLElement>('[data-pkc-gpu-chart-stage]')!.style.height).toBe('400px');
+  });
+
+  it('書き出しの PNG も同じ大きさで焼く(px はその幅、% は基準の幅の割合)', async () => {
+    const { ctx: c2 } = fake2d();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => c2 as never);
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((cb: BlobCallback) => cb(new Blob(['png'], { type: 'image/png' })));
+    expect((await renderGpuChartPng(LINE)).cssWidth).toBe(720);
+    expect((await renderGpuChartPng(LINE, { size: { width: { value: 400, unit: 'px' }, height: 200 } })).cssWidth).toBe(400);
+    expect((await renderGpuChartPng(LINE, { size: { width: { value: 50, unit: '%' } } })).cssWidth).toBe(360);
   });
 });
 

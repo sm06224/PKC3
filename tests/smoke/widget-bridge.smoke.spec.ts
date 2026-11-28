@@ -9,11 +9,11 @@
  * 5. `id=` の無い ` ```html ` は今までどおり描かれ、`localStorage` にウィジェットの鍵を書かない
  *
  * PR-08(ビジョン 5-B)── 同じ起動の道中の続きに載せる(起動を増やさない):
- * 6. 書式バー「その他 ▾ → HTML ツール」から「カウンター・進捗トラッカー」を入れ、値を変えて「ノートへ保存」
+ * 6. 書式バー「その他 ▾ → HTML ツール」から「進捗カウンター」を入れ、値を変えて「ノートへ保存」
  *    → 本文に ` ```json widget-state="tracker" ` が書かれる
  * 7. 端末のウィジェットの保存を空にして再読み込み → 本文の状態ブロックから値が戻る
  * 8. 「状態を初期化」→ 端末の保存も本文のブロックも消え、再読み込みしても戻らない
- * 9. 表のあるノートに「ノート内テーブル集計」を入れる → `readTables()` で読んだ行数と合計が出る
+ * 9. 表のあるノートに「表の集計」を入れる → `readTables()` で読んだ行数と合計が出る
  *
  * #2090(v4.1 Phase 1 / PR-2)── これも同じ起動の続き(起動を増やさない):
  * 11. HTML ファイルを添付 → 添付の画面の「ウィジェット記法をコピー」の字(` ```html asset:鍵 id="…" `)を本文へ
@@ -41,7 +41,7 @@
  *
  * #2097 / #2098(v4.1 Phase 2 / PR-5)── 同じ起動の続き(起動を増やさない):
  * 22. ここまでのノートを全部「閲覧用 HTML」で書き出し、PKC3 の無いページとして開く(`blob:` の文書 ── 起動を足さない)
- * 23. 表のノートの「ノート内テーブル集計」が、書き出した HTML の中でも `readTables()` で同じ行数・合計を出す
+ * 23. 表のノートの「表の集計」が、書き出した HTML の中でも `readTables()` で同じ行数・合計を出す
  *     / 箱は allow-scripts のみ / `getTheme()` に開いた先の配色が届き、OS を暗くすると箱を読み直さずに dark へ変わる
  * 24. 入出力のノートで素の `<a download>` → 確認バー(自動では保存しない)→「PC へ保存」で .csv がダウンロードされる
  *     /「このノートへ添付」は出ない(閲覧用 HTML は読むだけ)
@@ -56,6 +56,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readZipDirectory, readZipEntry } from '../../src/features/import/zip-reader';
+import { WIDGET_TEMPLATES } from '../../src/features/markdown/widget-templates';
 import {
   answerAppDialog,
   bootedHere,
@@ -252,7 +253,13 @@ async function insertTool(page: Page, label: string): Promise<void> {
   await clickBarMoreItem(page, '[data-pkc-action="insert-widget-template"]');
   const rows = page.locator('[data-pkc-field="pick-widget-template"]');
   await expect(rows, 'HTML ツールの一覧が 6 行出ていない').toHaveCount(6);
-  await clickReal(page, rows.filter({ hasText: label }).first());
+  // 🔴 v4.2 PR-1 ── 行は「短い名前 + 控えめな補足(別の span)」。括弧で説明を連結しない
+  const tpl = WIDGET_TEMPLATES.find((t) => t.label === label);
+  expect(tpl, `「${label}」が WIDGET_TEMPLATES に無い`).toBeDefined();
+  const row = rows.filter({ hasText: label }).first();
+  await expect(row.locator('[data-pkc-field="pick-row-hint"]')).toHaveText(tpl!.hint);
+  expect(await row.evaluate((b) => b.firstChild?.textContent ?? '')).toBe(label);
+  await clickReal(page, row);
   await expect(page.locator('[data-pkc-region="app-dialog"]')).toBeHidden();
 }
 
@@ -275,9 +282,9 @@ async function reopen(page: Page): Promise<void> {
 }
 
 async function prOEight(page: Page): Promise<void> {
-  // 6. 「HTML ツール」から「カウンター・進捗トラッカー」を入れる
+  // 6. 「HTML ツール」から「進捗カウンター」を入れる
   await clickReal(page, '[data-pkc-action="start-edit"]');
-  await insertTool(page, 'カウンター・進捗トラッカー');
+  await insertTool(page, '進捗カウンター');
   const inserted = await page.locator('[data-pkc-field="editor-body"]').inputValue();
   expect(inserted, '本文に ```html id="tracker" が入っていない').toContain('```html id="tracker"');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
@@ -321,24 +328,34 @@ async function prOEight(page: Page): Promise<void> {
   await reopen(page);
   await expect.poll(() => trackerValue(page), { timeout: 10_000 }).toBe('0');
 
-  // 9. 表のあるノートに「ノート内テーブル集計」── 行数と合計が出る
+  // 9. 表のあるノートに「表の集計」── 行数と合計が出る
   await clickReal(page, '[data-pkc-action="start-edit"]');
   const ta = page.locator('[data-pkc-field="editor-body"]');
   await ta.fill('| 品目 | 金額 |\n|---|---|\n| 米 | 2000 |\n| 卵 | 300 |\n| 水 | 100 |\n\n```csv\nname,qty\na,1\nb,2\n```\n');
-  await insertTool(page, 'ノート内テーブル集計');
+  await insertTool(page, '表の集計');
+  // 🔴 縦横の固定(v4.2 PR-1)── 入れたツールの 1 行目に width= / height= を足す
+  await ta.fill((await ta.inputValue()).replace('```html id="table-summary"', '```html id="table-summary" width=360 height=150'));
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await writesLanded(page);
   const sumFrame = page.locator('[data-pkc-field="detail-body"] [data-pkc-widget-id="table-summary"] iframe.pkc-widget-frame');
   await expect(sumFrame).toHaveCount(1);
+  // 実測の幅・高さは固定のまま(箱の中からの高さの申告で伸びない)
+  await expect(sumFrame).toHaveAttribute('data-pkc-fixed-height', '150');
+  await page.waitForTimeout(600);
+  {
+    const box = (await sumFrame.boundingBox())!;
+    expect(Math.round(box.width), '横幅が固定されていない').toBe(360);
+    expect(Math.round(box.height), '縦幅が固定されていない(中からの申告で伸びた)').toBe(150);
+  }
   const sf = await (await sumFrame.elementHandle())!.contentFrame();
   await expect(sf!.locator('[data-table-index="0"]')).toContainText('表 1(markdown):3 行', { timeout: 10_000 });
   await expect(sf!.locator('[data-table-index="0"] [data-sum]')).toHaveAttribute('data-sum', '2400');
   await expect(sf!.locator('[data-table-index="1"]')).toContainText('表 2(csv):2 行');
   await expect(sf!.locator('[data-table-index="1"] [data-sum]')).toHaveAttribute('data-sum', '3');
 
-  // 10. 🔴 同じノートに「表の検索・絞り込み」(v4.0 仕上げ PR-D)── 実物の readTables で表を読み、語で行が絞れる
+  // 10. 🔴 同じノートに「表の絞り込み」(v4.0 仕上げ PR-D)── 実物の readTables で表を読み、語で行が絞れる
   await clickReal(page, '[data-pkc-action="start-edit"]');
-  await insertTool(page, '表の検索・絞り込み');
+  await insertTool(page, '表の絞り込み');
   await clickReal(page, '[data-pkc-action="commit-edit"]');
   await writesLanded(page);
   // ⚠ 枠は「見えたとき」に起動する(`widget-bridge.ts` の IntersectionObserver)── 本文の下にあるので見える所まで送る

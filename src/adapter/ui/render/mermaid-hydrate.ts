@@ -13,6 +13,7 @@
  * - **同じ図は焼き直さない** ── 鍵(原文 + テーマ + 幅 + dpr)が一致すれば IDB から
  * - **ObjectURL は要素の寿命終端で revoke**(2026-07-27 の不可侵指示)
  */
+import { fenceSizeFromAttrs, type FenceSize } from '@features/markdown/fence-size';
 import {
   cacheKey,
   DeviceRenderError,
@@ -237,6 +238,12 @@ export interface DiagramKind {
   /** 「図を保存」を出すか(SVG で書き出せる種類だけ)。 */
   savable: boolean;
   /**
+   * 🔴 **焼く大きさを決める**(v4.2 PR-1)── 原文の明示と器の縦横の固定(`data-pkc-fixed-width` / `-height`)から。
+   * 省略 = 器の幅のまま(mermaid / plotly ── 今までどおり)。
+   * @param base 器の幅から決めた既定の幅(CSS px)
+   */
+  rasterSize?(source: string, fence: FenceSize, base: number): { width: number; height?: number };
+  /**
    * 絵を押すと別窓で大きく見る印(`markViewBig`)を付けるか。既定は付ける。
    * `false` = 器そのものが別の押し所(板の PDF は器が「元のノートを開く」ボタン)── 絵が奪うと二重になる。
    */
@@ -400,11 +407,16 @@ export function hydrateDiagrams(
     let currentKey = '';
     try {
       const look = lookOf();
+      const base = widthOf(p.host);
+      // 🔑 縦横の固定(v4.2 PR-1)── 種類が口を持つときだけ(無ければ器の幅のまま)
+      const sized =
+        kind.rasterSize?.(p.source, fenceSizeFromAttrs((name) => p.host.getAttribute(name)), base) ?? { width: base };
       const key = {
         source: p.source,
         theme: look.theme,
         palette: look.palette,
-        width: widthOf(p.host),
+        width: sized.width,
+        ...(sized.height === undefined ? {} : { height: sized.height }),
         dpr: window.devicePixelRatio || 1,
         ...(opts.volatile === true ? { volatile: true } : {}),
       };
