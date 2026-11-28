@@ -5052,6 +5052,61 @@ dd[data-pkc-field='inspector-toc'] {
   color: var(--muted);
   font-size: var(--fs-sm);
 }
+/* スクロール連動(` "bind" `。v4.1 PR-8)── 連動先・前へ / 次へ・追従 / 固定・上端に固定の行(グラフの上の行のすぐ下・同じ場所に固定) */
+.pkc-gpu-chart-bind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  padding: var(--s1) var(--s2);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+.pkc-gpu-chart-bind-label {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.pkc-gpu-chart-bind .pkc-gpu-chart-btn[aria-pressed='true'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+/* 上端に固定 ── 本文のスクロールの器の上端に留まる(⚠ 高さを抑えて中央の本文を奪わない) */
+/* ⚠ 囲みの塊は輪郭の光(`@media screen` の `.pkc-md-block[data-pkc-render-lang]:not(…)`)で `position: relative` を持つ ──
+ *   その詳細度(0,3,0)に勝つ形を並べる(sticky も光の疑似要素の基準になるので、光はそのまま描ける) */
+.pkc-md-rendered .pkc-gpu-chart-sticky,
+.pkc-md-rendered > .pkc-md-block.pkc-gpu-chart-sticky[data-pkc-render-lang] {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  /* 包んでいる塊の余白から本文の字が透けない(⚠ 本文の CSS が既に持つ変数だけを使う ── 新しい変数を足すと配布パッケージの明暗の写しが外れる) */
+  background: var(--surface);
+}
+.pkc-gpu-chart-sticky > .pkc-gpu-chart {
+  box-shadow: var(--shadow);
+}
+.pkc-gpu-chart-sticky .pkc-gpu-chart-stage {
+  max-height: 32vh;
+}
+/* データが無い時点 ── 古い絵を隠して理由を出す(嘘の絵を見せない) */
+.pkc-gpu-chart[data-pkc-gpu-chart-empty] .pkc-gpu-chart-stage > canvas,
+.pkc-gpu-chart[data-pkc-gpu-chart-empty] .pkc-gpu-chart-stage > img {
+  visibility: hidden;
+}
+.pkc-gpu-chart-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+/* 印刷用の静止画(`flush` が焼く)── 画面では出さず、紙では canvas の代わりに出す */
+.pkc-gpu-chart-print-img {
+  display: none;
+}
 /* ウィジェット(` ```html id="…" `。PR-07)。⚠ 原文は箱を置けなかった面(書き出し等)の受け皿として残す */
 .pkc-md-rendered .pkc-widget-source {
   margin: 0;
@@ -14127,6 +14182,23 @@ h3[data-pkc-section] {
  * ⚠ 紙の向きでも変わる ── A4 横(1123px)では狭幅の上書きが発火しない。
  */
 @media print {
+  /* 🔴 GPU のグラフ(v4.1 PR-8)── `flush` が焼いた静止画を canvas の代わりに出す。上端の固定と操作の行は紙に出さない */
+  .pkc-gpu-chart-sticky {
+    position: static;
+  }
+  .pkc-gpu-chart:has(> .pkc-gpu-chart-print-img) > .pkc-gpu-chart-stage {
+    display: none;
+  }
+  .pkc-gpu-chart-print-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: none;
+  }
+  .pkc-gpu-chart-bind,
+  .pkc-gpu-chart-bar .pkc-gpu-chart-btn {
+    display: none;
+  }
   /* 🔴 無限キャンバス(PR-09)── 枠・バー・ミニマップを外し、今までどおりの板として刷る */
   [data-pkc-field='canvas-bar'],
   [data-pkc-field='canvas-minimap'],

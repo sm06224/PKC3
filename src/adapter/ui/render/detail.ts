@@ -33,7 +33,7 @@ import { hydrate3d, mount3dViewer, resolveSceneModel, type Hydrate3dOptions } fr
 import { hydrateMath } from './math-hydrate';
 import { markViewBig } from './view-big';
 import { hydrateChart } from './chart-raster';
-import { hydrateGpuChart } from './gpu-chart';
+import { hydrateGpuChart, type HydrateGpuChartOptions } from './gpu-chart';
 import { hydratePlotly } from './plotly-raster';
 import { hydrateReact } from './react-sandbox';
 import { hydrateWidgets, remountStaleWidgets, WIDGET_LID_ATTR } from './widget-bridge';
@@ -94,7 +94,7 @@ export function hydrateFigures(
   root: ParentNode | readonly ParentNode[],
   opts?: HydrateOptions,
   /** ` ```3d ` の `asset:鍵` を引く口(v4.0 PR-12)。渡さない面ではモデルだけ断る。 */
-  opts3d?: Hydrate3dOptions,
+  opts3d?: Hydrate3dOptions & HydrateGpuChartOptions,
 ): MermaidScope[] {
   // ⚠ **数式もここに束ねる**(#707)── 面は 6 か所あるので、別の口を作ると
   //    そのうち 1 つで数式だけ字のまま残る(まさに mermaid が踏んだ形)。
@@ -672,6 +672,8 @@ export class DetailRenderer {
   private held: HeldView | null = null;
   /** 最後に描き終えた本文と、そのときの描画設定の鍵(持ち越すときの控え)。 */
   private paintedBody: string | null = null;
+  /** 読む面で最後に描き始めた本文(`readFigureOpts` が読む)。 */
+  private readingBody: { readonly lid: string; readonly body: string } | null = null;
   private paintedKey: string | null = null;
   /** 飛んでいる添付の読み込み(画像・音・動画・囲み)の数。⚠ 0 でなければ持ち越さない(読み込み中の節点を止めない)。 */
   private hydrating = 0;
@@ -2121,6 +2123,8 @@ export class DetailRenderer {
          *   新しい字が欄を閉じるまで画面に出ない(打ったのに古い字のまま見える)。
          */
         const keptCell = captureCellInput(host);
+        // 🔑 いま描いている本文(連動グラフが読む ── 描き終える前に現在地が届いても、古い本文で時点を作らない)
+        this.readingBody = { lid, body };
         /**
          * 🔴 **ウィジェットの保存先の lid を器に持たせる**(PR-07)── 箱が名乗る lid は使わず、ここから引く。
          * ⚠ 塊を当てる**直前**に付け替える(当てる前に付けると、まだ前のノートの塊が新しい lid を名乗る時間が延びる)。
@@ -2140,7 +2144,7 @@ export class DetailRenderer {
         //    `<img>` の ObjectURL を revoke してしまう)
         if (applied.inserted.length > 0) {
           void this.hydrateAssetRefs(applied.inserted, this.hydrateToken, opts);
-          this.mermaidScopes.push(...hydrateFigures(applied.inserted, undefined, this.figureOpts()));
+          this.mermaidScopes.push(...hydrateFigures(applied.inserted, undefined, this.readFigureOpts(lid, body)));
         }
         // 🔴 **差し替えで画面から消えた `<img>` のぶんを返す**(P8 段⑲)。
         //    ⚠ `inserted.length > 0` の中に入れてはいけない ── 塊が**消えるだけ**
@@ -4440,6 +4444,25 @@ export class DetailRenderer {
    * 🔴 **図の塊へ渡す付帯の口**(v4.0 PR-12)── ` ```3d ` の `model: "asset:鍵"` を、この面の添付の貸し出し
    * (`this.assets`)から引く。⚠ 種類は添付の登録情報(`listMimes`)を先に見る(Blob の `type` は空のことがある)。
    */
+  /**
+   * 🔴 **読む面の図の口**(v4.1 PR-8)── `figureOpts` に、スクロール連動グラフ(`"bind"`)が読む本文・lid・スクロールの器を足す。
+   * ⚠ 本文は**読むたびに引く**: このノートで最後に描き始めた本文(`readingBody`)。
+   *   保存して本文の塊が差し替わると、見張りが今の 1 通を送り直すので、同じ場所にいてもその場で作り直す(グラフの塊は差し替わらない)。
+   * ⚠ 読む面だけが渡す ── 埋め込み・編集のプレビューでは連動の見張りを張らない。
+   */
+  private readFigureOpts(lid: string, body: string): HydrateGpuChartOptions {
+    return {
+      ...this.figureOpts(),
+      noteLid: lid,
+      scrollRoot: this.scroller,
+      getNoteBody: () => {
+        const r = this.readingBody;
+        if (r !== null && r.lid === lid) return r.body;
+        return this.bodyHost?.getAttribute(PAINTED_ATTR) === lid && this.paintedBody !== null ? this.paintedBody : body;
+      },
+    };
+  }
+
   private figureOpts(): Hydrate3dOptions {
     const assets = this.assets;
     if (!assets) return {};

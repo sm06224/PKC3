@@ -33,6 +33,7 @@ import {
   gpuChartPointCount,
   parseGpuChartCsv,
   parseGpuChartSpec,
+  type ChartBindSpec,
   type GpuChartSpec,
 } from '@features/chart/gpu-chart-spec';
 import {
@@ -55,11 +56,14 @@ import {
 } from '@features/chart/gpu-chart-viewport';
 import { buildChartFrame, heatColor, parseCssRgb, rgbCss, type ChartFrame, type Rgb } from '@features/chart/gpu-chart-frame';
 import { wheelDeltaPx } from '@features/viewer3d/orbit-math';
+import { easeOutCubic, interpolateChartSpec } from '@features/chart/gpu-chart-bind';
 import { seriesColors } from './chart-raster';
 import { readPalette, type DiagramPalette } from './mermaid-raster';
 import { cssColorToHex } from './css-color';
 import { typingQuietIn } from './typing-gate';
-import type { MermaidScope } from './mermaid-hydrate';
+import { registerLiveScope, type MermaidScope } from './mermaid-hydrate';
+import { attachChartBinding, type ChartBindingHandle } from './gpu-chart-bound';
+import { extractBoundChartFrames } from '@features/chart/gpu-chart-bind';
 import type { GetAssetBlob } from './viewer-3d';
 
 type Three = typeof ThreeModule;
@@ -67,13 +71,40 @@ type Three = typeof ThreeModule;
 let surfaceFactory: (opts: GpuSurfaceOptions) => GpuSurface = createGpuSurface;
 let saveBlob: (name: string, blob: Blob) => void = downloadBlob;
 
-/** test 用: 描画面の作り方・保存の口を差し替える(`null` で実物へ戻す)。 */
+type Raf = (cb: (t: number) => void) => number;
+type Caf = (id: number) => void;
+const realRaf: Raf = (cb) =>
+  typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : (setTimeout(() => cb(Date.now()), 16) as unknown as number);
+const realCaf: Caf = (id) => {
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id);
+  else clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
+};
+/** OS の「視差効果を減らす」(`prefers-reduced-motion: reduce`)か。 */
+const realReducedMotion = (): boolean =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let raf: Raf = realRaf;
+let caf: Caf = realCaf;
+let reducedMotion: () => boolean = realReducedMotion;
+
+/** test 用: 描画面の作り方・保存の口・コマの口・動きを減らす設定を差し替える(`null` で実物へ戻す)。 */
 export function setGpuChartTestHooks(
-  hooks: { createSurface?: (opts: GpuSurfaceOptions) => GpuSurface; saveBlob?: (name: string, blob: Blob) => void } | null,
+  hooks: {
+    createSurface?: (opts: GpuSurfaceOptions) => GpuSurface;
+    saveBlob?: (name: string, blob: Blob) => void;
+    raf?: Raf;
+    caf?: Caf;
+    reducedMotion?: () => boolean;
+  } | null,
 ): void {
   surfaceFactory = hooks?.createSurface ?? createGpuSurface;
   saveBlob = hooks?.saveBlob ?? downloadBlob;
+  raf = hooks?.raf ?? realRaf;
+  caf = hooks?.caf ?? realCaf;
+  reducedMotion = hooks?.reducedMotion ?? realReducedMotion;
 }
+
+/** データの切り替えの補間の長さ(ms)。⚠ 終わった瞬間にコマを止める(静止時の rAF = 0)。 */
+export const GPU_CHART_TWEEN_MS = 220;
 
 // ───────────────────────────── テーマ
 
@@ -199,9 +230,24 @@ export function drawChartAxes(
   layout: ChartLayout,
   range: ChartRange,
   theme: ChartTheme,
-  opts: { coverMargins: boolean; grid: boolean; hover?: HoverMark | null },
+  opts: { coverMargins: boolean; grid: boolean; hover?: HoverMark | null; highlightX?: number },
 ): void {
   const { rect, xTicks, yTicks } = layout;
+  // 🔑 強調する区分(ログの日付連動の「その日」)── アクセント色の薄い帯と下の線
+  const hx = opts.highlightX;
+  if (hx !== undefined && Number.isFinite(hx)) {
+    const x0 = Math.max(rect.x, dataToPxX(hx - 0.5, range, rect));
+    const x1 = Math.min(rect.x + rect.w, dataToPxX(hx + 0.5, range, rect));
+    if (x1 > x0) {
+      ctx.save();
+      ctx.fillStyle = theme.accent;
+      ctx.globalAlpha = 0.14;
+      ctx.fillRect(x0, rect.y, x1 - x0, rect.h);
+      ctx.globalAlpha = 1;
+      ctx.fillRect(x0, rect.y + rect.h - 2, x1 - x0, 3);
+      ctx.restore();
+    }
+  }
   if (opts.coverMargins) {
     ctx.fillStyle = theme.bg;
     ctx.fillRect(0, 0, width, rect.y);
@@ -332,6 +378,11 @@ export function drawFrame2d(ctx: CanvasRenderingContext2D, frame: ChartFrame, re
   ctx.restore();
 }
 
+/** 強調する区分(あれば)。 */
+function hl(spec: GpuChartSpec): { highlightX?: number } {
+  return spec.highlightX === undefined ? {} : { highlightX: spec.highlightX };
+}
+
 /**
  * 🔴 **2D canvas で 1 枚描く**(簡易表示・PNG で保存・書き出しの焼き込みの 3 つで同じ 1 本)。
  */
@@ -360,7 +411,7 @@ export function paintChart2d(
   ctx.fillRect(0, 0, width, height);
   const layout = layoutChart(ctx, spec, range, width, height);
   // 2D はグリッドを先に(データの下)
-  drawChartAxes(ctx, width, height, layout, range, theme, { coverMargins: false, grid: true });
+  drawChartAxes(ctx, width, height, layout, range, theme, { coverMargins: false, grid: true, ...hl(spec) });
   const frame = buildChartFrame(spec, range, layout.rect.w);
   drawFrame2d(ctx, frame, layout.rect, spec, theme);
   drawChartAxes(ctx, width, height, layout, range, theme, { coverMargins: false, grid: false, hover: hover ?? null });
@@ -414,7 +465,17 @@ export interface GpuChartView {
    * 🔑 **データを差し替える**(PR-8 のスクロール連動・PR-9 の別窓連動の口)。GPU の buffer を作り直し、`invalidate()` 1 回で描く。
    * @param opts.resetViewport 表示範囲を全体へ戻す(既定は今の範囲を新しいデータの範囲に収めて保つ)
    */
-  updateData(nextSpec: GpuChartSpec, opts?: { resetViewport?: boolean }): void;
+  updateData(nextSpec: GpuChartSpec, opts?: { resetViewport?: boolean; animate?: boolean }): void;
+  /** 切り替えの補間の途中か(⚠ 終われば偽 ── コマの予約も 0)。 */
+  readonly animating: boolean;
+  /**
+   * データが無い時点を示す(連動グラフ。`null` で戻す)。⚠ 古いデータの絵は隠し、理由の文を描画面の上に出す ── 嘘の絵を見せない。
+   */
+  setEmpty(reason: string | null): void;
+  /** 印刷用の静止画(`<img>`)を今の表示で焼いて差す(`flush` が呼ぶ)。焼けなければ偽。 */
+  bakePrintImage(): Promise<boolean>;
+  /** 印刷用の静止画を外す(ObjectURL も返す)。 */
+  dropPrintImage(): void;
   /** 拡大(+1)・縮小(-1)。 */
   zoomStep(dir: 1 | -1): void;
   /** 全体表示。 */
@@ -449,6 +510,10 @@ class ChartView implements GpuChartView {
   private readonly cleanups: Array<() => void> = [];
   private drag: { id: number; x: number; y: number } | null = null;
   private noteBase = '';
+  /** 補間のコマの予約(無ければ `null` ── 静止時は常に `null`)。 */
+  private tween: { id: number; start: number | null; from: GpuChartSpec; to: GpuChartSpec; fromRange: ChartRange; toRange: ChartRange } | null = null;
+  private emptyEl: HTMLElement | null = null;
+  private printImg: { img: HTMLImageElement; url: string } | null = null;
 
   constructor(
     readonly host: HTMLElement,
@@ -705,18 +770,134 @@ class ChartView implements GpuChartView {
     this.setRange(this.home);
   }
 
-  updateData(nextSpec: GpuChartSpec, opts: { resetViewport?: boolean } = {}): void {
+  get animating(): boolean {
+    return this.tween !== null;
+  }
+
+  private stopTween(): void {
+    if (this.tween === null) return;
+    caf(this.tween.id);
+    this.tween = null;
+  }
+
+  updateData(nextSpec: GpuChartSpec, opts: { resetViewport?: boolean; animate?: boolean } = {}): void {
     if (this.state === 'disposed') return;
+    // ⚠ 補間の途中で次のデータが来たら、その場で止めて今の絵から次へ(古い行き先へ戻らない)
+    const shownSpec = this.spec;
+    const shownRange = this.cur;
+    this.stopTween();
+    this.dropPrintImage();
+    const nextHome = homeRangeOf(nextSpec);
+    const nextRange = opts.resetViewport === true ? nextHome : clampChartRange(this.cur, nextHome);
+    const canTween =
+      opts.animate === true && !reducedMotion() && interpolateChartSpec(shownSpec, nextSpec, 0.5) !== null;
+    this.commitData(nextSpec, canTween ? shownRange : nextRange, !canTween);
+    if (!canTween) return;
+    // 🔑 短い補間(220ms)だけコマを回す。⚠ 終わったら必ず止める(静止時の rAF = 0)
+    this.spec = shownSpec;
+    const tw = { id: 0, start: null as number | null, from: shownSpec, to: nextSpec, fromRange: shownRange, toRange: nextRange };
+    const step = (now: number): void => {
+      if (this.tween !== tw || (this.state as GpuChartState) === 'disposed') return;
+      if (tw.start === null) tw.start = now;
+      const p = Math.min(1, (now - tw.start) / GPU_CHART_TWEEN_MS);
+      if (p >= 1) {
+        this.tween = null;
+        this.spec = tw.to;
+        this.cur = tw.toRange;
+        this.requestDraw();
+        return;
+      }
+      const e = easeOutCubic(p);
+      this.spec = interpolateChartSpec(tw.from, tw.to, e) ?? tw.to;
+      const a = tw.fromRange;
+      const b = tw.toRange;
+      this.cur = {
+        xMin: a.xMin + (b.xMin - a.xMin) * e,
+        xMax: a.xMax + (b.xMax - a.xMax) * e,
+        yMin: a.yMin + (b.yMin - a.yMin) * e,
+        yMax: a.yMax + (b.yMax - a.yMax) * e,
+      };
+      this.requestDraw();
+      tw.id = raf(step);
+    };
+    this.tween = tw;
+    tw.id = raf(step);
+  }
+
+  /** データを差し替える(補間無し)── 範囲・点の数・注記・読み上げを新しいデータに揃えて 1 回描く。 */
+  private commitData(nextSpec: GpuChartSpec, range: ChartRange, draw = true): void {
     this.spec = nextSpec;
     this.home = homeRangeOf(nextSpec);
-    this.cur = opts.resetViewport === true ? this.home : clampChartRange(this.cur, this.home);
+    this.cur = range;
     this.total = gpuChartPointCount(nextSpec);
     this.dataGen += 1;
     this.setNoteBase(nextSpec.notes.join('。'), this.mode === '2d' ? this.fallbackReason : '');
     this.stage.setAttribute('aria-label', `${gpuChartAltText(nextSpec)}。ドラッグで移動、Ctrl + ホイールかボタンで拡大・縮小、矢印キーでも移動できます`);
     this.hover = null;
     this.info.hover.textContent = '';
-    this.requestDraw();
+    if (draw) this.requestDraw();
+  }
+
+  setEmpty(reason: string | null): void {
+    if (this.state === 'disposed') return;
+    if (reason === null) {
+      this.element.removeAttribute('data-pkc-gpu-chart-empty');
+      this.emptyEl?.remove();
+      this.emptyEl = null;
+      return;
+    }
+    this.stopTween();
+    this.element.setAttribute('data-pkc-gpu-chart-empty', '');
+    if (this.emptyEl === null) {
+      const el = this.stage.ownerDocument.createElement('p');
+      el.className = 'pkc-gpu-chart-empty';
+      el.setAttribute('data-pkc-field', 'gpu-chart-empty');
+      el.setAttribute('role', 'status');
+      this.stage.append(el);
+      this.emptyEl = el;
+    }
+    this.emptyEl.textContent = reason;
+  }
+
+  async bakePrintImage(): Promise<boolean> {
+    if (this.state === 'disposed' || this.state === 'failed') return false;
+    const { w, h } = this.stageSize();
+    const doc = this.stage.ownerDocument;
+    const c = doc.createElement('canvas');
+    // 🔑 紙は明るい配色で(図の印刷と同じ)。今の表示範囲・今のデータのまま 2D で焼く ── GPU の状態には触らない
+    // ⚠ 切り替えの補間の途中なら、途中のコマではなく行き先を焼く(紙に中間の絵を残さない)
+    const tw = this.tween;
+    const pSpec = tw === null ? this.spec : tw.to;
+    const pRange = tw === null ? this.cur : tw.toRange;
+    if (paintChart2d(c, pSpec, pRange, w, h, 2, PAPER_CHART_THEME, null) === null) return false;
+    const blob = await canvasToPng(c);
+    c.width = 0;
+    c.height = 0;
+    if (blob === null || (this.state as GpuChartState) === 'disposed') return false;
+    this.dropPrintImage();
+    const URLs = globalThis.URL as typeof URL | undefined;
+    if (URLs === undefined || typeof URLs.createObjectURL !== 'function') return false;
+    const url = URLs.createObjectURL(blob);
+    const img = doc.createElement('img');
+    img.className = 'pkc-gpu-chart-print-img';
+    img.setAttribute('data-pkc-gpu-chart-print', '');
+    img.alt = gpuChartAltText(pSpec);
+    img.src = url;
+    this.stage.after(img);
+    this.printImg = { img, url };
+    return true;
+  }
+
+  dropPrintImage(): void {
+    const p = this.printImg;
+    if (p === null) return;
+    this.printImg = null;
+    p.img.remove();
+    try {
+      URL.revokeObjectURL(p.url);
+    } catch {
+      /* 返せなくても続ける */
+    }
   }
 
   /** 描き直しを頼む(GPU なら `invalidate()` を 1 回、2D ならその場で描く)。 */
@@ -814,7 +995,7 @@ class ChartView implements GpuChartView {
     if (ctx === null) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    drawChartAxes(ctx, w, h, layout, this.cur, theme, { coverMargins: true, grid: true, hover: this.hover });
+    drawChartAxes(ctx, w, h, layout, this.cur, theme, { coverMargins: true, grid: true, hover: this.hover, ...hl(this.spec) });
   }
 
   private acquire(ctx: GpuContext): GpuSession {
@@ -1106,6 +1287,8 @@ class ChartView implements GpuChartView {
 
   dispose(): void {
     if (this.state === 'disposed') return;
+    this.stopTween();
+    this.dropPrintImage();
     this.setState('disposed');
     for (const c of this.cleanups.splice(0)) c();
     this.drag = null;
@@ -1131,7 +1314,19 @@ export function mountGpuChart(host: HTMLElement, spec: GpuChartSpec): GpuChartVi
 
 export interface HydrateGpuChartOptions {
   readonly getAssetBlob?: GetAssetBlob;
+  /**
+   * 🔑 **読む面だけが渡す**(v4.1 PR-8)── 表示中のノートの本文。渡した面でだけ `"bind"` のグラフが現在地に連動する。
+   * ⚠ 埋め込み・編集のプレビュー・書き出しでは渡さない(連動の見張りを張らない)。
+   */
+  readonly getNoteBody?: () => string | null;
+  /** 表示中のノートの lid(連動の 1 通に載せる)。 */
+  readonly noteLid?: string | null;
+  /** 本文のスクロールの器(`null` / 無しなら画面)。 */
+  readonly scrollRoot?: Element | null;
 }
+
+/** 本文の根(読む面の `detail-body`)。 */
+const BODY_ROOT_SELECTOR = '[data-pkc-field="detail-body"]';
 
 export const GPU_CHART_SRC_ATTR = 'data-pkc-gpu-chart-src';
 const STATE_ATTR = 'data-pkc-gpu-chart-state';
@@ -1175,11 +1370,58 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
   if (hosts.length === 0) return { dispose: () => undefined, prune: () => 0, flush: () => Promise.resolve() };
 
   const views = new Map<HTMLElement, GpuChartView>();
+  const bindings = new Map<HTMLElement, ChartBindingHandle>();
+  let afterPrintOff: (() => void) | null = null;
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let disposed = false;
   const failHost = (host: HTMLElement, error: string): void => {
     host.setAttribute(STATE_ATTR, 'failed');
     host.setAttribute(ERROR_ATTR, error);
+  };
+  /**
+   * 🔴 **スクロール連動のグラフを置く**(PR-8)。本文から時点のデータを作り、最初にデータのある時点で器を置いてから、
+   * 現在地(`chart-context-watch`)に連動させる。⚠ 読む面以外(本文を渡さない面)では見張りを張らない。
+   */
+  const mountBound = (host: HTMLElement, spec: GpuChartSpec & { readonly bind: ChartBindSpec }): void => {
+    const body = opts.getNoteBody?.() ?? null;
+    const lid = opts.noteLid ?? null;
+    const bodyRoot = host.closest<HTMLElement>(BODY_ROOT_SELECTOR);
+    if (body === null || lid === null || bodyRoot === null) {
+      // 連動できない面 ── 本文に書いたデータがあればそれを静的に、無ければ理由を出す
+      if (spec.series.length > 0) {
+        views.set(host, mountGpuChart(host, spec));
+        host.setAttribute(STATE_ATTR, 'ready');
+      } else failHost(host, 'スクロール連動のグラフは、ノートを読む画面で表示します');
+      return;
+    }
+    const data = extractBoundChartFrames(body, spec);
+    const first = data.frames.find((f) => f.spec !== null)?.spec ?? (spec.series.length > 0 ? spec : null);
+    if (first === null) {
+      failHost(host, `スクロール連動のグラフを描けません: 本文に連動するデータがありません(${BIND_DATA_HINT[spec.bind.mode]})`);
+      return;
+    }
+    const view = mountGpuChart(host, first);
+    views.set(host, view);
+    host.setAttribute(STATE_ATTR, 'ready');
+    host.setAttribute('data-pkc-gpu-chart-bind', spec.bind.mode);
+    bindings.set(
+      host,
+      attachChartBinding({
+        view,
+        host,
+        base: spec,
+        bodyRoot,
+        scrollRoot: opts.scrollRoot ?? null,
+        lid,
+        getNoteBody: opts.getNoteBody!,
+        initial: { body, data },
+      }),
+    );
+  };
+  const dropBinding = (host: HTMLElement): void => {
+    bindings.get(host)?.dispose();
+    bindings.delete(host);
+    host.removeAttribute('data-pkc-gpu-chart-bind');
   };
   const mount = (host: HTMLElement): void => {
     if (disposed || !host.isConnected || views.has(host)) return;
@@ -1195,6 +1437,11 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
     const parsed = parseGpuChartSpec(host.getAttribute(GPU_CHART_SRC_ATTR) ?? '');
     if (!parsed.ok) {
       failHost(host, parsed.error);
+      return;
+    }
+    const bound = parsed.spec;
+    if (bound.bind !== undefined) {
+      mountBound(host, bound as GpuChartSpec & { readonly bind: ChartBindSpec });
       return;
     }
     if (parsed.spec.source === null) {
@@ -1234,12 +1481,48 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
     if (io === null) mount(host);
     else io.observe(host);
   }
-  return {
+  /**
+   * 🔴 **印刷の前に静止画へ焼く**(PR-7 の残り)── 紙では WebGL の canvas が白く抜けうるので、画面の図ごとに 2D の PNG
+   * (`.pkc-gpu-chart-print-img`)を差し、`@media print` で canvas の代わりに見せる。⚠ 画面の GPU の状態には触らない。
+   * まだ置いていない器(画面の外)も、ここで置いてから焼く(印刷は画面の外の図も刷る)。刷り終えたら外す(`afterprint`)。
+   */
+  const flush = async (flushRoot: ParentNode): Promise<void> => {
+    if (disposed) return;
+    const targets = hosts.filter((h) => h.isConnected && flushRoot.contains(h) && h.getAttribute(STATE_ATTR) !== 'failed');
+    for (const h of targets) {
+      if (views.has(h)) continue;
+      io?.unobserve(h);
+      mount(h);
+    }
+    // 添付の CSV を読んでいる器は、置き終わるまで少し待つ(読めなければそのまま)
+    for (let i = 0; i < 20 && targets.some((h) => !views.has(h) && h.getAttribute(STATE_ATTR) === 'loading'); i++) {
+      await new Promise<void>((r) => setTimeout(r, 25));
+    }
+    const baked = await Promise.all(targets.map((h) => views.get(h)?.bakePrintImage() ?? Promise.resolve(false)));
+    if (!baked.some(Boolean)) return;
+    // ⚠ 刷り終えたら外す口は塊ごとに 1 本だけ(刷り直しのたびに積もらせない)。来ない環境でも dispose / 次の焼きで返す
+    afterPrintOff?.();
+    const win = (flushRoot as Node).ownerDocument?.defaultView ?? (typeof window === 'undefined' ? null : window);
+    if (win === null) return;
+    const onAfter = (): void => {
+      afterPrintOff = null;
+      for (const v of views.values()) v.dropPrintImage();
+    };
+    win.addEventListener('afterprint', onAfter, { once: true });
+    afterPrintOff = () => {
+      win.removeEventListener('afterprint', onAfter);
+      afterPrintOff = null;
+    };
+  };
+
+  return registerLiveScope({
     dispose: () => {
       disposed = true;
       io?.disconnect();
+      afterPrintOff?.();
       for (const t of timers) clearTimeout(t);
       timers.clear();
+      for (const h of [...bindings.keys()]) dropBinding(h);
       for (const v of views.values()) v.dispose();
       views.clear();
       // 🔑 器の印を外す ── 同じ器を次の塊が埋め直せる(印が残ると「済み」と見て空のまま飛ばす)
@@ -1251,6 +1534,7 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
     prune: () => {
       for (const [host, v] of views) {
         if (!host.isConnected) {
+          dropBinding(host);
           v.dispose();
           views.delete(host);
           io?.unobserve(host);
@@ -1258,6 +1542,13 @@ export function hydrateGpuChart(root: ParentNode | readonly ParentNode[], opts: 
       }
       return hosts.filter((h) => h.isConnected && h.getAttribute(STATE_ATTR) !== 'failed').length;
     },
-    flush: () => Promise.resolve(),
-  };
+    flush,
+  });
 }
+
+/** 連動の種類ごとに、本文に書くデータの説明。 */
+const BIND_DATA_HINT: Readonly<Record<ChartBindSpec['mode'], string>> = {
+  heading: '見出しの下に数の表か ```csv を書いてください',
+  page: '改ページ(+++)で区切ったページに数の表か ```csv を書いてください',
+  'log-day': '「## 2026-11-20 09:00」のような日付の見出しで記録を書いてください',
+};
