@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { gotoApp, clickReal, createEntry, collectPageErrors, useSplitEditor, clickBarMoreItem, pressCreateTool } from './helpers';
+import { DIAGRAM_CHOICES } from '../../src/features/markdown/text-ops';
 
 // 2026-08-14(#104 第 2 弾): 既定は live ── この file は全文 textarea
 // (editor-body)を入力の道具に使うので、設定で split を明示する。
@@ -574,7 +575,7 @@ test('🔴 日付の道具が実機で開き、選んだ日付が本文に入る
 });
 
 /**
- * 🔴 **「図」を押すと 5 種から選べる**(#528 案 B。user 裁定 2026-09-04)。
+ * 🔴 **「図」を押すと `DIAGRAM_CHOICES` の全種から選べる**(#528 案 B。user 裁定 2026-09-04)。
  *
  * 🔴 unit(`tests/adapter/format-append.test.ts`)は繋がりを見ている。
  * **ここが見るのは実ブラウザでしか通らない 2 つ** ── ① `Enter` が焦点のあるボタンを
@@ -595,11 +596,14 @@ test('🔴 「図」は Esc で入らず ↓ Enter で雛形が入り、「図�
     (el as HTMLTextAreaElement).setSelectionRange(3, 3);
   });
 
-  // ① 押すと一覧(5 行)。先頭がフローチャート
+  // ① 押すと一覧(正本 `DIAGRAM_CHOICES` の全行)。先頭がフローチャート、2 行目がクラス図(③ が ↓ 1 回で選ぶ)
+  // 🔑 行数は正本から引く ── 図の種類を足すたびに数字を打ち直さない(v4.0 Polish PR-D #2103 の `/3d` で 5 → 6 行に増えて陳腐化した)
   await clickBarMoreItem(page, '[data-pkc-action="insert-diagram"]');
   const rows = page.locator('[data-pkc-field="pick-diagram"]');
-  await expect(rows, '図の一覧が 5 行出ていない').toHaveCount(5);
+  await expect(rows, `図の一覧が ${DIAGRAM_CHOICES.length} 行出ていない`).toHaveCount(DIAGRAM_CHOICES.length);
+  await expect(rows, '図の一覧の並びが正本と違う').toHaveText(DIAGRAM_CHOICES.map((d) => d.label));
   await expect(rows.first()).toHaveText('フローチャート');
+  await expect(rows.nth(1), '2 行目がクラス図でない(③ の ↓ Enter の前提)').toHaveText('クラス図');
   await expect(rows.first(), '焦点が先頭の行に無い(鍵だけで選べない)').toBeFocused();
 
   // ② Esc で閉じて、何も入らない

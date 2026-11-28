@@ -506,6 +506,9 @@ export async function maybeShrink(
 export const SLOW_FIRST_MS = 1000;
 
 /** 取込本体。file ごとに独立に成否を扱う(1 個の失敗が batch を殺さない)。 */
+/** 選択を動かさずにルートへ作る(`attachFiles` が、開いているノートへ入れる回に使う)。 */
+const STAY_PLACE = { parentLid: null, keepSelection: true } as const;
+
 export async function attachFiles(
   dispatcher: Dispatcher,
   deps: AttachDeps,
@@ -576,6 +579,17 @@ export async function attachFiles(
   const elsewhere =
     at !== undefined && dropped !== undefined && at.lid !== opened.lid && isAppendable(dropped.archetype);
   const into = elsewhere ? { lid: at!.lid, archetype: dropped!.archetype } : opened;
+  /**
+   * 🔴 **開いているノートへ入れる回は、添付を作るときに選択を動かさない**(v4.1 仕上げ。PR #2108 の気づき)。
+   *
+   * ⚠ 直す前は `CREATE_ENTRY` が選択を**作った添付へ一瞬移し**、`putAssetIntoNote` が `SELECT_ENTRY` で戻していた ──
+   *   最後に開いているノートは同じだが、中央の描画は「別のノート → 元のノート」と 2 回入れ替わり、本文の差分描画の土台
+   *   (`bodyView`)が空に戻って**全部の塊を作り直していた**。`id=` の無い ```html のウィジェットは状態を持ち越さないので、
+   *   ウィジェットの確認バーの「このノートへ添付」・左の列の「添付」・貼り付けのたびに、**打っていた中身が消えた**。
+   * 🔑 着地点は同じ(選択は開いていたノートのまま)なので、途中を飛ばすだけ。本文はリンクの塊だけが差分で入る。
+   * ⚠ 横の枠へ落とした回(`elsewhere`。戻し先は主の枠)と、何も開いていない回(戻し先は「無い」)は今までどおり。
+   */
+  const stayOnOpened = !elsewhere && opened.lid !== null && opened.lid === dispatcher.getState().selectedLid;
   /**
    * 🔴 **横に枠を留めているときは、中央へ入った回も名前を言う**(#809-2、2026-09-09。
    * user 推薦 A)。
@@ -734,7 +748,7 @@ export async function attachFiles(
           { name: file.name, type: file.type, size: file.size, blob: file },
           shrinkRun,
         );
-        const attached = await attachOne(dispatcher, deps, item, known);
+        const attached = await attachOne(dispatcher, deps, item, known, stayOnOpened ? STAY_PLACE : undefined);
         endProgress(at);
         // ⚠ `null` は `attachOne` が既に理由を出している(二重に言わない)
         if (attached === null) continue;
