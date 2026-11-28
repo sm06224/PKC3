@@ -218,6 +218,14 @@ expect(under, '押そうとした所に押し所が在る(前提が崩れてい�
   `test.setTimeout(…)` を test の頭に置く(incidents「per-test の timeout より長い…」)
 - `<input>` を使い回す口(`setInputFiles`)は、**1 件ずつ取り込めたことを観測してから**次を渡す(待ちを伸ばしても直らない)
 - `page.goto('/#…')` は path が同じなら入り直しではない ── 起動時の経路を見たいなら `page.reload()`
+- 🔴 **この箱の Chromium は、`about:blank`(`page.setContent`)の最上位に `sandbox` 付きの `srcdoc` の iframe を置くとページごと落ちる**
+  (中身と無関係。http / file / blob の最上位では落ちない)。書き出した HTML を開くときは `setContent` ではなく
+  `page.evaluate` で `location.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }))` → `waitForURL(/^blob:/)`。
+  `.goto(` を使わないので起動の数(`smoke:budget`)は増えない。実例 `widget-bridge.smoke.spec.ts`(#2109)
+- **一覧の件数・並びは数字を打たず正本から引く**(spec は `../../src/...` を import できる。`@features` の別名を含む adapter の file も可)。
+  例: `SAMPLE_TEMPLATES.length` / `DIAGRAM_CHOICES.length`。数字で書くと正当な追加(#2103)のたびにフルの smoke だけが赤くなる
+- 近接発光の**静止の画素・背景**を読む前は、`NEAR_ATTR` に加えて余韻の `OUT_ATTR` も 0 件になるのを待つ(#2105 から光は 260ms かけて消える)
+- `npx playwright test` を素で叩かない ── 同梱の Chromium を指す設定は `tests/smoke/playwright.config.ts` にある。必ず `npm run test:smoke -- <spec>`
 - **PR gate の総量を増やさない**(CLAUDE.md「CI を長くしない」。user 指示 2026-07-30)。重い検証は押したときだけの口へ
 
 ## 8. 落ちたときの読み方 ── flake に見えるものが製品の穴だったことがある

@@ -159,6 +159,31 @@ describe('添付を開いていたノートへ入れる(#666)', () => {
   });
 
   /**
+   * 🔴 **途中でも選択が動かない**(v4.1 仕上げ。PR #2108 の気づき)。
+   *
+   * ⚠ 直す前は `CREATE_ENTRY` が選択を作った添付へ一瞬移し、`SELECT_ENTRY` で戻していた ── 最後の値(上の it)は
+   *   同じなので見えないが、中央の描画が 2 回入れ替わって本文の塊が全部作り直され、`id=` の無いウィジェットの中身が消えた。
+   * 🔑 だから最後の値ではなく、**通知のたびの** `selectedLid` と、開いている本文(`openBody`)が捨てられないことを見る。
+   */
+  it('🔴 開いているノートへ入れる回は、作る途中でも選択と開いている本文が動かない', async () => {
+    const h = withOpenNote();
+    appendsSeen.length = 0;
+    const seen: Array<string | null> = [];
+    const bodies: Array<string | null> = [];
+    const off = h.d.onState((st) => {
+      seen.push(st.selectedLid);
+      bodies.push(st.openBody?.lid ?? null);
+    });
+    await attachFiles(h.d, h.deps, [new File(['png bytes'], '猫.png', { type: 'image/png' })]);
+    await tick();
+    off();
+    expect(seen.length, '通知が 1 回も来ていない(台の空振り)').toBeGreaterThan(0);
+    expect(new Set(seen), '途中で選択が添付へ移った').toEqual(new Set(['n1']));
+    expect(new Set(bodies), '途中で開いている本文が添付へ移った(戻すと本文を読み直し、全部の塊を作り直す)').toEqual(new Set(['n1']));
+    expect(appended(h.d), '本文に入っていない').toHaveLength(1);
+  });
+
+  /**
    * 🔴 **入れ先を名指しできる**(#826)。
    *
    * ⚠ 要るのは、**選ぶ間ずっと画面を止めていない**口(書庫の別の窓)ができたからである

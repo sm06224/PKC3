@@ -533,6 +533,10 @@ async function widgetFileIo(page: Page): Promise<void> {
     await expect(bar).toHaveCount(0);
 
     // 18. requestDownload →「このノートへ添付」
+    // 🔴 箱(iframe)に印を付けておき、添付の後も**同じ箱が生きている**かを見る(v4.1 仕上げ。PR #2108 の気づき)
+    await ioFrame(page).evaluate((el) => {
+      (el as unknown as { __pkcKeep?: number }).__pkcKeep = 1;
+    });
     await ioClick(page, '#dl2');
     await expect(bar).toContainText('「memo.csv」', { timeout: 10_000 });
     await expect(bar.locator('[data-pkc-field="widget-io-attach"]')).toBeEnabled();
@@ -545,12 +549,16 @@ async function widgetFileIo(page: Page): Promise<void> {
     await expect(page.locator('[data-pkc-field="detail-body"]'), '本文に添付のリンクが入らない').toContainText('memo.csv');
     await expect(bar).toHaveCount(0);
     /**
-     * ⚠ 添付するとノートの本文が描き直され、箱も読み直される(左の列の「添付」ボタンで添付したときと同じ既存の挙動。
-     *   実測: 本文の器 `.pkc-md-rendered` ごと作り直される)── 箱へ返す `attach` の答えは単体の test(widget-bridge.test.ts)で見る。
-     *   ここでは読み直された箱が次の操作に使えることを確かめてから進む。
+     * 🔴 **添付しても箱は作り直されない**(v4.1 仕上げ)。直す前は添付が選択を作った添付へ一瞬移して戻していたので、本文の塊が
+     *   全部作り直され、箱も読み直されて中身(`#res`)が `-` に戻っていた。いまは本文へリンクの塊が差分で入るだけ ──
+     *   同じ箱(印が残る)が、`attach` の答えを受け取って表示する。
      */
     await expect(ioFrame(page)).toHaveCount(1, { timeout: 15_000 });
-    await expect.poll(() => ioText(page, '#res'), { timeout: 10_000 }).toBe('-');
+    expect(
+      await ioFrame(page).evaluate((el) => (el as unknown as { __pkcKeep?: number }).__pkcKeep),
+      '添付で箱が作り直された(id の無いウィジェットの中身が消える)',
+    ).toBe(1);
+    await expect.poll(() => ioText(page, '#res'), { timeout: 10_000 }).toBe('attach');
 
     // 19. 要注意の拡張子 → 注意が出る →「やめる」
     await ioClick(page, '#risk');

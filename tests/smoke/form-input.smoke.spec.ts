@@ -11,6 +11,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { gotoApp, collectPageErrors, createEntry, clickReal, useSplitEditor, writesLanded } from './helpers';
+import { SAMPLE_TEMPLATES, sampleLabel } from '../../src/features/snippet/sample-templates';
 
 test.beforeEach(async ({ page }) => {
   await useSplitEditor(page);
@@ -110,7 +111,10 @@ test('🔴 サンプルから作った記録のノートで、入力して表に
   await clickReal(page, '[data-pkc-field="create-pick"]');
   await clickReal(page, '[data-pkc-region="create-menu"] [data-pkc-action="create-from-template"]');
   const rows = page.locator('[data-pkc-field="pick-template-note"]');
-  await expect(rows, 'サンプルが 3 つ並ばない').toHaveCount(3);
+  // 🔑 件数は正本(`SAMPLE_TEMPLATES`)から引く ── サンプルを足すたびに数字を打ち直さない(v4.0 Polish PR-D #2103 で 3 → 8 種に増えて陳腐化した)。
+  //    自分のテンプレートは 0 件の新しいノートなので、並ぶのはサンプルだけ。並びも正本どおりかを見る
+  await expect(rows, `サンプルが ${SAMPLE_TEMPLATES.length} つ並ばない`).toHaveCount(SAMPLE_TEMPLATES.length);
+  await expect(rows, 'サンプルの並びが正本と違う').toHaveText(SAMPLE_TEMPLATES.map(sampleLabel));
   await rows.filter({ hasText: '回帰テストの実施記録' }).click();
   await expect(page.locator('[data-pkc-field="editor-body"]'), 'サンプルの中身が入っていない').toHaveValue(/```yaml form/);
   await clickReal(page, '[data-pkc-region="detail"] [data-pkc-action="commit-edit"]');
