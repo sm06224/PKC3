@@ -554,6 +554,7 @@ import {
   NOTE_OPEN_HERE_MESSAGE,
   announceOpenedWindow,
   connectViewDeepLink,
+  readChartPopoutToken,
   currentBaseUrl,
   linkOpenerFor,
   openAssetOwner,
@@ -8060,6 +8061,22 @@ export async function startApp(root: HTMLElement): Promise<AppHandle> {
 function bootstrap(): void {
   const root = document.querySelector<HTMLElement>('[data-pkc-slot="root"]');
   if (!root) return;
+
+  /**
+   * 🔴 **GPU グラフの別ウィンドウ**(`#pkc?chart=<token>`。v4.1 PR-9、#2095 後半)── 通常の起動(storage / OPFS / worker /
+   * サイドバー)を**一切しない**。DB を握らず、他のタブと書き込みの権利を取り合わない。グラフ表示だけの軽い起動へ分ける。
+   * ⚠ 判断は `deep-link.ts`(アドレスを読む唯一の口)、画面は `chart-popout-window.ts`(読み込みは要るときだけ)。
+   */
+  const chartToken = readChartPopoutToken();
+  if (chartToken !== null) {
+    void import('@adapter/ui/render/chart-popout-window').then(
+      (m) => m.bootChartPopoutWindow(root, chartToken),
+      () => {
+        root.textContent = 'グラフの別ウィンドウを開けませんでした。メインウィンドウからもう一度開いてください';
+      },
+    );
+    return;
+  }
 
   /**
    * 🔴 **開いた側へ「出ましたよ」と返す**(#300 段③ の直し、2026-08-22)。

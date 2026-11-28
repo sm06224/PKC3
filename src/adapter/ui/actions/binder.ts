@@ -237,6 +237,7 @@ import {
 } from '@adapter/ui/render/row-swap';
 import { INLINE_CODE_COPY_FAILED_EVENT } from '@adapter/ui/render/inline-code-copy';
 import { HEADING_ANCHOR_COPY_FAILED_EVENT } from '@adapter/ui/render/heading-anchor';
+import { GPU_CHART_POPOUT_FAILED_EVENT } from '@adapter/ui/render/gpu-chart-popout-link';
 import { iconShortcodeFor } from '@features/icon/icon-shortcode';
 import {
   HOLD_ATTR,
@@ -26535,6 +26536,11 @@ export function bindActions(
   // 見出しの「#」(参照のコピー)も同じ字で言う
   listen(root, HEADING_ANCHOR_COPY_FAILED_EVENT as keyof HTMLElementEventMap, () => {
     dispatcher.dispatch({ type: 'OP_FAILED', error: 'コピーできませんでした' });
+  });
+  // 🔴 GPU のグラフを別ウィンドウで開けなかった(ポップアップが止められた等)── 理由を画面下に言う(無言の dead click にしない。PR-9)
+  listen(root, GPU_CHART_POPOUT_FAILED_EVENT as keyof HTMLElementEventMap, (ev) => {
+    const msg = (ev as CustomEvent<{ message?: unknown }>).detail?.message;
+    dispatcher.dispatch({ type: 'OP_FAILED', error: typeof msg === 'string' && msg !== '' ? msg : '別ウィンドウを開けませんでした' });
   });
   /**
    * 🔴 **全域のコマンドを実行する ── または「いま実行できるか」だけ答える**(#425 段①)。

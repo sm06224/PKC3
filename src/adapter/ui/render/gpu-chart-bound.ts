@@ -33,6 +33,18 @@ export function stickyTargetOf(host: HTMLElement, bodyRoot: HTMLElement): HTMLEl
   return el.parentElement === bodyRoot ? el : host;
 }
 
+/**
+ * 🔑 **本文の今の閲覧位置**(親の追従 ON / 固定中に関係なく)── 別ウィンドウ(PR-9)へ配る中身。
+ * ⚠ 親が固定中でも、別ウィンドウには読んでいる場所を配る(追従・固定の判断は別ウィンドウ側が持つ)。
+ */
+export interface ChartReadingPoint {
+  readonly signal: ChartContextSignal | null;
+  readonly index: number;
+  readonly total: number;
+  readonly frame: BoundChartFrame | null;
+  readonly mode: ChartBindSpec['mode'];
+}
+
 export interface ChartBindingHandle {
   readonly following: boolean;
   readonly sticky: boolean;
@@ -42,6 +54,19 @@ export interface ChartBindingHandle {
   setSticky(on: boolean): void;
   /** 前(-1)・次(+1)の時点へ。 */
   step(dir: 1 | -1): void;
+  /** 本文の今の閲覧位置(本文が変わっていれば作り直してから)。 */
+  reading(): ChartReadingPoint;
+  /** 時点の名前の一覧(別ウィンドウの前へ・次への判定)。 */
+  framesMeta(): readonly { key: string; label: string }[];
+  /** 番号の時点(別ウィンドウの「前へ / 次へ」への返事に使う)。 */
+  frameAt(i: number): BoundChartFrame | null;
+  /** 本文をその時点の場所へ動かす(別ウィンドウからの `jump` ── 双方向)。 */
+  jump(i: number): void;
+  /**
+   * 閲覧位置・データの変化を聞く(親の追従 ON / 固定中に関係なく)。返り値で抜ける。
+   * @param dataChanged 本文が変わって時点のデータを作り直した
+   */
+  onReading(fn: (p: ChartReadingPoint, dataChanged: boolean) => void): () => void;
   dispose(): void;
 }
 
@@ -183,9 +208,10 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
     syncButtons();
   };
 
-  const applySignal = (s: ChartContextSignal, animate: boolean): void => {
+  const applySignal = (s: ChartContextSignal, animate: boolean, changedBefore = false): void => {
     // 🔴 同じ場所でも、本文が変わった(保存した)なら描き直す(古い数のまま残さない)
-    const changed = refreshData();
+    // ⚠ 先に聞き手へ配るために作り直していたら、その事実を引き継ぐ(2 回目の比較は「変わっていない」と答える)
+    const changed = refreshData() || changedBefore;
     const d = data;
     const r = resolveFrame(d, s);
     if (!changed && r.index === index && r.frame !== null && r.frame.spec !== null && view.element.getAttribute('data-pkc-gpu-chart-bind-key') === r.frame.key) return;
@@ -234,10 +260,26 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
   // 最初の時点(現在地が届くまで)── 1 つ目
   show(0, data.frames[0] ?? null, false);
 
+  const readers = new Set<(p: ChartReadingPoint, dataChanged: boolean) => void>();
+  const reading = (): ChartReadingPoint => {
+    const d = freshData();
+    if (lastSignal === null) return { signal: null, index: d.frames.length > 0 ? 0 : -1, total: d.frames.length, frame: d.frames[0] ?? null, mode: bind.mode };
+    const r = resolveFrame(d, lastSignal);
+    return { signal: lastSignal, index: r.index, total: d.frames.length, frame: r.frame, mode: bind.mode };
+  };
+
   const unsubscribe = subscribeChartContext({ root: bodyRoot, scrollRoot, lid, bind }, (s) => {
     lastSignal = s;
-    if (!following || disposed) return;
-    applySignal(s, true);
+    if (disposed) return;
+    let changed = false;
+    if (readers.size > 0) {
+      // 🔑 別ウィンドウへは親の追従 ON / 固定中に関係なく配る
+      changed = refreshData();
+      const p = reading();
+      for (const fn of [...readers]) fn(p, changed);
+    }
+    if (!following) return;
+    applySignal(s, true, changed);
   });
 
   return {
@@ -253,9 +295,21 @@ export function attachChartBinding(args: ChartBindingArgs): ChartBindingHandle {
     setFollowing,
     setSticky,
     step,
+    reading,
+    framesMeta: () => freshData().frames.map((f) => ({ key: f.key, label: f.label })),
+    frameAt: (i) => freshData().frames[i] ?? null,
+    jump: (i) => {
+      refreshData();
+      jumpTo(i);
+    },
+    onReading: (fn) => {
+      readers.add(fn);
+      return () => readers.delete(fn);
+    },
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      readers.clear();
       unsubscribe();
       prev.removeEventListener('click', onPrev);
       next.removeEventListener('click', onNext);

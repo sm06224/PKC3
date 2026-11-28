@@ -5107,6 +5107,79 @@ dd[data-pkc-field='inspector-toc'] {
 .pkc-gpu-chart-print-img {
   display: none;
 }
+/* 🔴 GPU グラフの別ウィンドウ(`#pkc?chart=…`。v4.1 PR-9)── 上の見出し 1 行 + 窓いっぱいの描画域(1 画面で完結) */
+.pkc-chart-popout {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+.pkc-chart-popout-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  padding: var(--s1) var(--s2);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+.pkc-chart-popout-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
+}
+.pkc-chart-popout-title > strong {
+  font-weight: 600;
+}
+.pkc-chart-popout-note {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pkc-chart-popout-bind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1);
+}
+.pkc-chart-popout-bind[hidden] {
+  display: none;
+}
+.pkc-chart-popout-bind .pkc-gpu-chart-btn[aria-pressed='true'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.pkc-chart-popout-status {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--muted);
+}
+.pkc-chart-popout-status:empty {
+  display: none;
+}
+.pkc-chart-popout-stage {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  padding: var(--s2);
+}
+.pkc-chart-popout-stage > .pkc-gpu-chart {
+  flex: 1 1 auto;
+  margin: 0;
+  min-height: 0;
+}
+.pkc-chart-popout-stage > .pkc-gpu-chart > .pkc-gpu-chart-stage {
+  flex: 1 1 auto;
+  min-height: 160px;
+}
 /* ウィジェット(` ```html id="…" `。PR-07)。⚠ 原文は箱を置けなかった面(書き出し等)の受け皿として残す */
 .pkc-md-rendered .pkc-widget-source {
   margin: 0;

@@ -401,6 +401,61 @@ test('🔴 ```3d: 3D の無いノート・外部 URL では Three.js を読ま�
   await clickReal(page, bChart.locator('[data-pkc-gpu-chart-op="bind-prev"]'));
   await expect(bLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
 
+  // ⑧ 🔴 別ウィンドウ(v4.1 PR-9、#2095 後半)── 「別ウィンドウで開く」で noopener の窓が開き、グラフだけの軽い起動で描く。
+  //    メインウィンドウを読み進めると別ウィンドウも切り替わる / 別ウィンドウだけ固定中 → 解除で最新へ / 別ウィンドウの次へで本文が動く
+  //    ⚠ 起動の予算を増やさない: 窓はクリック起点で開く(`.goto(` ではない)
+  test.setTimeout(150_000);
+  await readTo(0);
+  await expect(bLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 5_000 });
+  const nextPage = page.context().waitForEvent('page');
+  await clickReal(page, bChart.locator('[data-pkc-field="gpu-chart-popout"]'));
+  const pop = await nextPage;
+  const popErrors = collectPageErrors(pop);
+  expect(pop.url()).toMatch(/#pkc\?chart=[A-Za-z0-9_-]{8,64}$/);
+  const pRoot = pop.locator('[data-pkc-region="chart-popout"]');
+  await expect(pRoot).toBeAttached({ timeout: 15_000 });
+  // 通常の起動をしていない(枠もサイドバーも作らない)
+  await expect(pop.locator('[data-pkc-region="shell"]')).toHaveCount(0);
+  const pChart = pop.locator('[data-pkc-region="chart-popout-stage"] [data-pkc-gpu-chart]');
+  await expect(pChart).toHaveAttribute('data-pkc-gpu-chart-backend', /^(webgpu|webgl2|2d)$/, { timeout: 30_000 });
+  const pLabel = pop.locator('[data-pkc-field="chart-popout-bind"]');
+  const pStage = pChart.locator('[data-pkc-gpu-chart-stage]');
+  await expect(pLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 10_000 });
+  await expect(pStage).toHaveAttribute('aria-label', /売上/);
+  await expect(pop).toHaveTitle(/^四半期 - .*連動グラフ.* \| PKC3$/);
+  // 描画域は窓いっぱい(本文用の 220px の高さに縛られない)
+  await expect.poll(async () => (await pStage.boundingBox())?.height ?? 0).toBeGreaterThan(260);
+  // メインウィンドウで読み進める → 別ウィンドウも切り替わる
+  await readTo(1);
+  await expect(pLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
+  await expect(pStage).toHaveAttribute('aria-label', /来客数/);
+  await readTo(2);
+  await expect(pLabel).toHaveText('連動: Q3 (3 / 3)', { timeout: 5_000 });
+  await expect(pStage).toHaveAttribute('aria-label', /返品/);
+  // 別ウィンドウだけ固定中 → メインを読み戻しても別ウィンドウは Q3 のまま
+  const pFollow = pop.locator('[data-pkc-field="chart-popout-follow"]');
+  await clickReal(pop, pFollow);
+  await expect(pFollow).toHaveText('固定中');
+  await expect(pFollow).toHaveAttribute('aria-pressed', 'true');
+  await readTo(0);
+  await expect(bLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 5_000 });
+  await pop.waitForTimeout(600);
+  await expect(pLabel).toHaveText('連動: Q3 (3 / 3)');
+  await expect(pStage).toHaveAttribute('aria-label', /返品/);
+  // 解除 → メインで今読んでいる節(Q1)へ追従
+  await clickReal(pop, pFollow);
+  await expect(pFollow).toHaveText('追従 ON');
+  await expect(pLabel).toHaveText('連動: Q1 (1 / 3)', { timeout: 5_000 });
+  await expect(pStage).toHaveAttribute('aria-label', /売上/);
+  // 別ウィンドウの「次へ」→ メインの本文が Q2 へ動く(双方向)
+  await clickReal(pop, pop.locator('[data-pkc-field="chart-popout-next"]'));
+  await expect(pLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
+  await expect(bLabel).toHaveText('連動: Q2 (2 / 3)', { timeout: 5_000 });
+  // 閉じる ── メインウィンドウにエラーが出ない
+  await pop.close({ runBeforeUnload: true });
+  await page.waitForTimeout(400);
+  expect(popErrors, popErrors.join('\n')).toEqual([]);
+
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
